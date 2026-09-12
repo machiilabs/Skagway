@@ -2,6 +2,25 @@ import AVFoundation
 import AppKit
 import SwiftUI
 
+/// Drives List hover-panel playback from AppKit show/hide — avoids relying on `onAppear`
+/// when an `NSHostingView` reuses its root view across Table re-renders.
+@Observable
+@MainActor
+final class ListHoverPreviewDriver {
+    private(set) var generation: UInt64 = 0
+    private(set) var shouldPlay = false
+
+    func requestStart() {
+        shouldPlay = true
+        generation &+= 1
+    }
+
+    func requestStop() {
+        shouldPlay = false
+        generation &+= 1
+    }
+}
+
 /// Ensures only one grid card runs a live hover preview at a time (large libraries).
 @MainActor
 enum HoverPreviewExclusive {

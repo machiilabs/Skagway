@@ -142,6 +142,8 @@ struct TableScrollHelper: NSViewRepresentable {
 private final class ListRowReviewState {
     var isRowHovering: Bool = false
     var isBadgeHovering: Bool = false
+    /// Survives row re-renders when the collected set changes (Table `@State` would reset).
+    var isThumbnailHovered: Bool = false
 
     var showsCollectBadge: Bool { isRowHovering || isBadgeHovering }
 }
@@ -162,13 +164,18 @@ private struct ListMouseDownHandler: NSViewRepresentable {
     let onPlainMouseDown: () -> Void
     var onModifierMouseDown: ((NSEvent.ModifierFlags) -> Void)? = nil
     var ignoreModifiers: Bool = false
+    /// When true, only the inscribed circle accepts clicks (collect badge).
+    var circleHitOnly: Bool = false
 
     final class HandlerView: NSView {
         var onPlainMouseDown: (() -> Void)?
         var onModifierMouseDown: ((NSEvent.ModifierFlags) -> Void)?
         var ignoreModifiers = false
+        var circleHitOnly = false
+        private var mouseDownPoint: NSPoint?
 
         override func mouseDown(with event: NSEvent) {
+            mouseDownPoint = event.locationInWindow
             if ignoreModifiers || !ListSelectionModifiers.usesExtendedSelection(event.modifierFlags) {
                 onPlainMouseDown?()
                 super.mouseDown(with: event)
@@ -177,7 +184,35 @@ private struct ListMouseDownHandler: NSViewRepresentable {
             onModifierMouseDown?(event.modifierFlags)
         }
 
+        override func mouseUp(with event: NSEvent) {
+            super.mouseUp(with: event)
+            mouseDownPoint = nil
+        }
+
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        /// Left-button clicks only — hover / mouse-moved fall through to SwiftUI `onHover`.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard bounds.contains(point) else { return nil }
+            if circleHitOnly, !pointIsInsideCircle(point) { return nil }
+            guard let event = NSApp.currentEvent else { return nil }
+            switch event.type {
+            case .leftMouseDown:
+                return self
+            case .leftMouseDragged, .leftMouseUp:
+                return mouseDownPoint != nil ? self : nil
+            default:
+                return nil
+            }
+        }
+
+        private func pointIsInsideCircle(_ point: NSPoint) -> Bool {
+            let center = NSPoint(x: bounds.midX, y: bounds.midY)
+            let radius = min(bounds.width, bounds.height) * 0.5
+            let dx = point.x - center.x
+            let dy = point.y - center.y
+            return dx * dx + dy * dy <= radius * radius
+        }
     }
 
     func makeNSView(context: Context) -> HandlerView {
@@ -185,6 +220,7 @@ private struct ListMouseDownHandler: NSViewRepresentable {
         view.onPlainMouseDown = onPlainMouseDown
         view.onModifierMouseDown = onModifierMouseDown
         view.ignoreModifiers = ignoreModifiers
+        view.circleHitOnly = circleHitOnly
         return view
     }
 
@@ -192,6 +228,7 @@ private struct ListMouseDownHandler: NSViewRepresentable {
         nsView.onPlainMouseDown = onPlainMouseDown
         nsView.onModifierMouseDown = onModifierMouseDown
         nsView.ignoreModifiers = ignoreModifiers
+        nsView.circleHitOnly = circleHitOnly
     }
 }
 
@@ -202,6 +239,7 @@ private struct ListHoverPreviewFloater: NSViewRepresentable {
     let video: Video
     let thumbnailService: ThumbnailService
     var livePreviewEnabled: Bool
+    var isCollected: Bool = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -222,7 +260,8 @@ private struct ListHoverPreviewFloater: NSViewRepresentable {
             isPresented: isPresented,
             video: video,
             thumbnailService: thumbnailService,
-            livePreviewEnabled: livePreviewEnabled
+            livePreviewEnabled: livePreviewEnabled,
+            isCollected: isCollected
         )
     }
 
@@ -260,20 +299,35 @@ private struct ListHoverPreviewFloater: NSViewRepresentable {
         private var thumbnailService: ThumbnailService?
         private var livePreviewEnabled = false
         private var isPresented = false
+        private var isCollected = false
+        private let previewDriver = ListHoverPreviewDriver()
 
         func sync(
             isPresented: Bool,
             video: Video,
             thumbnailService: ThumbnailService,
-            livePreviewEnabled: Bool
+            livePreviewEnabled: Bool,
+            isCollected: Bool
         ) {
+            let wasPresented = self.isPresented
+            let videoChanged = self.video?.id != video.id
+            let liveChanged = self.livePreviewEnabled != livePreviewEnabled
+            let collectedChanged = self.isCollected != isCollected
+            let needsContentRefresh = !wasPresented
+                || videoChanged
+                || liveChanged
+                || collectedChanged
+                || hostingView == nil
+
             self.isPresented = isPresented
             self.video = video
             self.thumbnailService = thumbnailService
             self.livePreviewEnabled = livePreviewEnabled
+            self.isCollected = isCollected
+
             if isPresented {
-                show()
-            } else {
+                show(refreshContent: needsContentRefresh)
+            } else if wasPresented {
                 hide()
             }
         }
@@ -283,24 +337,34 @@ private struct ListHoverPreviewFloater: NSViewRepresentable {
             reposition()
         }
 
-        private func show() {
+        private func show(refreshContent: Bool) {
             guard let video, let thumbnailService else { return }
             let panel = ensurePanel()
             let panelSize = NSSize(width: 224, height: 144)
-            let content = ListHoverPreviewPanel(
-                video: video,
-                thumbnailService: thumbnailService,
-                livePreviewEnabled: livePreviewEnabled
-            )
-            if let hostingView {
-                hostingView.rootView = content
-                hostingView.frame = NSRect(origin: .zero, size: panelSize)
-            } else {
-                let hosting = NSHostingView(rootView: content)
-                hosting.frame = NSRect(origin: .zero, size: panelSize)
-                panel.contentView = hosting
-                hostingView = hosting
+
+            if refreshContent {
+                let content = ListHoverPreviewPanel(
+                    video: video,
+                    thumbnailService: thumbnailService,
+                    livePreviewEnabled: livePreviewEnabled,
+                    driver: previewDriver
+                )
+                if let hostingView {
+                    hostingView.rootView = content
+                    hostingView.frame = NSRect(origin: .zero, size: panelSize)
+                } else {
+                    let hosting = NSHostingView(rootView: content)
+                    hosting.frame = NSRect(origin: .zero, size: panelSize)
+                    panel.contentView = hosting
+                    hostingView = hosting
+                }
+                if livePreviewEnabled {
+                    previewDriver.requestStart()
+                } else {
+                    previewDriver.requestStop()
+                }
             }
+
             panel.setContentSize(panelSize)
             reposition()
             panel.orderFront(nil)
@@ -345,10 +409,14 @@ private struct ListHoverPreviewFloater: NSViewRepresentable {
         }
 
         private func hide() {
+            previewDriver.requestStop()
             panel?.orderOut(nil)
+            panel?.contentView = nil
+            hostingView = nil
         }
 
         func teardown() {
+            previewDriver.requestStop()
             if let panel, let parent = panel.parent {
                 parent.removeChildWindow(panel)
             }
@@ -364,6 +432,7 @@ private struct ListHoverPreviewPanel: View {
     let video: Video
     let thumbnailService: ThumbnailService
     var livePreviewEnabled: Bool
+    let driver: ListHoverPreviewDriver
 
     @State private var previewPlayer: AVPlayer?
     @State private var previewTask: Task<Void, Never>?
@@ -384,18 +453,26 @@ private struct ListHoverPreviewPanel: View {
         .frame(width: 224, height: 144)
         .appMediaFrame(cornerRadius: AppRadius.md)
         .onAppear {
-            if livePreviewEnabled { startLivePreview() }
+            applyPlaybackIntent()
         }
         .onDisappear {
             stopLivePreview()
         }
-        .onChange(of: livePreviewEnabled) { _, enabled in
-            if enabled { startLivePreview() } else { stopLivePreview() }
+        .onChange(of: driver.generation) { _, _ in
+            applyPlaybackIntent()
+        }
+    }
+
+    private func applyPlaybackIntent() {
+        if driver.shouldPlay && livePreviewEnabled {
+            startLivePreview()
+        } else {
+            stopLivePreview()
         }
     }
 
     private func startLivePreview() {
-        guard livePreviewEnabled else { return }
+        guard livePreviewEnabled, driver.shouldPlay else { return }
         previewTask?.cancel()
         previewTask = nil
         if let previewPlayer {
@@ -434,10 +511,25 @@ private struct ListRowHoverThumbnail: View {
     let thumbnailService: ThumbnailService
     var hoverPreviewEnabled: Bool
     var isMoving: Bool
+    var isCollected: Bool = false
+    /// When set (Review mode), hover survives Table re-renders after collect clicks.
+    var reviewState: ListRowReviewState? = nil
     let onSelect: () -> Void
     let onModifierSelect: (NSEvent.ModifierFlags) -> Void
 
-    @State private var isThumbnailHovered = false
+    @State private var localThumbnailHovered = false
+
+    private var isThumbnailHovered: Bool {
+        reviewState?.isThumbnailHovered ?? localThumbnailHovered
+    }
+
+    private func setThumbnailHovered(_ hovering: Bool) {
+        if let reviewState {
+            reviewState.isThumbnailHovered = hovering
+        } else {
+            localThumbnailHovered = hovering
+        }
+    }
 
     var body: some View {
         AsyncThumbnailView(
@@ -455,12 +547,13 @@ private struct ListRowHoverThumbnail: View {
                 isPresented: isThumbnailHovered,
                 video: video,
                 thumbnailService: thumbnailService,
-                livePreviewEnabled: hoverPreviewEnabled && !isMoving
+                livePreviewEnabled: hoverPreviewEnabled && !isMoving,
+                isCollected: isCollected
             )
             .frame(width: 56, height: 36)
             .allowsHitTesting(false)
         }
-        .onHover { isThumbnailHovered = $0 }
+        .onHover { setThumbnailHovered($0) }
     }
 }
 
@@ -481,8 +574,10 @@ private struct ListCollectedSetBadge: View {
                 .overlay {
                     ListMouseDownHandler(
                         onPlainMouseDown: { onCollectClick([]) },
-                        onModifierMouseDown: onCollectClick
+                        onModifierMouseDown: onCollectClick,
+                        circleHitOnly: true
                     )
+                    .frame(width: 18, height: 18)
                 }
                 .help(isCollected ? "Remove from collected set" : "Add to collected set")
                 .zIndex(1)
@@ -1104,21 +1199,23 @@ struct LibraryListView: View {
 
     @ViewBuilder
     private func listRowThumbnail(for video: Video) -> some View {
-        let thumb = ListRowHoverThumbnail(
-            video: video,
-            thumbnailService: thumbnailService,
-            hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
-            isMoving: viewModel.activeMoveVideoIds.contains(video.id),
-            onSelect: { selectListRow(video) },
-            onModifierSelect: { handleListThumbnailModifierClick(video, flags: $0) }
-        )
-
         if viewModel.isReviewMode {
             let reviewState = reviewRowStore.state(for: video.id)
+            let isCollected = viewModel.selectedVideoIds.contains(video.id)
+            let thumb = ListRowHoverThumbnail(
+                video: video,
+                thumbnailService: thumbnailService,
+                hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
+                isMoving: viewModel.activeMoveVideoIds.contains(video.id),
+                isCollected: isCollected,
+                reviewState: reviewState,
+                onSelect: { selectListRow(video) },
+                onModifierSelect: { handleListThumbnailModifierClick(video, flags: $0) }
+            )
             ZStack(alignment: .topLeading) {
                 thumb
                 ListCollectedSetBadge(
-                    isCollected: viewModel.selectedVideoIds.contains(video.id),
+                    isCollected: isCollected,
                     reviewState: reviewState,
                     onCollectClick: { handleCollectCircleClick(video, flags: $0) }
                 )
@@ -1126,7 +1223,14 @@ struct LibraryListView: View {
             .frame(width: 56, height: 36)
             .onHover { reviewState.isRowHovering = $0 }
         } else {
-            thumb
+            ListRowHoverThumbnail(
+                video: video,
+                thumbnailService: thumbnailService,
+                hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
+                isMoving: viewModel.activeMoveVideoIds.contains(video.id),
+                onSelect: { selectListRow(video) },
+                onModifierSelect: { handleListThumbnailModifierClick(video, flags: $0) }
+            )
         }
     }
 

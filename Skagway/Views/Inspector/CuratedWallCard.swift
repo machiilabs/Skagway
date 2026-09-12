@@ -201,6 +201,11 @@ struct CuratedWallCard: View {
                 stopHoverPreview()
             }
         }
+        .onChange(of: selectionState.isSelected) { _, _ in
+            if isHovering {
+                startHoverPreviewIfAllowed()
+            }
+        }
         .onChange(of: hoverPreviewEnabled) { _, enabled in
             if !enabled { stopHoverPreview() }
         }

@@ -141,6 +141,7 @@ struct CuratedWallGrid: View {
                         .overlay(alignment: .topLeading) {
                             if viewModel.isReviewMode {
                                 collectedSetBadge(for: video)
+                                    .frame(width: 40, height: 40, alignment: .topLeading)
                             }
                         }
                         .onHover { hovering in
@@ -462,6 +463,17 @@ struct CuratedWallGrid: View {
             }
 
             override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+            /// Only the circle accepts clicks — pass everything else through for card hover.
+            override func hitTest(_ point: NSPoint) -> NSView? {
+                guard bounds.contains(point) else { return nil }
+                let center = NSPoint(x: bounds.midX, y: bounds.midY)
+                let radius = min(bounds.width, bounds.height) * 0.5
+                let dx = point.x - center.x
+                let dy = point.y - center.y
+                guard dx * dx + dy * dy <= radius * radius else { return nil }
+                return self
+            }
         }
 
         func makeNSView(context: Context) -> HandlerView {
@@ -489,10 +501,11 @@ struct CuratedWallGrid: View {
                     .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
                     .padding(.top, 12)
                     .padding(.leading, 12)
-                    .contentShape(Circle())
                     .overlay {
                         CollectCircleClickHandler(onClick: onClick)
+                            .frame(width: 24, height: 24)
                     }
+                    .contentShape(Circle())
                     .help(isSelected ? "Remove from collected set" : "Add to collected set")
             }
         }
