@@ -31,12 +31,14 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
-- **Review mode in List view** — List now mirrors Grid Review behavior: Table highlight follows review focus while the collected set is built separately (A, thumbnail circle, ⌘/⇧/⌥-click). Context menus respect the collected set when right-clicking a collected row. Per-row hover tracking fixes collect circles flickering unpredictably between rows.
-- **List hover preview** — Hovering a List thumbnail opens the enlarged popover (including in Review); when hover preview is on, that panel plays the same muted cycling scrub as Grid cards (Settings → Hover preview on Grid and List; off while inline playback is open). Clicking the mini-thumbnail selects the row immediately, even while the preview popover is open.
-- **List Review polish** — ⌘/⇧/⌥ clicks keep working while the hover preview is open (preview uses a click-through floating panel instead of a blocking popover; thumbnail handler applies modifier selection on the first press). List hover preview panel is vertically centered on its row (screen-coordinate positioning). List double-click plays inline like Grid. `ListReviewTableSelectionTests` cover List Review modifier semantics.
-- **Review collect circles** — Grid and List collect circles now honor ⌘/⇧/⌥ (⇧-click range-collects from the last circle click; shared `ReviewSession.applyCollectCircleClick` + AppKit click handling on Grid badges). ⇧-range adds into the collected set instead of replacing earlier picks on other rows. Grid collect badge hit area is constrained so live hover previews keep working after collecting.
-- **List Review hover preview** — Live List hover preview survives collecting into an existing set: thumbnail hover state is stored per row (not `@State`), collect-badge clicks use a circle-only hit target, and thumbnail mouse handlers pass hover events through to SwiftUI.
-- **List hover preview reliability** — Fixed live preview dying after hovering several List rows: the floater no longer restarts playback on every Table re-render (which was invalidating `HoverPreviewExclusive` tokens during the start delay). Preview is driven explicitly from show/hide via `ListHoverPreviewDriver`, and hide now stops players and releases panel content.
+## 1.1.0 (build 1045) - 2026-09-12
+
+- **Review mode** — Collect a set of videos while watching clips: Grid and List share focus vs collected-set semantics (plain click = focus; collect circle with plain/⌘/⇧/⌥; A to add focused row to set). Inspector and context menus respect the collected set. `ReviewSession` + unit tests (`ReviewSessionTests`, `ListReviewTableSelectionTests`).
+- **Review mode in List view** — List mirrors Grid Review behavior: Table highlight follows review focus while the collected set is built separately. Context menus respect the collected set when right-clicking a collected row. Per-row hover tracking fixes collect circles flickering between rows.
+- **List hover preview** — Hovering a List thumbnail opens an enlarged click-through floating panel (including in Review) with the same muted cycling scrub as Grid cards when hover preview is enabled. List double-click plays inline like Grid.
+- **List Review polish** — ⌘/⇧/⌥ clicks work on the first press while the hover preview is open. Preview panel is vertically centered on its row. Thumbnail handler applies modifier selection directly.
+- **Review collect circles** — Grid and List collect circles honor ⌘/⇧/⌥ (⇧-click range-collects from the last circle click; ⇧-range unions into the set). Collect-badge hit areas are constrained so live hover previews keep working after collecting.
+- **List hover preview reliability** — Fixed live preview dying after hovering several List rows: the floater no longer restarts playback on every Table re-render. Preview is driven from show/hide via `ListHoverPreviewDriver`; hide stops players and releases panel content.
 
 ## 1.0.0 (build 1014) - 2026-09-03
 
