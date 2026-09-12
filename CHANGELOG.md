@@ -33,6 +33,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 - **Review mode in List view** — List now mirrors Grid Review behavior: Table highlight follows review focus while the collected set is built separately (A, thumbnail circle, ⌘/⇧/⌥-click). Context menus respect the collected set when right-clicking a collected row. Per-row hover tracking fixes collect circles flickering unpredictably between rows.
 - **List hover preview** — Hovering a List thumbnail opens the enlarged popover (including in Review); when hover preview is on, that panel plays the same muted cycling scrub as Grid cards (Settings → Hover preview on Grid and List; off while inline playback is open). Clicking the mini-thumbnail selects the row immediately, even while the preview popover is open.
+- **List Review polish** — ⌘/⇧/⌥ clicks keep working while the hover preview is open (preview uses a click-through floating panel instead of a blocking popover; thumbnail handler applies modifier selection on the first press). List hover preview panel is vertically centered on its row (screen-coordinate positioning). List double-click plays inline like Grid. `ListReviewTableSelectionTests` cover List Review modifier semantics.
 
 ## 1.0.0 (build 1014) - 2026-09-03
 

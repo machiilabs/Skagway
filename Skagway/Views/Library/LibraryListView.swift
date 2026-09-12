@@ -159,14 +159,22 @@ private final class ListRowReviewStore {
 
 /// Catches mouse-down before transient popover dismissal or Table routing eats the click.
 private struct ListMouseDownHandler: NSViewRepresentable {
-    let onMouseDown: () -> Void
+    let onPlainMouseDown: () -> Void
+    var onModifierMouseDown: ((NSEvent.ModifierFlags) -> Void)? = nil
+    var ignoreModifiers: Bool = false
 
     final class HandlerView: NSView {
-        var onMouseDown: (() -> Void)?
+        var onPlainMouseDown: (() -> Void)?
+        var onModifierMouseDown: ((NSEvent.ModifierFlags) -> Void)?
+        var ignoreModifiers = false
 
         override func mouseDown(with event: NSEvent) {
-            onMouseDown?()
-            super.mouseDown(with: event)
+            if ignoreModifiers || !ListSelectionModifiers.usesExtendedSelection(event.modifierFlags) {
+                onPlainMouseDown?()
+                super.mouseDown(with: event)
+                return
+            }
+            onModifierMouseDown?(event.modifierFlags)
         }
 
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -174,12 +182,180 @@ private struct ListMouseDownHandler: NSViewRepresentable {
 
     func makeNSView(context: Context) -> HandlerView {
         let view = HandlerView()
-        view.onMouseDown = onMouseDown
+        view.onPlainMouseDown = onPlainMouseDown
+        view.onModifierMouseDown = onModifierMouseDown
+        view.ignoreModifiers = ignoreModifiers
         return view
     }
 
     func updateNSView(_ nsView: HandlerView, context: Context) {
-        nsView.onMouseDown = onMouseDown
+        nsView.onPlainMouseDown = onPlainMouseDown
+        nsView.onModifierMouseDown = onModifierMouseDown
+        nsView.ignoreModifiers = ignoreModifiers
+    }
+}
+
+/// Enlarged hover preview in a child panel that ignores mouse events so row clicks (including
+/// ⌘/⇧) land on the first press instead of being eaten by popover dismiss.
+private struct ListHoverPreviewFloater: NSViewRepresentable {
+    var isPresented: Bool
+    let video: Video
+    let thumbnailService: ThumbnailService
+    var livePreviewEnabled: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> FloaterAnchorView {
+        let view = FloaterAnchorView()
+        view.onFrameChange = { [weak coordinator = context.coordinator] in
+            coordinator?.repositionIfNeeded()
+        }
+        context.coordinator.anchorView = view
+        return view
+    }
+
+    func updateNSView(_ nsView: FloaterAnchorView, context: Context) {
+        context.coordinator.anchorView = nsView
+        context.coordinator.sync(
+            isPresented: isPresented,
+            video: video,
+            thumbnailService: thumbnailService,
+            livePreviewEnabled: livePreviewEnabled
+        )
+    }
+
+    static func dismantleNSView(_ nsView: FloaterAnchorView, coordinator: Coordinator) {
+        coordinator.teardown()
+    }
+
+    final class FloaterAnchorView: NSView {
+        var onFrameChange: (() -> Void)?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func layout() {
+            super.layout()
+            onFrameChange?()
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            onFrameChange?()
+        }
+
+        override func viewDidMoveToSuperview() {
+            super.viewDidMoveToSuperview()
+            onFrameChange?()
+        }
+    }
+
+    @MainActor
+    final class Coordinator {
+        weak var anchorView: FloaterAnchorView?
+        private var panel: NSPanel?
+        private var hostingView: NSHostingView<ListHoverPreviewPanel>?
+        private var video: Video?
+        private var thumbnailService: ThumbnailService?
+        private var livePreviewEnabled = false
+        private var isPresented = false
+
+        func sync(
+            isPresented: Bool,
+            video: Video,
+            thumbnailService: ThumbnailService,
+            livePreviewEnabled: Bool
+        ) {
+            self.isPresented = isPresented
+            self.video = video
+            self.thumbnailService = thumbnailService
+            self.livePreviewEnabled = livePreviewEnabled
+            if isPresented {
+                show()
+            } else {
+                hide()
+            }
+        }
+
+        func repositionIfNeeded() {
+            guard isPresented else { return }
+            reposition()
+        }
+
+        private func show() {
+            guard let video, let thumbnailService else { return }
+            let panel = ensurePanel()
+            let panelSize = NSSize(width: 224, height: 144)
+            let content = ListHoverPreviewPanel(
+                video: video,
+                thumbnailService: thumbnailService,
+                livePreviewEnabled: livePreviewEnabled
+            )
+            if let hostingView {
+                hostingView.rootView = content
+                hostingView.frame = NSRect(origin: .zero, size: panelSize)
+            } else {
+                let hosting = NSHostingView(rootView: content)
+                hosting.frame = NSRect(origin: .zero, size: panelSize)
+                panel.contentView = hosting
+                hostingView = hosting
+            }
+            panel.setContentSize(panelSize)
+            reposition()
+            panel.orderFront(nil)
+        }
+
+        private func reposition() {
+            guard let panel, let anchorView, let window = anchorView.window else { return }
+            if panel.parent == nil {
+                window.addChildWindow(panel, ordered: .above)
+            }
+            let panelSize = panel.frame.size
+            guard panelSize.width > 0, panelSize.height > 0 else { return }
+
+            // `convert(_:to: nil)` is window space; child panels need screen space.
+            let anchorInWindow = anchorView.convert(anchorView.bounds, to: nil)
+            guard anchorInWindow.width > 0, anchorInWindow.height > 0 else { return }
+            let anchorOnScreen = window.convertToScreen(anchorInWindow)
+
+            let origin = NSPoint(
+                x: anchorOnScreen.maxX + 8,
+                y: anchorOnScreen.midY - panelSize.height * 0.5
+            )
+            panel.setFrame(NSRect(origin: origin, size: panelSize), display: true)
+        }
+
+        private func ensurePanel() -> NSPanel {
+            if let panel { return panel }
+            let panel = NSPanel(
+                contentRect: NSRect(x: 0, y: 0, width: 224, height: 144),
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            panel.isFloatingPanel = true
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = true
+            panel.hidesOnDeactivate = false
+            panel.ignoresMouseEvents = true
+            self.panel = panel
+            return panel
+        }
+
+        private func hide() {
+            panel?.orderOut(nil)
+        }
+
+        func teardown() {
+            if let panel, let parent = panel.parent {
+                parent.removeChildWindow(panel)
+            }
+            panel?.close()
+            panel = nil
+            hostingView = nil
+        }
     }
 }
 
@@ -259,20 +435,9 @@ private struct ListRowHoverThumbnail: View {
     var hoverPreviewEnabled: Bool
     var isMoving: Bool
     let onSelect: () -> Void
+    let onModifierSelect: (NSEvent.ModifierFlags) -> Void
 
     @State private var isThumbnailHovered = false
-
-    /// Popover tracks hover; when AppKit dismisses it on an anchor click, select if still hovered.
-    private var popoverPresented: Binding<Bool> {
-        Binding(
-            get: { isThumbnailHovered },
-            set: { presented in
-                if !presented, isThumbnailHovered {
-                    onSelect()
-                }
-            }
-        )
-    }
 
     var body: some View {
         AsyncThumbnailView(
@@ -283,16 +448,19 @@ private struct ListRowHoverThumbnail: View {
         .frame(width: 56, height: 36)
         .appMediaFrame(cornerRadius: AppRadius.sm)
         .overlay {
-            ListMouseDownHandler(onMouseDown: onSelect)
+            ListMouseDownHandler(onPlainMouseDown: onSelect, onModifierMouseDown: onModifierSelect)
         }
-        .onHover { isThumbnailHovered = $0 }
-        .popover(isPresented: popoverPresented, arrowEdge: .trailing) {
-            ListHoverPreviewPanel(
+        .overlay {
+            ListHoverPreviewFloater(
+                isPresented: isThumbnailHovered,
                 video: video,
                 thumbnailService: thumbnailService,
                 livePreviewEnabled: hoverPreviewEnabled && !isMoving
             )
+            .frame(width: 56, height: 36)
+            .allowsHitTesting(false)
         }
+        .onHover { isThumbnailHovered = $0 }
     }
 }
 
@@ -311,7 +479,7 @@ private struct ListCollectedSetBadge: View {
                 .padding(2)
                 .contentShape(Circle())
                 .overlay {
-                    ListMouseDownHandler(onMouseDown: onToggle)
+                    ListMouseDownHandler(onPlainMouseDown: onToggle, ignoreModifiers: true)
                 }
                 .help(isCollected ? "Remove from collected set" : "Add to collected set")
                 .zIndex(1)
@@ -346,23 +514,7 @@ struct LibraryListView: View {
     }
 
     var body: some View {
-        Table(
-            viewModel.filteredVideos,
-            selection: tableSelectionBinding,
-            // While shuffled, `tableSortOrder` itself is left untouched (see `shuffleOrder()`) so
-            // exiting random order can tell whether the user picked a genuinely different sort —
-            // but that means the Table would otherwise keep showing a caret on whichever column
-            // was sorted before the shuffle. Reporting an empty order here clears that indicator
-            // without touching the real value; a real column click still writes through normally,
-            // which correctly exits random order via `tableSortOrder`'s own didSet.
-            sortOrder: Binding(
-                get: { (viewModel.isRandomOrder || viewModel.isShowingAlbumOrder) ? [] : viewModel.tableSortOrder },
-                set: { viewModel.tableSortOrder = $0 }
-            ),
-            columnCustomization: $viewModel.columnCustomization
-        ) {
-            listTableColumns()
-        }
+        listTableWithContextMenu
         .tint(Color.appAccent)
         .id("\(viewModel.filteredVideosVersion)-\(viewModel.listColumnConfigurationSignature)")
         .background(TableScrollHelper(scrollToRow: scrollToRow))
@@ -391,13 +543,71 @@ struct LibraryListView: View {
         .onChange(of: viewModel.focusedVideoId) { _, id in
             if let id { lastClickedId = id }
         }
+        .sheet(item: $filmstripSession) { session in
+            FilmstripConfigView(
+                videos: session.videos,
+                thumbnailService: thumbnailService,
+                defaultRows: viewModel.defaultFilmstripRows,
+                defaultColumns: viewModel.defaultFilmstripColumns
+            ) {
+                viewModel.filmstripRefreshId &+= 1
+            }
+        }
+        .confirmationDialog(
+            "Delete \(viewModel.pendingDeleteIds.count == 1 ? "Video" : "\(viewModel.pendingDeleteIds.count) Videos")",
+            isPresented: $viewModel.showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                let ids = viewModel.pendingDeleteIds
+                viewModel.pendingDeleteIds = []
+                Task { await viewModel.deleteVideos(ids) }
+            }
+            Button("Cancel", role: .cancel) {
+                viewModel.pendingDeleteIds = []
+            }
+        } message: {
+            if viewModel.pendingDeleteIds.count == 1 {
+                Text("The file will be moved to Trash.")
+            } else {
+                Text("\(viewModel.pendingDeleteIds.count) files will be moved to Trash.")
+            }
+        }
+    }
+
+    private var listTableWithContextMenu: some View {
+        Table(
+            viewModel.filteredVideos,
+            selection: tableSelectionBinding,
+            // While shuffled, `tableSortOrder` itself is left untouched (see `shuffleOrder()`) so
+            // exiting random order can tell whether the user picked a genuinely different sort —
+            // but that means the Table would otherwise keep showing a caret on whichever column
+            // was sorted before the shuffle. Reporting an empty order here clears that indicator
+            // without touching the real value; a real column click still writes through normally,
+            // which correctly exits random order via `tableSortOrder`'s own didSet.
+            sortOrder: Binding(
+                get: { (viewModel.isRandomOrder || viewModel.isShowingAlbumOrder) ? [] : viewModel.tableSortOrder },
+                set: { viewModel.tableSortOrder = $0 }
+            ),
+            columnCustomization: $viewModel.columnCustomization
+        ) {
+            listTableColumns()
+        }
         .contextMenu(forSelectionType: Video.ID.self) { ids in
-            if let filePath = ids.first,
-               let video = viewModel.filteredVideos.first(where: { $0.id == filePath })
-            {
-                let ids = effectiveContextMenuIds(tableSelection: ids, for: video.id)
-                let isMoving = ids.contains { viewModel.activeMoveVideoIds.contains($0) }
-                Button("Play in External Player") {
+            listSelectionContextMenu(tableSelection: ids)
+        } primaryAction: { ids in
+            handleListPrimaryAction(ids: ids)
+        }
+    }
+
+    @ViewBuilder
+    private func listSelectionContextMenu(tableSelection selectionIds: Set<String>) -> some View {
+        if let filePath = selectionIds.first,
+           let video = viewModel.filteredVideos.first(where: { $0.id == filePath })
+        {
+            let ids = effectiveContextMenuIds(tableSelection: selectionIds, for: video.id)
+            let isMoving = ids.contains { viewModel.activeMoveVideoIds.contains($0) }
+            Button("Play in External Player") {
                     NSWorkspace.shared.open(video.url)
                     Task { await viewModel.recordPlay(for: video) }
                 }
@@ -554,44 +764,19 @@ struct LibraryListView: View {
                 }
                 .disabled(isMoving)
                 .help(isMoving ? "Move in progress — file isn't safe to modify yet" : "")
-            }
-        } primaryAction: { ids in
-            if let filePath = ids.first,
-               let video = viewModel.filteredVideos.first(where: { $0.id == filePath })
-            {
-                NSWorkspace.shared.open(video.url)
-                Task { await viewModel.recordPlay(for: video) }
-            }
         }
-        .sheet(item: $filmstripSession) { session in
-            FilmstripConfigView(
-                videos: session.videos,
-                thumbnailService: thumbnailService,
-                defaultRows: viewModel.defaultFilmstripRows,
-                defaultColumns: viewModel.defaultFilmstripColumns
-            ) {
-                viewModel.filmstripRefreshId &+= 1
-            }
-        }
-        .confirmationDialog(
-            "Delete \(viewModel.pendingDeleteIds.count == 1 ? "Video" : "\(viewModel.pendingDeleteIds.count) Videos")",
-            isPresented: $viewModel.showDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                let ids = viewModel.pendingDeleteIds
-                viewModel.pendingDeleteIds = []
-                Task { await viewModel.deleteVideos(ids) }
-            }
-            Button("Cancel", role: .cancel) {
-                viewModel.pendingDeleteIds = []
-            }
-        } message: {
-            if viewModel.pendingDeleteIds.count == 1 {
-                Text("The file will be moved to Trash.")
+    }
+
+    private func handleListPrimaryAction(ids: Set<String>) {
+        if let filePath = ids.first,
+           let video = viewModel.filteredVideos.first(where: { $0.id == filePath })
+        {
+            if viewModel.isReviewMode {
+                viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
             } else {
-                Text("\(viewModel.pendingDeleteIds.count) files will be moved to Trash.")
+                viewModel.selectOnly(video.id)
             }
+            viewModel.isPlayingInline = true
         }
     }
 
@@ -921,7 +1106,8 @@ struct LibraryListView: View {
             thumbnailService: thumbnailService,
             hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
             isMoving: viewModel.activeMoveVideoIds.contains(video.id),
-            onSelect: { selectListRow(video) }
+            onSelect: { selectListRow(video) },
+            onModifierSelect: { handleListThumbnailModifierClick(video, flags: $0) }
         )
 
         if viewModel.isReviewMode {
@@ -950,6 +1136,40 @@ struct LibraryListView: View {
         }
     }
 
+    private func handleListThumbnailModifierClick(_ video: Video, flags: NSEvent.ModifierFlags) {
+        if !viewModel.isReviewMode {
+            if flags.contains(.command) {
+                var ids = viewModel.selectedVideoIds
+                if ids.contains(video.id) { ids.remove(video.id) } else { ids.insert(video.id) }
+                viewModel.selectedVideoIds = ids
+                lastClickedId = video.id
+                return
+            }
+            if flags.contains(.shift) {
+                viewModel.selectedVideoIds = listModifierSelectionIds(for: video, flags: flags)
+                lastClickedId = video.id
+                return
+            }
+        }
+        applyTableSelection(listModifierSelectionIds(for: video, flags: flags), flags: flags)
+    }
+
+    private func listModifierSelectionIds(for video: Video, flags: NSEvent.ModifierFlags) -> Set<String> {
+        if flags.contains(.shift) {
+            let anchor = lastClickedId
+                ?? viewModel.focusedVideoId
+                ?? viewModel.selectedVideoIds.first
+            if let anchor,
+               let aIdx = viewModel.filteredVideos.firstIndex(where: { $0.id == anchor }),
+               let idx = viewModel.filteredVideos.firstIndex(where: { $0.id == video.id })
+            {
+                let range = min(aIdx, idx)...max(aIdx, idx)
+                return Set(range.map { viewModel.filteredVideos[$0].id })
+            }
+        }
+        return [video.id]
+    }
+
     private func effectiveContextMenuIds(tableSelection: Set<String>, for videoId: String) -> Set<String> {
         if viewModel.isReviewMode {
             if viewModel.selectedVideoIds.contains(videoId), !viewModel.selectedVideoIds.isEmpty {
@@ -963,65 +1183,32 @@ struct LibraryListView: View {
         return [videoId]
     }
 
-    private func applyTableSelection(_ newIds: Set<String>) {
+    private func applyTableSelection(
+        _ newIds: Set<String>,
+        flags: NSEvent.ModifierFlags = NSEvent.modifierFlags
+    ) {
         if !viewModel.isReviewMode {
             viewModel.selectedVideoIds = newIds
             return
         }
 
-        let flags = NSEvent.modifierFlags
-        let previousTable = Set(viewModel.focusedVideoId.map { [$0] } ?? [])
-        let allIds = Set(viewModel.filteredVideos.map(\.id))
-
-        if flags.contains(.command), newIds == allIds, !allIds.isEmpty {
-            viewModel.selectedVideoIds = newIds
-            return
-        }
-
-        let optionOnly = flags.contains(.option)
-            && !flags.contains(.command)
-            && !flags.contains(.shift)
-        if optionOnly, let id = newIds.first {
-            lastClickedId = id
-            viewModel.selectOnly(id)
-            return
-        }
-
-        if flags.contains(.command) {
-            for id in newIds.symmetricDifference(previousTable) {
-                viewModel.toggleInCollectedSet(id)
-            }
-            if let id = newIds.subtracting(previousTable).first ?? newIds.first {
-                lastClickedId = id
-            }
-            return
-        }
-
-        if flags.contains(.shift) {
-            viewModel.selectedVideoIds = newIds
-            if let clicked = shiftClickEndpoint(in: newIds) {
-                lastClickedId = clicked
-                viewModel.setReviewFocus(clicked, retargetIfPlaying: false)
-            }
-            return
-        }
-
-        if let id = newIds.first {
-            lastClickedId = id
-            viewModel.setReviewFocus(id)
-        }
-    }
-
-    private func shiftClickEndpoint(in ids: Set<String>) -> String? {
-        guard let anchor = lastClickedId,
-              let anchorIdx = viewModel.filteredVideos.firstIndex(where: { $0.id == anchor })
-        else {
-            return ids.first
-        }
-        return ids.max { lhs, rhs in
-            let li = viewModel.filteredVideos.firstIndex(where: { $0.id == lhs }) ?? anchorIdx
-            let ri = viewModel.filteredVideos.firstIndex(where: { $0.id == rhs }) ?? anchorIdx
-            return abs(li - anchorIdx) < abs(ri - anchorIdx)
+        var session = ReviewSession(
+            focusedId: viewModel.focusedVideoId,
+            selectedIds: viewModel.selectedVideoIds,
+            inspectorPrefersSelection: viewModel.inspectorPrefersSelection
+        )
+        lastClickedId = session.applyListTableSelection(
+            newIds: newIds,
+            allVideoIds: viewModel.filteredVideos.map(\.id),
+            previousTableFocusId: viewModel.focusedVideoId,
+            lastClickedId: lastClickedId,
+            flags: flags
+        )
+        viewModel.focusedVideoId = session.focusedId
+        viewModel.selectedVideoIds = session.selectedIds
+        viewModel.inspectorPrefersSelection = session.inspectorPrefersSelection
+        if let id = session.focusedId {
+            viewModel.lastSelectedVideoId = id
         }
     }
 
