@@ -157,6 +157,32 @@ private final class ListRowReviewStore {
     }
 }
 
+/// Catches mouse-down before transient popover dismissal or Table routing eats the click.
+private struct ListMouseDownHandler: NSViewRepresentable {
+    let onMouseDown: () -> Void
+
+    final class HandlerView: NSView {
+        var onMouseDown: (() -> Void)?
+
+        override func mouseDown(with event: NSEvent) {
+            onMouseDown?()
+            super.mouseDown(with: event)
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    }
+
+    func makeNSView(context: Context) -> HandlerView {
+        let view = HandlerView()
+        view.onMouseDown = onMouseDown
+        return view
+    }
+
+    func updateNSView(_ nsView: HandlerView, context: Context) {
+        nsView.onMouseDown = onMouseDown
+    }
+}
+
 /// Enlarged List hover panel — static poster, optionally with Grid-style live scrub on top.
 private struct ListHoverPreviewPanel: View {
     let video: Video
@@ -232,8 +258,21 @@ private struct ListRowHoverThumbnail: View {
     let thumbnailService: ThumbnailService
     var hoverPreviewEnabled: Bool
     var isMoving: Bool
+    let onSelect: () -> Void
 
-    @State private var showPopover = false
+    @State private var isThumbnailHovered = false
+
+    /// Popover tracks hover; when AppKit dismisses it on an anchor click, select if still hovered.
+    private var popoverPresented: Binding<Bool> {
+        Binding(
+            get: { isThumbnailHovered },
+            set: { presented in
+                if !presented, isThumbnailHovered {
+                    onSelect()
+                }
+            }
+        )
+    }
 
     var body: some View {
         AsyncThumbnailView(
@@ -243,19 +282,16 @@ private struct ListRowHoverThumbnail: View {
         )
         .frame(width: 56, height: 36)
         .appMediaFrame(cornerRadius: AppRadius.sm)
-        .onHover { showPopover = $0 }
-        .popover(isPresented: $showPopover, arrowEdge: .trailing) {
+        .overlay {
+            ListMouseDownHandler(onMouseDown: onSelect)
+        }
+        .onHover { isThumbnailHovered = $0 }
+        .popover(isPresented: popoverPresented, arrowEdge: .trailing) {
             ListHoverPreviewPanel(
                 video: video,
                 thumbnailService: thumbnailService,
                 livePreviewEnabled: hoverPreviewEnabled && !isMoving
             )
-        }
-        .onChange(of: hoverPreviewEnabled) { _, enabled in
-            if !enabled { showPopover = false }
-        }
-        .onChange(of: isMoving) { _, moving in
-            if moving { showPopover = false }
         }
     }
 }
@@ -267,19 +303,19 @@ private struct ListCollectedSetBadge: View {
 
     var body: some View {
         if isCollected || reviewState.showsCollectBadge {
-            Button(action: onToggle) {
-                Image(systemName: isCollected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, isCollected ? Color.appAccent : Color.white.opacity(0.55))
-                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-            }
-            .buttonStyle(.plain)
-            .help(isCollected ? "Remove from collected set" : "Add to collected set")
-            .padding(2)
-            .contentShape(Circle())
-            .zIndex(1)
-            .onHover { reviewState.isBadgeHovering = $0 }
+            Image(systemName: isCollected ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 14, weight: .semibold))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, isCollected ? Color.appAccent : Color.white.opacity(0.55))
+                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                .padding(2)
+                .contentShape(Circle())
+                .overlay {
+                    ListMouseDownHandler(onMouseDown: onToggle)
+                }
+                .help(isCollected ? "Remove from collected set" : "Add to collected set")
+                .zIndex(1)
+                .onHover { reviewState.isBadgeHovering = $0 }
         }
     }
 }
@@ -884,7 +920,8 @@ struct LibraryListView: View {
             video: video,
             thumbnailService: thumbnailService,
             hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
-            isMoving: viewModel.activeMoveVideoIds.contains(video.id)
+            isMoving: viewModel.activeMoveVideoIds.contains(video.id),
+            onSelect: { selectListRow(video) }
         )
 
         if viewModel.isReviewMode {
@@ -901,6 +938,15 @@ struct LibraryListView: View {
             .onHover { reviewState.isRowHovering = $0 }
         } else {
             thumb
+        }
+    }
+
+    private func selectListRow(_ video: Video) {
+        lastClickedId = video.id
+        if viewModel.isReviewMode {
+            viewModel.setReviewFocus(video.id)
+        } else {
+            viewModel.selectedVideoIds = [video.id]
         }
     }
 
