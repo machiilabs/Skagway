@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Skagway
 
@@ -113,5 +114,82 @@ final class ReviewSessionTests: XCTestCase {
         var session = ReviewSession(focusedId: c, selectedIds: [a, b], inspectorPrefersSelection: true)
         XCTAssertEqual(session.reviewedId(lastSelectedId: b), b)
         XCTAssertEqual(session.reviewedId(lastSelectedId: c), session.selectedIds.first)
+    }
+
+    func testCollectCirclePlainToggleAddsToSetWithoutMovingFocus() {
+        var session = ReviewSession(focusedId: b, selectedIds: [])
+        let last = session.applyCollectCircleClick(
+            id: a,
+            orderedIds: [a, b, c, d],
+            anchorId: nil,
+            flags: []
+        )
+        XCTAssertEqual(last, a)
+        XCTAssertEqual(session.focusedId, b)
+        XCTAssertEqual(session.selectedIds, [a])
+    }
+
+    func testCollectCircleShiftSelectsRangeFromAnchor() {
+        var session = ReviewSession(focusedId: nil, selectedIds: [a])
+        let last = session.applyCollectCircleClick(
+            id: d,
+            orderedIds: [a, b, c, d],
+            anchorId: a,
+            flags: [.shift]
+        )
+        XCTAssertEqual(last, d)
+        XCTAssertEqual(session.focusedId, d)
+        XCTAssertEqual(session.selectedIds, [a, b, c, d])
+    }
+
+    func testCollectCircleCommandToggleDoesNotMoveFocus() {
+        var session = ReviewSession(focusedId: c, selectedIds: [a])
+        let last = session.applyCollectCircleClick(
+            id: b,
+            orderedIds: [a, b, c, d],
+            anchorId: a,
+            flags: [.command]
+        )
+        XCTAssertEqual(last, b)
+        XCTAssertEqual(session.focusedId, c)
+        XCTAssertEqual(session.selectedIds, [a, b])
+    }
+
+    func testCollectCircleOptionSelectsOnly() {
+        var session = ReviewSession(focusedId: a, selectedIds: [a, c])
+        let last = session.applyCollectCircleClick(
+            id: b,
+            orderedIds: [a, b, c, d],
+            anchorId: a,
+            flags: [.option]
+        )
+        XCTAssertEqual(last, b)
+        XCTAssertEqual(session.focusedId, b)
+        XCTAssertEqual(session.selectedIds, [b])
+    }
+
+    func testCollectCircleShiftUnionsWithExistingSet() {
+        let w = "/w.mp4"
+        let x = "/x.mp4"
+        let y = "/y.mp4"
+        let z = "/z.mp4"
+        let ordered = [a, b, c, d, w, x, y, z]
+
+        var session = ReviewSession(focusedId: nil, selectedIds: [a, b, c, d])
+        _ = session.applyCollectCircleClick(
+            id: w,
+            orderedIds: ordered,
+            anchorId: d,
+            flags: []
+        )
+        let last = session.applyCollectCircleClick(
+            id: z,
+            orderedIds: ordered,
+            anchorId: w,
+            flags: [.shift]
+        )
+        XCTAssertEqual(last, z)
+        XCTAssertEqual(session.focusedId, z)
+        XCTAssertEqual(session.selectedIds, [a, b, c, d, w, x, y, z])
     }
 }

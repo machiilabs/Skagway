@@ -139,7 +139,7 @@ struct ReviewSession: Equatable {
         }
 
         if flags.contains(.shift) {
-            selectedIds = newIds
+            selectedIds.formUnion(newIds)
             if let clicked = Self.listShiftClickEndpoint(in: newIds, anchor: lastClickedId, orderedIds: allVideoIds) {
                 focus(clicked)
                 return clicked
@@ -165,5 +165,40 @@ struct ReviewSession: Equatable {
             let ri = orderedIds.firstIndex(of: rhs) ?? anchorIdx
             return abs(li - anchorIdx) < abs(ri - anchorIdx)
         }
+    }
+
+    /// Grid/List collect-circle clicks while Review is on. Plain or ⌘ toggles membership; ⇧
+    /// adds the range from the anchor into the set; ⌥ selects only.
+    mutating func applyCollectCircleClick(
+        id: String,
+        orderedIds: [String],
+        anchorId: String?,
+        flags: NSEvent.ModifierFlags
+    ) -> String? {
+        let optionOnly = flags.contains(.option)
+            && !flags.contains(.command)
+            && !flags.contains(.shift)
+        if optionOnly {
+            selectOnly(id)
+            return id
+        }
+
+        if flags.contains(.shift) {
+            let anchor = anchorId ?? focusedId ?? selectedIds.first
+            if let anchor,
+               let aIdx = orderedIds.firstIndex(of: anchor),
+               let idx = orderedIds.firstIndex(of: id)
+            {
+                let range = min(aIdx, idx)...max(aIdx, idx)
+                selectedIds.formUnion(range.map { orderedIds[$0] })
+                focus(id)
+                return id
+            }
+            toggleInSet(id)
+            return id
+        }
+
+        toggleInSet(id)
+        return id
     }
 }

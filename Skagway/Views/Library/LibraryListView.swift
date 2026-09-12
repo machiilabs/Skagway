@@ -467,7 +467,7 @@ private struct ListRowHoverThumbnail: View {
 private struct ListCollectedSetBadge: View {
     let isCollected: Bool
     let reviewState: ListRowReviewState
-    let onToggle: () -> Void
+    let onCollectClick: (NSEvent.ModifierFlags) -> Void
 
     var body: some View {
         if isCollected || reviewState.showsCollectBadge {
@@ -479,7 +479,10 @@ private struct ListCollectedSetBadge: View {
                 .padding(2)
                 .contentShape(Circle())
                 .overlay {
-                    ListMouseDownHandler(onPlainMouseDown: onToggle, ignoreModifiers: true)
+                    ListMouseDownHandler(
+                        onPlainMouseDown: { onCollectClick([]) },
+                        onModifierMouseDown: onCollectClick
+                    )
                 }
                 .help(isCollected ? "Remove from collected set" : "Add to collected set")
                 .zIndex(1)
@@ -1117,7 +1120,7 @@ struct LibraryListView: View {
                 ListCollectedSetBadge(
                     isCollected: viewModel.selectedVideoIds.contains(video.id),
                     reviewState: reviewState,
-                    onToggle: { viewModel.toggleInCollectedSet(video.id) }
+                    onCollectClick: { handleCollectCircleClick(video, flags: $0) }
                 )
             }
             .frame(width: 56, height: 36)
@@ -1133,6 +1136,26 @@ struct LibraryListView: View {
             viewModel.setReviewFocus(video.id)
         } else {
             viewModel.selectedVideoIds = [video.id]
+        }
+    }
+
+    private func handleCollectCircleClick(_ video: Video, flags: NSEvent.ModifierFlags) {
+        var session = ReviewSession(
+            focusedId: viewModel.focusedVideoId,
+            selectedIds: viewModel.selectedVideoIds,
+            inspectorPrefersSelection: viewModel.inspectorPrefersSelection
+        )
+        lastClickedId = session.applyCollectCircleClick(
+            id: video.id,
+            orderedIds: viewModel.filteredVideos.map(\.id),
+            anchorId: lastClickedId,
+            flags: flags
+        )
+        viewModel.focusedVideoId = session.focusedId
+        viewModel.selectedVideoIds = session.selectedIds
+        viewModel.inspectorPrefersSelection = session.inspectorPrefersSelection
+        if let id = session.focusedId {
+            viewModel.lastSelectedVideoId = id
         }
     }
 

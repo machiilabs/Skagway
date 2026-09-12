@@ -57,8 +57,8 @@ final class ListReviewTableSelectionTests: XCTestCase {
         XCTAssertEqual(session.selectedIds, [a])
     }
 
-    func testShiftClickReplacesSetWithRange() {
-        var session = ReviewSession(focusedId: a, selectedIds: [a])
+    func testShiftClickUnionsRangeIntoExistingSet() {
+        var session = ReviewSession(focusedId: a, selectedIds: [a, d])
         let last = session.applyListTableSelection(
             newIds: [a, b, c],
             allVideoIds: ordered,
@@ -68,7 +68,7 @@ final class ListReviewTableSelectionTests: XCTestCase {
         )
         XCTAssertEqual(last, c)
         XCTAssertEqual(session.focusedId, c)
-        XCTAssertEqual(session.selectedIds, [a, b, c])
+        XCTAssertEqual(session.selectedIds, [a, b, c, d])
     }
 
     func testOptionClickSelectsOnly() {

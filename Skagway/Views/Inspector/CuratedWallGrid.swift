@@ -449,24 +449,51 @@ struct CuratedWallGrid: View {
         }
     }
 
+    /// AppKit click handler so ⌘/⇧/⌥ on the collect circle are reliable (SwiftUI Button is not).
+    private struct CollectCircleClickHandler: NSViewRepresentable {
+        let onClick: (NSEvent.ModifierFlags) -> Void
+
+        final class HandlerView: NSView {
+            var onClick: ((NSEvent.ModifierFlags) -> Void)?
+
+            override func mouseUp(with event: NSEvent) {
+                guard event.clickCount <= 1 else { return }
+                onClick?(event.modifierFlags)
+            }
+
+            override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        }
+
+        func makeNSView(context: Context) -> HandlerView {
+            let view = HandlerView()
+            view.onClick = onClick
+            return view
+        }
+
+        func updateNSView(_ nsView: HandlerView, context: Context) {
+            nsView.onClick = onClick
+        }
+    }
+
     private struct CollectedSetBadge: View {
         let selectionState: CardSelectionState
-        let onToggle: () -> Void
+        let onClick: (NSEvent.ModifierFlags) -> Void
 
         var body: some View {
             let isSelected = selectionState.isSelected
             if isSelected || selectionState.isHovering {
-                Button(action: onToggle) {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 16, weight: .semibold))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, isSelected ? Color.appAccent : Color.white.opacity(0.55))
-                        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                }
-                .buttonStyle(.plain)
-                .help(isSelected ? "Remove from collected set" : "Add to collected set")
-                .padding(.top, 12)
-                .padding(.leading, 12)
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, isSelected ? Color.appAccent : Color.white.opacity(0.55))
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                    .padding(.top, 12)
+                    .padding(.leading, 12)
+                    .contentShape(Circle())
+                    .overlay {
+                        CollectCircleClickHandler(onClick: onClick)
+                    }
+                    .help(isSelected ? "Remove from collected set" : "Add to collected set")
             }
         }
     }
@@ -512,11 +539,12 @@ struct CuratedWallGrid: View {
            let aIdx = viewModel.filteredVideos.firstIndex(where: { $0.id == anchor }),
            let idx = viewModel.filteredVideos.firstIndex(where: { $0.id == video.id }) {
             let range = min(aIdx, idx)...max(aIdx, idx)
-            let newIds = Set(range.map { viewModel.filteredVideos[$0].id })
-            selectionStore.sync(to: newIds)
+            let rangeIds = Set(range.map { viewModel.filteredVideos[$0].id })
+            let merged = viewModel.selectedVideoIds.union(rangeIds)
+            selectionStore.sync(to: merged)
             selectionStore.syncFocus(to: video.id)
             DispatchQueue.main.async {
-                viewModel.selectedVideoIds = newIds
+                viewModel.selectedVideoIds = merged
                 viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
             }
             return
@@ -550,10 +578,30 @@ struct CuratedWallGrid: View {
         DispatchQueue.main.async { viewModel.selectedVideoIds = newIds }
     }
 
+    private func handleCollectCircleClick(_ video: Video, flags: NSEvent.ModifierFlags) {
+        var session = ReviewSession(
+            focusedId: viewModel.focusedVideoId,
+            selectedIds: viewModel.selectedVideoIds,
+            inspectorPrefersSelection: viewModel.inspectorPrefersSelection
+        )
+        lastClickedId = session.applyCollectCircleClick(
+            id: video.id,
+            orderedIds: viewModel.filteredVideos.map(\.id),
+            anchorId: lastClickedId,
+            flags: flags
+        )
+        viewModel.focusedVideoId = session.focusedId
+        viewModel.selectedVideoIds = session.selectedIds
+        viewModel.inspectorPrefersSelection = session.inspectorPrefersSelection
+        selectionStore.sync(to: session.selectedIds)
+        if let focusId = session.focusedId {
+            selectionStore.syncFocus(to: focusId)
+        }
+    }
+
     private func collectedSetBadge(for video: Video) -> some View {
-        CollectedSetBadge(selectionState: selectionStore.state(for: video.id)) {
-            viewModel.toggleInCollectedSet(video.id)
-            selectionStore.sync(to: viewModel.selectedVideoIds)
+        CollectedSetBadge(selectionState: selectionStore.state(for: video.id)) { flags in
+            handleCollectCircleClick(video, flags: flags)
         }
     }
 
