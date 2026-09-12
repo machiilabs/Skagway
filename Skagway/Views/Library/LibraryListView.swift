@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 
 struct TableScrollHelper: NSViewRepresentable {
     let scrollToRow: Int?
@@ -156,6 +157,109 @@ private final class ListRowReviewStore {
     }
 }
 
+/// Enlarged List hover panel — static poster, optionally with Grid-style live scrub on top.
+private struct ListHoverPreviewPanel: View {
+    let video: Video
+    let thumbnailService: ThumbnailService
+    var livePreviewEnabled: Bool
+
+    @State private var previewPlayer: AVPlayer?
+    @State private var previewTask: Task<Void, Never>?
+
+    var body: some View {
+        AsyncThumbnailView(
+            filePath: video.filePath,
+            thumbnailService: thumbnailService,
+            cacheVersion: video.thumbnailPath
+        )
+        .overlay {
+            if let previewPlayer {
+                HoverPreviewPlayerView(player: previewPlayer)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: 224, height: 144)
+        .appMediaFrame(cornerRadius: AppRadius.md)
+        .onAppear {
+            if livePreviewEnabled { startLivePreview() }
+        }
+        .onDisappear {
+            stopLivePreview()
+        }
+        .onChange(of: livePreviewEnabled) { _, enabled in
+            if enabled { startLivePreview() } else { stopLivePreview() }
+        }
+    }
+
+    private func startLivePreview() {
+        guard livePreviewEnabled else { return }
+        previewTask?.cancel()
+        previewTask = nil
+        if let previewPlayer {
+            previewPlayer.pause()
+            previewPlayer.replaceCurrentItem(with: nil)
+        }
+        previewPlayer = nil
+
+        let token = HoverPreviewExclusive.claim()
+        previewTask = Task { @MainActor in
+            await HoverPreviewPlayback.run(
+                url: video.url,
+                knownDuration: video.duration,
+                token: token,
+                assignPlayer: { player in
+                    self.previewPlayer = player
+                }
+            )
+        }
+    }
+
+    private func stopLivePreview() {
+        previewTask?.cancel()
+        previewTask = nil
+        if let previewPlayer {
+            previewPlayer.pause()
+            previewPlayer.replaceCurrentItem(with: nil)
+        }
+        previewPlayer = nil
+    }
+}
+
+/// Small List title thumbnail; hover opens the enlarged preview popover.
+private struct ListRowHoverThumbnail: View {
+    let video: Video
+    let thumbnailService: ThumbnailService
+    var hoverPreviewEnabled: Bool
+    var isMoving: Bool
+
+    @State private var showPopover = false
+
+    var body: some View {
+        AsyncThumbnailView(
+            filePath: video.filePath,
+            thumbnailService: thumbnailService,
+            cacheVersion: video.thumbnailPath
+        )
+        .frame(width: 56, height: 36)
+        .appMediaFrame(cornerRadius: AppRadius.sm)
+        .onHover { showPopover = $0 }
+        .popover(isPresented: $showPopover, arrowEdge: .trailing) {
+            ListHoverPreviewPanel(
+                video: video,
+                thumbnailService: thumbnailService,
+                livePreviewEnabled: hoverPreviewEnabled && !isMoving
+            )
+        }
+        .onChange(of: hoverPreviewEnabled) { _, enabled in
+            if !enabled { showPopover = false }
+        }
+        .onChange(of: isMoving) { _, moving in
+            if moving { showPopover = false }
+        }
+    }
+}
+
 private struct ListCollectedSetBadge: View {
     let isCollected: Bool
     let reviewState: ListRowReviewState
@@ -188,7 +292,6 @@ struct LibraryListView: View {
     @State private var filmstripSession: FilmstripModifySession?
     @FocusState private var isRenameFocused: Bool
     @State private var scrollToRow: Int?
-    @State private var thumbnailPopoverVideoId: String?
     @State private var albumReorderTargetId: String?
     @State private var lastClickedId: String?
     @State private var reviewRowStore = ListRowReviewStore()
@@ -251,9 +354,6 @@ struct LibraryListView: View {
         }
         .onChange(of: viewModel.focusedVideoId) { _, id in
             if let id { lastClickedId = id }
-        }
-        .onChange(of: viewModel.isReviewMode) { _, isOn in
-            if isOn { thumbnailPopoverVideoId = nil }
         }
         .contextMenu(forSelectionType: Video.ID.self) { ids in
             if let filePath = ids.first,
@@ -780,13 +880,12 @@ struct LibraryListView: View {
 
     @ViewBuilder
     private func listRowThumbnail(for video: Video) -> some View {
-        let thumb = AsyncThumbnailView(
-            filePath: video.filePath,
+        let thumb = ListRowHoverThumbnail(
+            video: video,
             thumbnailService: thumbnailService,
-            cacheVersion: video.thumbnailPath
+            hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
+            isMoving: viewModel.activeMoveVideoIds.contains(video.id)
         )
-        .frame(width: 56, height: 36)
-        .appMediaFrame(cornerRadius: AppRadius.sm)
 
         if viewModel.isReviewMode {
             let reviewState = reviewRowStore.state(for: video.id)
@@ -802,23 +901,6 @@ struct LibraryListView: View {
             .onHover { reviewState.isRowHovering = $0 }
         } else {
             thumb
-                .onHover { hovering in
-                    thumbnailPopoverVideoId = hovering ? video.id : nil
-                }
-                .popover(
-                    isPresented: Binding(
-                        get: { thumbnailPopoverVideoId == video.id },
-                        set: { if !$0 { thumbnailPopoverVideoId = nil } }
-                    ),
-                    arrowEdge: .trailing
-                ) {
-                    AsyncThumbnailView(
-                        filePath: video.filePath, thumbnailService: thumbnailService,
-                        cacheVersion: video.thumbnailPath
-                    )
-                    .frame(width: 224, height: 144)
-                    .appMediaFrame(cornerRadius: AppRadius.md)
-                }
         }
     }
 

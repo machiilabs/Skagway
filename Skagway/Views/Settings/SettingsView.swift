@@ -438,8 +438,8 @@ struct SettingsView: View {
                 )
                 cardSeparator
                 describedToggleRow(
-                    title: "Hover preview on Grid cards",
-                    description: "Plays a muted cycling scrub when the pointer rests on a Grid card (disabled automatically while the floating player is open).",
+                    title: "Hover preview on Grid and List",
+                    description: "Plays a muted cycling scrub when the pointer rests on a Grid card, or in the enlarged preview that pops up over a List thumbnail (disabled automatically while the floating player is open).",
                     isOn: $viewModel.gridHoverPreviewEnabled
                 )
             }

@@ -140,9 +140,9 @@ enum SettingsSearchCatalog {
         ),
         .init(
             id: "video.hoverPreview",
-            title: "Hover preview on Grid cards",
+            title: "Hover preview on Grid and List",
             category: .video,
-            keywords: ["hover", "scrub", "grid"]
+            keywords: ["hover", "scrub", "grid", "list", "thumbnail"]
         ),
         .init(
             id: "video.tagBlind",
