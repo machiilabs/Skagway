@@ -135,6 +135,51 @@ struct TableScrollHelper: NSViewRepresentable {
     }
 }
 
+/// Per-row hover for List Review collect circles — avoids a single shared id racing when
+/// pointer moves between Table rows (one row's `onHover(false)` must not clear another's).
+@Observable
+private final class ListRowReviewState {
+    var isRowHovering: Bool = false
+    var isBadgeHovering: Bool = false
+
+    var showsCollectBadge: Bool { isRowHovering || isBadgeHovering }
+}
+
+private final class ListRowReviewStore {
+    private var states: [String: ListRowReviewState] = [:]
+
+    func state(for id: String) -> ListRowReviewState {
+        if let s = states[id] { return s }
+        let s = ListRowReviewState()
+        states[id] = s
+        return s
+    }
+}
+
+private struct ListCollectedSetBadge: View {
+    let isCollected: Bool
+    let reviewState: ListRowReviewState
+    let onToggle: () -> Void
+
+    var body: some View {
+        if isCollected || reviewState.showsCollectBadge {
+            Button(action: onToggle) {
+                Image(systemName: isCollected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, isCollected ? Color.appAccent : Color.white.opacity(0.55))
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+            }
+            .buttonStyle(.plain)
+            .help(isCollected ? "Remove from collected set" : "Add to collected set")
+            .padding(2)
+            .contentShape(Circle())
+            .zIndex(1)
+            .onHover { reviewState.isBadgeHovering = $0 }
+        }
+    }
+}
+
 struct LibraryListView: View {
     @Bindable var viewModel: LibraryViewModel
     let thumbnailService: ThumbnailService
@@ -145,11 +190,26 @@ struct LibraryListView: View {
     @State private var scrollToRow: Int?
     @State private var thumbnailPopoverVideoId: String?
     @State private var albumReorderTargetId: String?
+    @State private var lastClickedId: String?
+    @State private var reviewRowStore = ListRowReviewStore()
+
+    private var tableSelectionBinding: Binding<Set<String>> {
+        Binding(
+            get: {
+                if viewModel.isReviewMode {
+                    if let id = viewModel.focusedVideoId { return [id] }
+                    return []
+                }
+                return viewModel.selectedVideoIds
+            },
+            set: { applyTableSelection($0) }
+        )
+    }
 
     var body: some View {
         Table(
             viewModel.filteredVideos,
-            selection: $viewModel.selectedVideoIds,
+            selection: tableSelectionBinding,
             // While shuffled, `tableSortOrder` itself is left untouched (see `shuffleOrder()`) so
             // exiting random order can tell whether the user picked a genuinely different sort —
             // but that means the Table would otherwise keep showing a caret on whichever column
@@ -189,10 +249,17 @@ struct LibraryListView: View {
                 scrollToRow(withId: id, delay: delay)
             }
         }
+        .onChange(of: viewModel.focusedVideoId) { _, id in
+            if let id { lastClickedId = id }
+        }
+        .onChange(of: viewModel.isReviewMode) { _, isOn in
+            if isOn { thumbnailPopoverVideoId = nil }
+        }
         .contextMenu(forSelectionType: Video.ID.self) { ids in
             if let filePath = ids.first,
                let video = viewModel.filteredVideos.first(where: { $0.id == filePath })
             {
+                let ids = effectiveContextMenuIds(tableSelection: ids, for: video.id)
                 let isMoving = ids.contains { viewModel.activeMoveVideoIds.contains($0) }
                 Button("Play in External Player") {
                     NSWorkspace.shared.open(video.url)
@@ -570,30 +637,7 @@ struct LibraryListView: View {
                     .help("Drag to reorder this album")
                     .allowsHitTesting(false)
             }
-            AsyncThumbnailView(
-                filePath: video.filePath,
-                thumbnailService: thumbnailService,
-                cacheVersion: video.thumbnailPath
-            )
-            .frame(width: 56, height: 36)
-            .appMediaFrame(cornerRadius: AppRadius.sm)
-            .onHover { hovering in
-                thumbnailPopoverVideoId = hovering ? video.id : nil
-            }
-            .popover(
-                isPresented: Binding(
-                    get: { thumbnailPopoverVideoId == video.id },
-                    set: { if !$0 { thumbnailPopoverVideoId = nil } }
-                ),
-                arrowEdge: .trailing
-            ) {
-                AsyncThumbnailView(
-                    filePath: video.filePath, thumbnailService: thumbnailService,
-                    cacheVersion: video.thumbnailPath
-                )
-                .frame(width: 224, height: 144)
-                .appMediaFrame(cornerRadius: AppRadius.md)
-            }
+            listRowThumbnail(for: video)
 
             if viewModel.renamingVideoId == video.id {
                 TextField("", text: $viewModel.renameText)
@@ -660,13 +704,23 @@ struct LibraryListView: View {
                 }
             }
         }
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if viewModel.isReviewMode {
+                reviewRowStore.state(for: video.id).isRowHovering = hovering
+            }
+        }
         .overlay {
             if viewModel.isViewingAlbum {
                 AlbumReorderInteractionOverlay(
                     videoId: video.id,
                     title: video.displayTitle,
                     onClick: { _ in
-                        viewModel.selectedVideoIds = [video.id]
+                        if viewModel.isReviewMode {
+                            viewModel.setReviewFocus(video.id)
+                        } else {
+                            viewModel.selectedVideoIds = [video.id]
+                        }
                     },
                     onDoubleClick: { viewModel.isPlayingInline = true },
                     onTargeted: { hovering in
@@ -724,8 +778,128 @@ struct LibraryListView: View {
         viewModel.cancelTitleEdit()
     }
 
+    @ViewBuilder
+    private func listRowThumbnail(for video: Video) -> some View {
+        let thumb = AsyncThumbnailView(
+            filePath: video.filePath,
+            thumbnailService: thumbnailService,
+            cacheVersion: video.thumbnailPath
+        )
+        .frame(width: 56, height: 36)
+        .appMediaFrame(cornerRadius: AppRadius.sm)
+
+        if viewModel.isReviewMode {
+            let reviewState = reviewRowStore.state(for: video.id)
+            ZStack(alignment: .topLeading) {
+                thumb
+                ListCollectedSetBadge(
+                    isCollected: viewModel.selectedVideoIds.contains(video.id),
+                    reviewState: reviewState,
+                    onToggle: { viewModel.toggleInCollectedSet(video.id) }
+                )
+            }
+            .frame(width: 56, height: 36)
+            .onHover { reviewState.isRowHovering = $0 }
+        } else {
+            thumb
+                .onHover { hovering in
+                    thumbnailPopoverVideoId = hovering ? video.id : nil
+                }
+                .popover(
+                    isPresented: Binding(
+                        get: { thumbnailPopoverVideoId == video.id },
+                        set: { if !$0 { thumbnailPopoverVideoId = nil } }
+                    ),
+                    arrowEdge: .trailing
+                ) {
+                    AsyncThumbnailView(
+                        filePath: video.filePath, thumbnailService: thumbnailService,
+                        cacheVersion: video.thumbnailPath
+                    )
+                    .frame(width: 224, height: 144)
+                    .appMediaFrame(cornerRadius: AppRadius.md)
+                }
+        }
+    }
+
+    private func effectiveContextMenuIds(tableSelection: Set<String>, for videoId: String) -> Set<String> {
+        if viewModel.isReviewMode {
+            if viewModel.selectedVideoIds.contains(videoId), !viewModel.selectedVideoIds.isEmpty {
+                return viewModel.selectedVideoIds
+            }
+            return [videoId]
+        }
+        if tableSelection.count > 1, tableSelection.contains(videoId) {
+            return tableSelection
+        }
+        return [videoId]
+    }
+
+    private func applyTableSelection(_ newIds: Set<String>) {
+        if !viewModel.isReviewMode {
+            viewModel.selectedVideoIds = newIds
+            return
+        }
+
+        let flags = NSEvent.modifierFlags
+        let previousTable = Set(viewModel.focusedVideoId.map { [$0] } ?? [])
+        let allIds = Set(viewModel.filteredVideos.map(\.id))
+
+        if flags.contains(.command), newIds == allIds, !allIds.isEmpty {
+            viewModel.selectedVideoIds = newIds
+            return
+        }
+
+        let optionOnly = flags.contains(.option)
+            && !flags.contains(.command)
+            && !flags.contains(.shift)
+        if optionOnly, let id = newIds.first {
+            lastClickedId = id
+            viewModel.selectOnly(id)
+            return
+        }
+
+        if flags.contains(.command) {
+            for id in newIds.symmetricDifference(previousTable) {
+                viewModel.toggleInCollectedSet(id)
+            }
+            if let id = newIds.subtracting(previousTable).first ?? newIds.first {
+                lastClickedId = id
+            }
+            return
+        }
+
+        if flags.contains(.shift) {
+            viewModel.selectedVideoIds = newIds
+            if let clicked = shiftClickEndpoint(in: newIds) {
+                lastClickedId = clicked
+                viewModel.setReviewFocus(clicked, retargetIfPlaying: false)
+            }
+            return
+        }
+
+        if let id = newIds.first {
+            lastClickedId = id
+            viewModel.setReviewFocus(id)
+        }
+    }
+
+    private func shiftClickEndpoint(in ids: Set<String>) -> String? {
+        guard let anchor = lastClickedId,
+              let anchorIdx = viewModel.filteredVideos.firstIndex(where: { $0.id == anchor })
+        else {
+            return ids.first
+        }
+        return ids.max { lhs, rhs in
+            let li = viewModel.filteredVideos.firstIndex(where: { $0.id == lhs }) ?? anchorIdx
+            let ri = viewModel.filteredVideos.firstIndex(where: { $0.id == rhs }) ?? anchorIdx
+            return abs(li - anchorIdx) < abs(ri - anchorIdx)
+        }
+    }
+
     private func scrollToSelectedRow(delay: Double) {
-        guard let selectedId = viewModel.selectedVideoIds.first,
+        let primaryId = viewModel.focusedVideoId ?? viewModel.selectedVideoIds.first
+        guard let selectedId = primaryId,
               let row = viewModel.filteredVideos.firstIndex(where: { $0.id == selectedId })
         else {
             // No selection to scroll to (e.g. after Deselect All) — still grab first responder so

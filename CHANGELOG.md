@@ -31,6 +31,8 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Review mode in List view** — List now mirrors Grid Review behavior: Table highlight follows review focus while the collected set is built separately (A, thumbnail circle, ⌘/⇧/⌥-click). Context menus respect the collected set when right-clicking a collected row. List thumbnail hover preview is disabled during Review so the collect circle stays clickable. Per-row hover tracking fixes collect circles flickering unpredictably between rows.
+
 ## 1.0.0 (build 1014) - 2026-09-03
 
 - **First 1.0.0** — Readiness pass complete: 107 unit tests, 12,174-video perf PASS (watch: sort ~2–2.5 s), feature audit (nothing 1.0-critical half-finished), Bugbot review, local FS/ffmpeg/no-telemetry security PASS.

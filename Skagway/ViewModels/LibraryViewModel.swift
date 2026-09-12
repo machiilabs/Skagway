@@ -507,9 +507,9 @@ final class LibraryViewModel {
     }
     var selectedVideoIds: Set<String> = [] {
         didSet {
-            // List's Table owns selection: keep focus in lockstep. Grid treats the set as a
-            // collected working set and must not steal review focus when a clip is toggled in.
-            if viewMode == .list || !isReviewMode {
+            // When Review is off, selection and focus stay in lockstep (List Table and Grid).
+            // In Review mode both views keep the collected set separate from review focus.
+            if !isReviewMode {
                 let added = selectedVideoIds.subtracting(oldValue)
                 if let newId = added.first {
                     lastSelectedVideoId = newId
