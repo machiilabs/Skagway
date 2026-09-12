@@ -507,17 +507,61 @@ final class LibraryViewModel {
     }
     var selectedVideoIds: Set<String> = [] {
         didSet {
-            let added = selectedVideoIds.subtracting(oldValue)
-            if let newId = added.first {
-                lastSelectedVideoId = newId
-            } else if !selectedVideoIds.isEmpty, !selectedVideoIds.contains(lastSelectedVideoId ?? "") {
-                lastSelectedVideoId = selectedVideoIds.first
-            } else if selectedVideoIds.isEmpty {
-                lastSelectedVideoId = nil
+            // List's Table owns selection: keep focus in lockstep. Grid treats the set as a
+            // collected working set and must not steal review focus when a clip is toggled in.
+            if viewMode == .list || !isReviewMode {
+                let added = selectedVideoIds.subtracting(oldValue)
+                if let newId = added.first {
+                    lastSelectedVideoId = newId
+                    focusedVideoId = newId
+                    inspectorPrefersSelection = false
+                } else if selectedVideoIds.isEmpty {
+                    lastSelectedVideoId = nil
+                    if !isReviewMode { focusedVideoId = nil }
+                } else if let last = lastSelectedVideoId, !selectedVideoIds.contains(last) {
+                    lastSelectedVideoId = selectedVideoIds.first
+                    focusedVideoId = lastSelectedVideoId
+                }
+            }
+            if selectedVideoIds.count < 2 {
+                inspectorPrefersSelection = false
+            }
+            if !isReviewMode, isPlayingInline, !isAdvancingPlayAllQueue,
+               selectedVideoIds != oldValue {
+                isPlayingInline = false
             }
         }
     }
     var lastSelectedVideoId: String?
+    /// Clip being reviewed (player + Inspector). May sit outside `selectedVideoIds`.
+    var focusedVideoId: String?
+    /// After collecting, Inspector shows the set instead of the focused clip.
+    var inspectorPrefersSelection: Bool = false
+    /// When off (default), click and arrows are Finder-style selection. When on, they move
+    /// review focus and the collected set is built with A / the card circle.
+    var isReviewMode: Bool = false
+
+    var inspectorIsSetMode: Bool {
+        guard selectedVideoIds.count > 1 else { return false }
+        if !isReviewMode { return true }
+        return inspectorPrefersSelection || focusedVideoId == nil
+    }
+
+    var inspectorActionIds: Set<String> {
+        if inspectorIsSetMode { return selectedVideoIds }
+        if let focusedVideoId { return [focusedVideoId] }
+        return selectedVideoIds
+    }
+
+    var reviewVideoId: String? {
+        if inspectorIsSetMode {
+            if let lastSelectedVideoId, selectedVideoIds.contains(lastSelectedVideoId) {
+                return lastSelectedVideoId
+            }
+            return selectedVideoIds.first
+        }
+        return focusedVideoId ?? lastSelectedVideoId ?? selectedVideoIds.first
+    }
     var filmstripRefreshId: Int = 0
 
     /// The single shared inline-playback engine. One player instance backs the resizable player
@@ -3235,11 +3279,18 @@ final class LibraryViewModel {
                 scrollToVideoId = id
                 selectedVideoIds = [id]
                 lastSelectedVideoId = id
+                focusedVideoId = id
             }
             let validIds = Set(newValue.map(\.id))
             let pruned = selectedVideoIds.intersection(validIds)
             if pruned != selectedVideoIds {
                 selectedVideoIds = pruned
+            }
+            if let id = focusedVideoId, !validIds.contains(id) {
+                focusedVideoId = pruned.first
+                if lastSelectedVideoId == id {
+                    lastSelectedVideoId = focusedVideoId
+                }
             }
         } else if pendingScrollToAfterRename != nil {
             pendingScrollToAfterRename = nil
@@ -3650,24 +3701,20 @@ final class LibraryViewModel {
     /// handler), so this is the same mechanism Home/End and rename-completion use.
     func surpriseMePickRandom() {
         guard let random = filteredVideos.randomElement() else { return }
-        selectedVideoIds = [random.id]
-        lastSelectedVideoId = random.id
+        selectOnly(random.id, scroll: true)
         pendingAutoPlay = surpriseMeAutoPlays
-        scrollToVideoId = random.id
     }
 
     /// Play the current filtered view from the first playable video, ignoring resume.
     func playAllFromStart() {
         guard let first = firstPlayableFilteredVideo() else { return }
         isPlayAllSession = true
-        lastSelectedVideoId = first.id
-        scrollToVideoId = first.id
+        setReviewFocus(first.id, retargetIfPlaying: false, scroll: true)
         pendingFilmstripSeekSeconds = nil
         pendingIgnoreResumeOnNextStart = true
         if isPlayingInline {
             playQueueSuccessor(first)
         } else {
-            selectedVideoIds = [first.id]
             pendingAutoPlay = true
         }
     }
@@ -3676,31 +3723,112 @@ final class LibraryViewModel {
         filteredVideos.first { FileManager.default.fileExists(atPath: $0.filePath) }
     }
 
-    /// Grid keyboard navigation: move selection along `filteredVideos` (same order as list). List relies on `Table` arrow handling.
+    /// Grid keyboard navigation: move focus along `filteredVideos` (same order as list). List relies on `Table` arrow handling.
     func scrollToSelected() {
-        guard let id = lastSelectedVideoId ?? selectedVideoIds.first,
+        guard let id = focusedVideoId ?? lastSelectedVideoId ?? selectedVideoIds.first,
               filteredVideos.contains(where: { $0.id == id }) else { return }
         scrollToVideoId = id
+    }
+
+    /// Move review focus without replacing the collected set. Retargets the player when already playing.
+    func setReviewFocus(_ id: String, retargetIfPlaying: Bool = true, scroll: Bool = false) {
+        let previous = focusedVideoId
+        focusedVideoId = id
+        lastSelectedVideoId = id
+        inspectorPrefersSelection = false
+        if scroll { scrollToVideoId = id }
+        if retargetIfPlaying, isPlayingInline, previous != id,
+           let video = filteredVideo(forPath: id) {
+            retargetPlayback(to: video)
+        }
+    }
+
+    func toggleInCollectedSet(_ id: String) {
+        var ids = selectedVideoIds
+        if ids.contains(id) { ids.remove(id) } else { ids.insert(id) }
+        selectedVideoIds = ids
+    }
+
+    func toggleFocusedInCollectedSet() {
+        guard isReviewMode else { return }
+        guard let id = focusedVideoId ?? lastSelectedVideoId ?? selectedVideoIds.first else { return }
+        toggleInCollectedSet(id)
+    }
+
+    func selectOnly(_ id: String, scroll: Bool = false) {
+        selectedVideoIds = [id]
+        setReviewFocus(id, retargetIfPlaying: isPlayingInline, scroll: scroll)
+    }
+
+    func inspectCollectedSet() {
+        guard isReviewMode, selectedVideoIds.count > 1 else { return }
+        inspectorPrefersSelection = true
+    }
+
+    func notePlaybackStopped() {
+        if isReviewMode, selectedVideoIds.count > 1 {
+            inspectorPrefersSelection = true
+        }
+    }
+
+    func toggleReviewMode() {
+        if isReviewMode { exitReviewMode() } else { enterReviewMode() }
+    }
+
+    func enterReviewMode() {
+        isReviewMode = true
+        inspectorPrefersSelection = false
+        if focusedVideoId == nil {
+            focusedVideoId = lastSelectedVideoId ?? selectedVideoIds.first
+        }
+        if let id = focusedVideoId {
+            lastSelectedVideoId = id
+        }
+    }
+
+    func exitReviewMode() {
+        isReviewMode = false
+        if selectedVideoIds.isEmpty, let id = focusedVideoId {
+            selectedVideoIds = [id]
+        } else if let id = focusedVideoId, selectedVideoIds.contains(id) {
+            lastSelectedVideoId = id
+        } else if let id = selectedVideoIds.first {
+            focusedVideoId = id
+            lastSelectedVideoId = id
+        }
+        inspectorPrefersSelection = selectedVideoIds.count > 1
+    }
+
+    /// Keep the collected set, review focus, and last-selected id coherent when a file path changes.
+    private func remapVideoPathInSelection(from old: String, to new: String) {
+        if selectedVideoIds.contains(old) {
+            selectedVideoIds.remove(old)
+            selectedVideoIds.insert(new)
+        }
+        if lastSelectedVideoId == old {
+            lastSelectedVideoId = new
+        }
+        if focusedVideoId == old {
+            focusedVideoId = new
+        }
     }
 
     func navigateFilteredVideoStep(_ step: Int) {
         guard step != 0 else { return }
         let videos = filteredVideos
         guard !videos.isEmpty else { return }
-        let currentId = lastSelectedVideoId ?? selectedVideoIds.first
-        let currentIndex: Int
-        if let id = currentId, let idx = videos.firstIndex(where: { $0.id == id }) {
-            currentIndex = idx
-        } else if step > 0 {
-            currentIndex = -1
+        var session = ReviewSession(
+            focusedId: focusedVideoId ?? lastSelectedVideoId ?? selectedVideoIds.first,
+            selectedIds: selectedVideoIds,
+            inspectorPrefersSelection: inspectorPrefersSelection
+        )
+        session.moveFocus(step: step, orderedIds: videos.map(\.id))
+        guard let newId = session.focusedId, newId != focusedVideoId else { return }
+        if isReviewMode {
+            setReviewFocus(newId, scroll: true)
         } else {
-            currentIndex = videos.count
+            selectOnly(newId, scroll: true)
         }
-        let next = currentIndex + step
-        guard next >= 0, next < videos.count else { return }
-        let newId = videos[next].id
-        selectedVideoIds = [newId]
-        scrollToVideoId = newId
     }
 
     /// Home / End key equivalents: select the first / last video in the current filtered order and
@@ -3722,13 +3850,21 @@ final class LibraryViewModel {
 
     func goToFirstVideo() {
         guard let first = filteredVideos.first else { return }
-        selectedVideoIds = [first.id]
+        if isReviewMode {
+            setReviewFocus(first.id)
+        } else {
+            selectOnly(first.id)
+        }
         issueScrollCommand(.top)
     }
 
     func goToLastVideo() {
         guard let last = filteredVideos.last else { return }
-        selectedVideoIds = [last.id]
+        if isReviewMode {
+            setReviewFocus(last.id)
+        } else {
+            selectOnly(last.id)
+        }
         issueScrollCommand(.bottom)
     }
 
@@ -4225,10 +4361,7 @@ final class LibraryViewModel {
                 }
                 videos = updated
             }
-            if selectedVideoIds.contains(video.filePath) {
-                selectedVideoIds.remove(video.filePath)
-                selectedVideoIds.insert(newFilePath)
-            }
+            remapVideoPathInSelection(from: video.filePath, to: newFilePath)
             if isSortedByName {
                 pendingScrollToAfterRename = newFilePath
             }
@@ -4358,12 +4491,8 @@ final class LibraryViewModel {
             }
             videos = updated
         }
-        if wasSelected {
-            selectedVideoIds.remove(video.filePath)
-            selectedVideoIds.insert(newURL.path)
-        }
-        if wasLastSelected {
-            lastSelectedVideoId = newURL.path
+        if wasSelected || wasLastSelected || focusedVideoId == video.filePath {
+            remapVideoPathInSelection(from: video.filePath, to: newURL.path)
         }
     }
 
@@ -4385,13 +4514,7 @@ final class LibraryViewModel {
             return
         }
 
-        if selectedVideoIds.contains(video.filePath) {
-            selectedVideoIds.remove(video.filePath)
-            selectedVideoIds.insert(newPath)
-        }
-        if lastSelectedVideoId == video.filePath {
-            lastSelectedVideoId = newPath
-        }
+        remapVideoPathInSelection(from: video.filePath, to: newPath)
 
         // Look up by DB id, not filePath: GRDB's observation may have already updated
         // the in-memory path (e.g. wmv→mp4) before we reach this line.
@@ -4999,12 +5122,8 @@ final class LibraryViewModel {
             }
             videos = updated
         }
-        if wasSelected {
-            selectedVideoIds.remove(sourcePath)
-            selectedVideoIds.insert(finalURL.path)
-        }
-        if wasLastSelected {
-            lastSelectedVideoId = finalURL.path
+        if wasSelected || wasLastSelected || focusedVideoId == sourcePath {
+            remapVideoPathInSelection(from: sourcePath, to: finalURL.path)
         }
         if let idx = moveJobs.firstIndex(where: { $0.id == jobId }) {
             moveJobs[idx].status = .completed
@@ -5128,7 +5247,7 @@ final class LibraryViewModel {
         // Epoch bump makes every prior on-disk/in-memory filmstrip a miss immediately.
         thumbnailService.invalidateAllFilmstrips()
 
-        if let selectedId = lastSelectedVideoId ?? selectedVideoIds.first,
+        if let selectedId = focusedVideoId ?? lastSelectedVideoId ?? selectedVideoIds.first,
            let video = videos.first(where: { $0.filePath == selectedId })
         {
             _ = try? await thumbnailService.regenerateFilmstrip(
@@ -5218,6 +5337,7 @@ final class LibraryViewModel {
         guard let next = Self.successorIdAfterRemoving(fromOrderedIds: ordered, removedIds: removedIds) else { return }
         selectedVideoIds = [next]
         lastSelectedVideoId = next
+        focusedVideoId = next
         scrollToVideoId = next
     }
 
@@ -5237,8 +5357,9 @@ final class LibraryViewModel {
 
     /// Reload bookmarks for the single selected video (clears list when multi/none/no DB id).
     func reloadBookmarksForSelection() async {
-        guard selectedVideoIds.count == 1,
-              let path = selectedVideoIds.first,
+        let ids = inspectorActionIds
+        guard ids.count == 1,
+              let path = ids.first,
               let video = video(forPath: path),
               let videoId = video.databaseId else {
             bookmarksForSelection = []
@@ -5286,12 +5407,12 @@ final class LibraryViewModel {
                 bookmark.thumbnailPath = stillURL.path
             }
             pendingBookmarkTitleFocusId = bookmarkId
-            if selectedVideoIds.count == 1, selectedVideoIds.contains(video.filePath) {
+            if inspectorActionIds == [video.filePath] {
                 await reloadBookmarksForSelection()
             }
             if playback.currentVideo?.filePath == video.filePath {
                 await reloadBookmarksForPlayback(video: video)
-            } else if selectedVideoIds.count != 1 || !selectedVideoIds.contains(video.filePath) {
+            } else if inspectorActionIds != [video.filePath] {
                 notifyBookmarksChanged()
             }
             return bookmark
@@ -5733,6 +5854,7 @@ final class LibraryViewModel {
     func advancePlayAllIfNeeded() {
         guard isPlayAllSession else { return }
         let currentPath = playback.currentVideo?.filePath
+            ?? focusedVideoId
             ?? lastSelectedVideoId
             ?? selectedVideoIds.first
         guard let currentPath else { return }
@@ -5753,15 +5875,20 @@ final class LibraryViewModel {
         playQueueSuccessor(filteredVideos[nextIdx])
     }
 
-    private func playQueueSuccessor(_ video: Video) {
+    private func retargetPlayback(to video: Video) {
         isAdvancingPlayAllQueue = true
         pendingFilmstripSeekSeconds = nil
         pendingIgnoreResumeOnNextStart = true
-        selectedVideoIds = [video.id]
+        focusedVideoId = video.id
+        lastSelectedVideoId = video.id
         playback.start(video: video, at: 0, ignoreResume: true)
         DispatchQueue.main.async { [weak self] in
             self?.isAdvancingPlayAllQueue = false
         }
+    }
+
+    private func playQueueSuccessor(_ video: Video) {
+        retargetPlayback(to: video)
     }
 
     func renameCollection(_ collection: VideoCollection, to name: String) async {

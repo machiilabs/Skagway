@@ -10,6 +10,8 @@ import UniformTypeIdentifiers
 @Observable
 final class CardSelectionState {
     var isSelected: Bool = false
+    var isFocused: Bool = false
+    var isHovering: Bool = false
 }
 
 /// Plain (non-`@Observable`) store so `CuratedWallGrid.body` can call `state(for:)`
@@ -28,6 +30,13 @@ private final class CardSelectionStore {
         let current = Set(states.filter { $0.value.isSelected }.keys)
         for id in current.subtracting(newIds) { states[id]?.isSelected = false }
         for id in newIds.subtracting(current) { state(for: id).isSelected = true }
+    }
+
+    func syncFocus(to id: String?) {
+        let current = states.first(where: { $0.value.isFocused })?.key
+        if current == id { return }
+        if let current { states[current]?.isFocused = false }
+        if let id { state(for: id).isFocused = true }
     }
 }
 
@@ -124,8 +133,19 @@ struct CuratedWallGrid: View {
                         .modifier(AlbumSelectionGestures(
                             enabled: !viewModel.isViewingAlbum,
                             onSelect: { handleSelection(video) },
-                            onPlay: { viewModel.isPlayingInline = true }
+                            onPlay: {
+                                viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
+                                viewModel.isPlayingInline = true
+                            }
                         ))
+                        .overlay(alignment: .topLeading) {
+                            if viewModel.isReviewMode {
+                                collectedSetBadge(for: video)
+                            }
+                        }
+                        .onHover { hovering in
+                            selectionStore.state(for: video.id).isHovering = hovering
+                        }
                         .onDrop(of: [.fileURL], isTargeted: Binding(
                             get: { posterDropTargetId == video.id },
                             set: { hovering in
@@ -144,7 +164,10 @@ struct CuratedWallGrid: View {
                                     videoId: video.id,
                                     title: video.displayTitle,
                                     onClick: { flags in handleSelection(video, flags: flags) },
-                                    onDoubleClick: { viewModel.isPlayingInline = true },
+                                    onDoubleClick: {
+                                        viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
+                                        viewModel.isPlayingInline = true
+                                    },
                                     onTargeted: { hovering in
                                         if hovering {
                                             albumReorderTargetId = video.id
@@ -347,9 +370,10 @@ struct CuratedWallGrid: View {
             .background(Color(red: 3 / 255, green: 13 / 255, blue: 23 / 255))   // #030D17
             .onAppear {
                 selectionStore.sync(to: viewModel.selectedVideoIds)
+                selectionStore.syncFocus(to: viewModel.focusedVideoId)
                 guard viewModel.scrollToSelectedOnViewSwitch else { return }
                 viewModel.scrollToSelectedOnViewSwitch = false
-                guard let id = viewModel.lastSelectedVideoId ?? viewModel.selectedVideoIds.first,
+                guard let id = viewModel.focusedVideoId ?? viewModel.lastSelectedVideoId ?? viewModel.selectedVideoIds.first,
                       let index = viewModel.filteredVideos.firstIndex(where: { $0.id == id }) else { return }
                 let videos = viewModel.filteredVideos
                 let cols = columnCount
@@ -362,6 +386,10 @@ struct CuratedWallGrid: View {
             }
             .onChange(of: viewModel.selectedVideoIds) { _, newIds in
                 selectionStore.sync(to: newIds)
+            }
+            .onChange(of: viewModel.focusedVideoId) { _, id in
+                selectionStore.syncFocus(to: id)
+                if let id { lastClickedId = id }
             }
             .onChange(of: viewModel.renamingVideoId) { _, id in
                 if id != nil {
@@ -421,6 +449,28 @@ struct CuratedWallGrid: View {
         }
     }
 
+    private struct CollectedSetBadge: View {
+        let selectionState: CardSelectionState
+        let onToggle: () -> Void
+
+        var body: some View {
+            let isSelected = selectionState.isSelected
+            if isSelected || selectionState.isHovering {
+                Button(action: onToggle) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 16, weight: .semibold))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, isSelected ? Color.appAccent : Color.white.opacity(0.55))
+                        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                }
+                .buttonStyle(.plain)
+                .help(isSelected ? "Remove from collected set" : "Add to collected set")
+                .padding(.top, 12)
+                .padding(.leading, 12)
+            }
+        }
+    }
+
     private struct AlbumSelectionGestures: ViewModifier {
         var enabled: Bool
         let onSelect: () -> Void
@@ -438,6 +488,45 @@ struct CuratedWallGrid: View {
     }
 
     private func handleSelection(_ video: Video, flags: NSEvent.ModifierFlags = NSEvent.modifierFlags) {
+        if !viewModel.isReviewMode {
+            handleStandardSelection(video, flags: flags)
+            return
+        }
+        let optionOnly = flags.contains(.option)
+            && !flags.contains(.command)
+            && !flags.contains(.shift)
+        if optionOnly {
+            lastClickedId = video.id
+            selectionStore.sync(to: [video.id])
+            selectionStore.syncFocus(to: video.id)
+            viewModel.selectOnly(video.id)
+            return
+        }
+        if flags.contains(.command) {
+            lastClickedId = video.id
+            viewModel.toggleInCollectedSet(video.id)
+            selectionStore.sync(to: viewModel.selectedVideoIds)
+            return
+        }
+        if flags.contains(.shift), let anchor = lastClickedId,
+           let aIdx = viewModel.filteredVideos.firstIndex(where: { $0.id == anchor }),
+           let idx = viewModel.filteredVideos.firstIndex(where: { $0.id == video.id }) {
+            let range = min(aIdx, idx)...max(aIdx, idx)
+            let newIds = Set(range.map { viewModel.filteredVideos[$0].id })
+            selectionStore.sync(to: newIds)
+            selectionStore.syncFocus(to: video.id)
+            DispatchQueue.main.async {
+                viewModel.selectedVideoIds = newIds
+                viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
+            }
+            return
+        }
+        lastClickedId = video.id
+        selectionStore.syncFocus(to: video.id)
+        viewModel.setReviewFocus(video.id)
+    }
+
+    private func handleStandardSelection(_ video: Video, flags: NSEvent.ModifierFlags) {
         let newIds: Set<String>
         if flags.contains(.command) {
             var ids = viewModel.selectedVideoIds
@@ -451,13 +540,21 @@ struct CuratedWallGrid: View {
             newIds = Set(range.map { viewModel.filteredVideos[$0].id })
         } else {
             lastClickedId = video.id
-            newIds = [video.id]
+            selectionStore.sync(to: [video.id])
+            selectionStore.syncFocus(to: video.id)
+            viewModel.selectOnly(video.id)
+            return
         }
-        // Update card states first (O(1) per-card @Observable update — only the 2 affected
-        // cards re-render, not the whole grid), then update the VM one tick later so the
-        // inspector re-renders after the selection ring is already visible.
         selectionStore.sync(to: newIds)
+        selectionStore.syncFocus(to: video.id)
         DispatchQueue.main.async { viewModel.selectedVideoIds = newIds }
+    }
+
+    private func collectedSetBadge(for video: Video) -> some View {
+        CollectedSetBadge(selectionState: selectionStore.state(for: video.id)) {
+            viewModel.toggleInCollectedSet(video.id)
+            selectionStore.sync(to: viewModel.selectedVideoIds)
+        }
     }
 
     private func commitRename(_ video: Video) {

@@ -59,9 +59,15 @@ private struct LibraryContentView: View {
     /// scroll region. `nil` until first measured.
     @State private var filtersDrawerContentHeight: CGFloat?
 
-    /// The video shown in the detail pane / overlay (primary selection). Shared by `detailContent` and the overlay.
+    /// Inspector target: focused clip while reviewing, collected set once you finish.
     private var selectedVideo: Video? {
-        guard let id = vm.lastSelectedVideoId ?? vm.selectedVideoIds.first else { return nil }
+        guard let id = vm.reviewVideoId else { return nil }
+        return vm.filteredVideo(forPath: id)
+    }
+
+    /// Player always follows review focus, even when Inspector is in set mode.
+    private var focusedVideo: Video? {
+        guard let id = vm.focusedVideoId ?? vm.lastSelectedVideoId ?? vm.selectedVideoIds.first else { return nil }
         return vm.filteredVideo(forPath: id)
     }
 
@@ -73,7 +79,7 @@ private struct LibraryContentView: View {
     }
 
     private var detailID: String {
-        vm.lastSelectedVideoId ?? ""
+        vm.reviewVideoId ?? ""
     }
 
 
@@ -379,6 +385,17 @@ private struct LibraryContentView: View {
             }
             .controlSize(.small)
 
+            Button {
+                vm.toggleReviewMode()
+            } label: {
+                Image(systemName: vm.isReviewMode ? "eye.fill" : "eye")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(vm.isReviewMode ? Color.appAccent : Color.appTextSecondary)
+            .help(vm.isReviewMode
+                  ? "Review on — click to watch, A or the circle to collect (⌘3)"
+                  : "Review — watch and collect a set without losing it (⌘3)")
+
             Divider().frame(height: 16)
 
             sortCluster
@@ -392,13 +409,19 @@ private struct LibraryContentView: View {
             Spacer()
 
             // Video count — busy progress / errors live in the bottom activity strip.
-            Text(headerStatusText)
-                .font(.system(size: 10))
-                .foregroundStyle(Color.appTextTertiary)
-                .monospacedDigit()
-                .lineLimit(1)
-                .help(headerStatusText)
-                .padding(.trailing, 4)
+            Button {
+                vm.inspectCollectedSet()
+            } label: {
+                Text(headerStatusText)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.appTextTertiary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .disabled(!vm.isReviewMode || vm.selectedVideoIds.count < 2)
+            .help(vm.isReviewMode && vm.selectedVideoIds.count > 1 ? "Inspect the collected set" : headerStatusText)
+            .padding(.trailing, 4)
 
             // Icon-only queue access when the strip is not already showing that job.
             if showsHeaderConversionIconOnly { conversionPill }
@@ -655,7 +678,7 @@ private struct LibraryContentView: View {
                 // The single resizable player: one surface anchored top-right, shown whenever
                 // playback is active. Hidden while in true full-screen (the borderless window hosts
                 // the same player instead). Floats above the wall/inspector (no freeze/resize).
-                if vm.isPlayingInline, !vm.isPlayerFullScreen, let video = selectedVideo {
+                if vm.isPlayingInline, !vm.isPlayerFullScreen, let video = focusedVideo {
                     GeometryReader { geo in
                         FloatingPlayerPanel(video: video, viewModel: vm, available: geo.size)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -667,7 +690,7 @@ private struct LibraryContentView: View {
             // the panel can hide for full-screen without tearing down the player.
             .onChange(of: vm.isPlayingInline) { _, isOn in
                 if isOn {
-                    guard let v = selectedVideo else { vm.isPlayingInline = false; return }
+                    guard let v = focusedVideo ?? selectedVideo else { vm.isPlayingInline = false; return }
                     // Search (and other text fields) often still hold focus after a click/double-click
                     // to play. Escape then only resigns the field; a second Escape is needed to stop
                     // playback. Clear focus as playback starts so the next Escape stops the player.
@@ -687,6 +710,7 @@ private struct LibraryContentView: View {
                 } else {
                     vm.isPlayerFullScreen = false
                     vm.playback.stop()
+                    vm.notePlaybackStopped()
                 }
             }
             // Surprise Me auto-play: `surpriseMePickRandom()` selects a random video and (if enabled)
@@ -886,8 +910,7 @@ private struct LibraryContentView: View {
                 return event
             }
             if (lvm.viewMode == .list || lvm.viewMode == .grid),
-               lvm.selectedVideoIds.count == 1,
-               let videoId = lvm.selectedVideoIds.first,
+               let videoId = lvm.focusedVideoId ?? (lvm.selectedVideoIds.count == 1 ? lvm.selectedVideoIds.first : nil),
                !lvm.activeMoveVideoIds.contains(videoId),
                let video = lvm.filteredVideo(forPath: videoId)
             {
@@ -946,6 +969,11 @@ private struct LibraryContentView: View {
                 }
                 return nil
             }
+            // Review mode, not playing: Escape inspects the collected set.
+            if lvm.isReviewMode, lvm.selectedVideoIds.count > 1, !lvm.inspectorIsSetMode {
+                DispatchQueue.main.async { lvm.inspectCollectedSet() }
+                return nil
+            }
             return event
         }
         // Space — play/pause (or start playback). ⌥-Space — "Play from Beginning": starts (or, if
@@ -970,11 +998,25 @@ private struct LibraryContentView: View {
                 }
                 return nil
             }
-            guard !lvm.selectedVideoIds.isEmpty else { return event }
+            guard lvm.focusedVideoId != nil || !lvm.selectedVideoIds.isEmpty else { return event }
             DispatchQueue.main.async {
                 if optionHeld { lvm.pendingIgnoreResumeOnNextStart = true }
                 lvm.isPlayingInline = true
             }
+            return nil
+        }
+
+        // A — toggle the focused clip in the collected set (review mode only).
+        if event.keyCode == 0,
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+           lvm.isReviewMode,
+           !lvm.isEditingText {
+            if let first = NSApp.keyWindow?.firstResponder,
+               first is NSTextView || first is NSTextField || first is NSText
+            {
+                return event
+            }
+            DispatchQueue.main.async { lvm.toggleFocusedInCollectedSet() }
             return nil
         }
 

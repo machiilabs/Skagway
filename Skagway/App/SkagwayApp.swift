@@ -44,6 +44,13 @@ struct SkagwayApp: App {
                 .keyboardShortcut("2", modifiers: .command)
                 .disabled(!appState.hasLibrary)
 
+                Toggle("Review", isOn: Binding(
+                    get: { appState.libraryViewModel?.isReviewMode ?? false },
+                    set: { _ in appState.libraryViewModel?.toggleReviewMode() }
+                ))
+                .keyboardShortcut("3", modifiers: .command)
+                .disabled(!appState.hasLibrary)
+
                 Divider()
 
                 Button("Scroll to Selection") {
@@ -215,6 +222,13 @@ struct SkagwayApp: App {
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .disabled(appState.libraryViewModel?.selectedVideoIds.isEmpty != false)
 
+                Button("Toggle in Selection") {
+                    appState.libraryViewModel?.toggleFocusedInCollectedSet()
+                }
+                .disabled(!(appState.libraryViewModel?.isReviewMode ?? false)
+                    || (appState.libraryViewModel?.focusedVideoId == nil
+                        && appState.libraryViewModel?.selectedVideoIds.isEmpty != false))
+
                 Divider()
 
                 Button("Delete\u{2026}") {
@@ -304,27 +318,29 @@ struct SkagwayApp: App {
             CommandGroup(replacing: .importExport) {
                 Button("Play in External Player") {
                     guard let vm = appState.libraryViewModel,
-                          let videoId = vm.selectedVideoIds.first,
+                          let videoId = vm.focusedVideoId ?? vm.selectedVideoIds.first,
                           let video = vm.filteredVideo(forPath: videoId)
                     else { return }
                     NSWorkspace.shared.open(video.url)
                     Task { await vm.recordPlay(for: video) }
                 }
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(appState.libraryViewModel?.selectedVideoIds.first == nil)
+                .disabled(appState.libraryViewModel?.focusedVideoId == nil
+                    && appState.libraryViewModel?.selectedVideoIds.first == nil)
 
                 Button("Show in Finder") {
                     guard let vm = appState.libraryViewModel,
-                          let videoId = vm.selectedVideoIds.first,
+                          let videoId = vm.focusedVideoId ?? vm.selectedVideoIds.first,
                           let video = vm.filteredVideo(forPath: videoId)
                     else { return }
                     NSWorkspace.shared.selectFile(video.filePath, inFileViewerRootedAtPath: "")
                 }
                 .keyboardShortcut("f", modifiers: [.command, .option])
-                .disabled(appState.libraryViewModel?.selectedVideoIds.first == nil)
+                .disabled(appState.libraryViewModel?.focusedVideoId == nil
+                    && appState.libraryViewModel?.selectedVideoIds.first == nil)
 
                 if let vm = appState.libraryViewModel,
-                   let videoId = vm.selectedVideoIds.first,
+                   let videoId = vm.focusedVideoId ?? vm.selectedVideoIds.first,
                    let video = vm.filteredVideo(forPath: videoId)
                 {
                     Menu("Open With") {

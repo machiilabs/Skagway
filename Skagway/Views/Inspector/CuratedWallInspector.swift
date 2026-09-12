@@ -12,7 +12,8 @@ struct CuratedWallInspector: View {
     @Bindable var viewModel: LibraryViewModel
     let thumbnailService: ThumbnailService
 
-    private var selectedIds: Set<String> { viewModel.selectedVideoIds }
+    private var selectedIds: Set<String> { viewModel.inspectorActionIds }
+    private var collectedSetCount: Int { viewModel.selectedVideoIds.count }
 
     @State private var hero: NSImage?
     @State private var filmstrip: NSImage?
@@ -88,10 +89,8 @@ struct CuratedWallInspector: View {
         }
         .frame(minWidth: 300)
         .onChange(of: video?.filePath) { _, _ in
-            // Selection changed: stop any in-progress playback and refresh hero assets.
-            if viewModel.isPlayingInline, !viewModel.isAdvancingPlayAllQueue {
-                viewModel.isPlayingInline = false
-            }
+            // Playback follows review focus separately; do not stop the player when
+            // Inspector switches between the focused clip and the collected set.
             loadCustomFieldValues()
             hero = nil
             filmstrip = nil
@@ -114,6 +113,11 @@ struct CuratedWallInspector: View {
             Task { await viewModel.reloadBookmarksForSelection() }
         }
         .onChange(of: viewModel.selectedVideoIds) { _, _ in
+            loadCustomFieldValues()
+            bookmarkTitleDrafts = [:]
+            Task { await viewModel.reloadBookmarksForSelection() }
+        }
+        .onChange(of: viewModel.inspectorPrefersSelection) { _, _ in
             loadCustomFieldValues()
             bookmarkTitleDrafts = [:]
             Task { await viewModel.reloadBookmarksForSelection() }
@@ -348,8 +352,8 @@ struct CuratedWallInspector: View {
 
     private func titleAndActions(for v: Video) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if selectedIds.count > 1 {
-                Text("\(selectedIds.count) Videos Selected")
+            if viewModel.inspectorIsSetMode {
+                Text("\(collectedSetCount) Videos Selected")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Color.appTextPrimary)
             } else {
@@ -384,12 +388,30 @@ struct CuratedWallInspector: View {
                 .help("Reveal in Finder")
 
                 HStack(spacing: 14) {
-                    Button { viewModel.isPlayingInline = true } label: {
+                    Button {
+                        viewModel.setReviewFocus(v.id, retargetIfPlaying: false)
+                        viewModel.isPlayingInline = true
+                    } label: {
                         Label("Play", systemImage: "play.fill")
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain).foregroundStyle(Color.appAccent)
 
                     Spacer()
+
+                    if viewModel.isReviewMode, collectedSetCount > 0 {
+                        Button {
+                            viewModel.inspectCollectedSet()
+                        } label: {
+                            Text(collectedSetCount == 1 ? "1 selected" : "\(collectedSetCount) selected")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.appAccent)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(collectedSetCount < 2)
+                        .help(collectedSetCount > 1
+                              ? "Tag or edit the collected set"
+                              : "Collect more clips (A or the card checkbox) to tag them together")
+                    }
                 }
                 .font(.callout)
             }

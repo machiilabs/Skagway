@@ -47,6 +47,7 @@ struct CuratedWallCard: View {
 
     var body: some View {
         let isSelected = selectionState.isSelected
+        let isFocused = selectionState.isFocused
         let titleVisible = !isInlineEditing && previewPlayer == nil
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottom) {
@@ -74,16 +75,6 @@ struct CuratedWallCard: View {
                     .overlay(alignment: .topTrailing) {
                         topBadgeCluster
                             .padding(6)
-                    }
-                    .overlay(alignment: .topLeading) {
-                        if isSelected {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .symbolRenderingMode(.palette)
-                                .foregroundStyle(.white, Color.appAccent)
-                                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                                .padding(6)
-                        }
                     }
                     .overlay(alignment: .topLeading) {
                         if showAlbumReorderHandle {
@@ -117,8 +108,10 @@ struct CuratedWallCard: View {
                             .strokeBorder(
                                 isSelected
                                     ? Color.appAccent.opacity(0.95)
-                                    : Color.white.opacity(isHovering ? 0.22 : 0.10),
-                                lineWidth: isSelected ? 1.5 : 1
+                                    : (isFocused
+                                        ? Color.appAccent.opacity(0.55)
+                                        : Color.white.opacity(isHovering ? 0.22 : 0.10)),
+                                lineWidth: isSelected || isFocused ? 1.5 : 1
                             )
                     }
                     .shadow(
@@ -193,7 +186,12 @@ struct CuratedWallCard: View {
         .clipShape(RoundedRectangle(cornerRadius: corner + 2, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: corner + 2, style: .continuous)
-                .stroke(isSelected ? Color.appAccent.opacity(0.85) : Color.clear, lineWidth: 2)
+                .stroke(
+                    isSelected
+                        ? Color.appAccent.opacity(0.85)
+                        : (isFocused ? Color.white.opacity(0.55) : Color.clear),
+                    lineWidth: 2
+                )
         )
         .onHover { hovering in
             isHovering = hovering
@@ -211,6 +209,7 @@ struct CuratedWallCard: View {
         }
         .onDisappear {
             stopHoverPreview()
+            selectionState.isHovering = false
         }
         .task(id: "\(video.filePath)|\(video.thumbnailPath ?? "")") {
             if let lo = thumbnailService.loadThumbnail(for: video.filePath) {
