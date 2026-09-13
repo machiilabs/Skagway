@@ -231,6 +231,10 @@ enum RuleComparison: String, Codable, CaseIterable, Identifiable {
     /// Inclusive range using both `value` (lower) and `value2` (upper). Added in the Phase 2
     /// filter-engine unification; older stored rules never use it.
     case between
+    /// Custom metadata: no stored value, or whitespace-only / unset boolean.
+    case isEmpty
+    /// Custom metadata: has a stored, non-blank value.
+    case isNotEmpty
 
     var id: String { rawValue }
 
@@ -247,9 +251,19 @@ enum RuleComparison: String, Codable, CaseIterable, Identifiable {
         case .lessThanOrEqual: "is at most"
         case .greaterThanOrEqual: "is at least"
         case .between: "is between"
+        case .isEmpty: "is empty"
+        case .isNotEmpty: "is not empty"
         }
     }
 
     /// Whether this operator consumes a second value (`FilterCondition.value2`).
     var usesSecondValue: Bool { self == .between }
+
+    /// Whether this operator needs `FilterCondition.value` (and a value editor in the UI).
+    var usesValue: Bool {
+        switch self {
+        case .isEmpty, .isNotEmpty: return false
+        default: return true
+        }
+    }
 }

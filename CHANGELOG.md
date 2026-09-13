@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Custom field empty filters** — Advanced Filter and Smart Collections support **is empty** / **is not empty** on custom metadata fields (unset, blank, or whitespace-only values).
 - **Sparkle publish checklist** — Release workflow, `docs/SPARKLE.md`, and `package_dmg.sh` now require uploading both `Skagway.dmg` + `Skagway.appcast.xml` to R2 and passing `scripts/verify_sparkle_publish.sh` before announcing a release (prevents “improperly signed” updates when CDN serves a stale DMG).
 - **Build / install cleanup** — `build_and_install.sh` and `package_dmg.sh` now run `cleanup_stray_skagway_apps.sh` after install/package: removes DerivedData and Sparkle appcast cache copies, ejects leftover install DMG volumes, rebuilds Launch Services, and re-registers `/Applications/Skagway.app` so Launchpad does not accumulate duplicate Skagway icons.
 

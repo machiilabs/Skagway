@@ -372,6 +372,9 @@ final class LibraryViewModel {
             return list.isEmpty ? field : "\(field) \(verb) \(list)"
         }
         let op = c.comparison.label
+        if !c.comparison.usesValue {
+            return "\(field) \(op)"
+        }
         if c.comparison.usesSecondValue, let v2 = c.value2 {
             return "\(field) \(op) \(c.value) and \(v2)"
         }

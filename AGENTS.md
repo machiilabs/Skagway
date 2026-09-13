@@ -15,13 +15,13 @@ This document defines how AI agents (Cursor, Claude, etc.) should work on the Sk
 
 ## Core Workflow Rules (Non-Negotiable)
 
-1. **After every code change**
-   - Run the official build script:
+1. **After every code change (CRITICAL — non-negotiable)**
+   - Run **only** the official build script — never substitute raw `xcodebuild build`:
      ```bash
      bash scripts/build_and_install.sh
      ```
-   - This bumps the build number, regenerates the Xcode project, builds Release, installs to `/Applications`, and cleans up.
-   - Always announce the new version (e.g. `✓ Skagway 0.13.0 (375) [Release]`).
+   - Every normal run **must**: bump `CURRENT_PROJECT_VERSION`, build Release, copy to `/Applications/Skagway.app`, run `cleanup_stray_skagway_apps.sh`, and print the final line.
+   - **Always announce** that line in your reply (e.g. `✓ Skagway 1.1.0 (1046) [Release]`). A build without reporting the build number is incomplete.
    - **Stage all changes**: Use `git add -A` (or equivalent) to include every tracked modification **and** every untracked file.
    - **Update `CHANGELOG.md`**: Add high-level bullet points describing the changes to the `## Unreleased` section. Do this on/around every commit so the changelog reflects work as it happens.
    - Commit the changes (including the changelog update) as part of the work.

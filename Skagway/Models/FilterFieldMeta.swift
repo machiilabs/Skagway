@@ -48,13 +48,13 @@ extension FilterField {
         case .custom:
             switch kind(customFields: customFields) {
             case .string, .tag:
-                return [.equals, .notEquals, .contains, .startsWith, .endsWith, .matches]
+                return [.isEmpty, .isNotEmpty, .equals, .notEquals, .contains, .startsWith, .endsWith, .matches]
             case .number, .rating:
-                return [.equals, .notEquals, .lessThan, .greaterThan, .lessThanOrEqual, .greaterThanOrEqual, .between]
+                return [.isEmpty, .isNotEmpty, .equals, .notEquals, .lessThan, .greaterThan, .lessThanOrEqual, .greaterThanOrEqual, .between]
             case .date:
-                return [.equals, .lessThan, .greaterThan, .between]
+                return [.isEmpty, .isNotEmpty, .equals, .lessThan, .greaterThan, .between]
             case .quality, .boolean:
-                return [.equals, .notEquals]
+                return [.isEmpty, .isNotEmpty, .equals, .notEquals]
             }
         }
     }

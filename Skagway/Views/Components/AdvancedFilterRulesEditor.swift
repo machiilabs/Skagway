@@ -205,7 +205,7 @@ struct AdvancedFilterRulesEditor: View {
                 if !supported.contains(rule.wrappedValue.comparison) {
                     rule.wrappedValue.comparison = supported.first ?? .equals
                 }
-                if rule.wrappedValue.value.isEmpty {
+                if rule.wrappedValue.comparison.usesValue && rule.wrappedValue.value.isEmpty {
                     prefillDefault(rule.value, kind: newField.kind(customFields: fields))
                 }
             }
@@ -218,12 +218,19 @@ struct AdvancedFilterRulesEditor: View {
             .labelsHidden()
             .frame(minWidth: 120, idealWidth: 140, maxWidth: 160)
             .onChange(of: rule.wrappedValue.comparison) { _, newComp in
-                if newComp.usesSecondValue && rule.wrappedValue.value2.isEmpty {
+                if !newComp.usesValue {
+                    rule.wrappedValue.value = ""
+                    rule.wrappedValue.value2 = ""
+                } else if newComp.usesSecondValue && rule.wrappedValue.value2.isEmpty {
                     prefillDefault(rule.value2, kind: rule.wrappedValue.field.kind(customFields: fields))
+                } else if rule.wrappedValue.value.isEmpty {
+                    prefillDefault(rule.value, kind: rule.wrappedValue.field.kind(customFields: fields))
                 }
             }
 
-            ruleValueEditor(rule, fields: fields)
+            if rule.wrappedValue.comparison.usesValue {
+                ruleValueEditor(rule, fields: fields)
+            }
 
             Spacer(minLength: 0)
 
@@ -402,6 +409,7 @@ struct AdvancedFilterRulesEditor: View {
     }
 
     private func ruleIsValid(_ rule: EditableRule) -> Bool {
+        guard rule.comparison.usesValue else { return true }
         guard !rule.value.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         if rule.comparison.usesSecondValue {
             return !rule.value2.trimmingCharacters(in: .whitespaces).isEmpty

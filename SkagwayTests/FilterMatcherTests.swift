@@ -10,8 +10,13 @@ final class FilterMatcherTests: XCTestCase {
     private lazy var fourStarPlain = TestVideo.make(path: "/plain.mp4", rating: 4)
     private lazy var favoriteOnly = TestVideo.make(path: "/fav.mp4", rating: 1)
 
-    private func matcher(_ group: FilterGroup) -> FilterMatcher {
-        FilterMatcher(group: group, customFields: [:])
+    private func matcher(_ group: FilterGroup, customFields: [UUID: CustomMetadataFieldDefinition] = [:]) -> FilterMatcher {
+        FilterMatcher(group: group, customFields: customFields)
+    }
+
+    private func notesField() -> (UUID, CustomMetadataFieldDefinition) {
+        let id = UUID()
+        return (id, CustomMetadataFieldDefinition(id: id, name: "Notes", valueType: .text))
     }
 
     private func ratingAtLeast(_ n: Int) -> FilterCondition {
@@ -88,5 +93,28 @@ final class FilterMatcherTests: XCTestCase {
             .condition(FilterCondition(field: .custom(missing), comparison: .equals, value: "x")),
         ])
         XCTAssertFalse(matcher(group).matches(fourStarPlain, tags: [], customValues: [missing: "x"]))
+    }
+
+    func testCustomFieldIsEmpty() {
+        let (fieldId, def) = notesField()
+        let group = FilterGroup(mode: .all, nodes: [
+            .condition(FilterCondition(field: .custom(fieldId), comparison: .isEmpty, value: "")),
+        ])
+        let m = matcher(group, customFields: [fieldId: def])
+        XCTAssertTrue(m.matches(fourStarPlain, tags: [], customValues: [:]))
+        XCTAssertTrue(m.matches(fourStarPlain, tags: [], customValues: [fieldId: ""]))
+        XCTAssertTrue(m.matches(fourStarPlain, tags: [], customValues: [fieldId: "   "]))
+        XCTAssertFalse(m.matches(fourStarPlain, tags: [], customValues: [fieldId: "Has notes"]))
+    }
+
+    func testCustomFieldIsNotEmpty() {
+        let (fieldId, def) = notesField()
+        let group = FilterGroup(mode: .all, nodes: [
+            .condition(FilterCondition(field: .custom(fieldId), comparison: .isNotEmpty, value: "")),
+        ])
+        let m = matcher(group, customFields: [fieldId: def])
+        XCTAssertFalse(m.matches(fourStarPlain, tags: [], customValues: [:]))
+        XCTAssertFalse(m.matches(fourStarPlain, tags: [], customValues: [fieldId: ""]))
+        XCTAssertTrue(m.matches(fourStarPlain, tags: [], customValues: [fieldId: "Has notes"]))
     }
 }

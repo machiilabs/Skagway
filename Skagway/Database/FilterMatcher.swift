@@ -148,6 +148,15 @@ struct FilterMatcher {
     // MARK: - Custom fields
 
     private static func compileCustom(fieldId: UUID, valueType: CustomMetadataValueType, cmp: RuleComparison, value: String, value2: String?) -> Predicate {
+        switch cmp {
+        case .isEmpty:
+            return { _, _, cvals in customValueIsEmpty(cvals[fieldId], valueType: valueType) }
+        case .isNotEmpty:
+            return { _, _, cvals in !customValueIsEmpty(cvals[fieldId], valueType: valueType) }
+        default:
+            break
+        }
+
         switch valueType {
         case .string, .text:
             let m = StringMatcher(cmp, value)
@@ -188,6 +197,18 @@ struct FilterMatcher {
                 default: return false
                 }
             }
+        }
+    }
+
+    /// Unset row, whitespace-only text/number/date, or boolean that doesn't normalize.
+    private static func customValueIsEmpty(_ raw: String?, valueType: CustomMetadataValueType) -> Bool {
+        guard let raw else { return true }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch valueType {
+        case .string, .text, .number, .date, .dateTime:
+            return trimmed.isEmpty
+        case .boolean:
+            return CustomMetadataValueType.normalizeBooleanStorage(trimmed) == nil
         }
     }
 
