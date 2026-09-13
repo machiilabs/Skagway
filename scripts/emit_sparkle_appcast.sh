@@ -95,4 +95,5 @@ fi
 
 echo "✓ Appcast: ${APPCAST_OUT}"
 echo "  Enclosure URL: ${DOWNLOAD_PREFIX}Skagway.dmg"
-echo "  Publish both files to downloads.machiilabs.com (see docs/SPARKLE.md)."
+echo "  Publish BOTH Skagway.dmg and Skagway.appcast.xml to downloads.machiilabs.com (see docs/SPARKLE.md)."
+echo "  After upload: bash scripts/verify_sparkle_publish.sh ${APPCAST_OUT}"

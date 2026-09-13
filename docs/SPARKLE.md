@@ -29,6 +29,8 @@ SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData -path '*/artifacts/spar
 
 ## Release checklist
 
+**Every release — do not ship without steps 2–4.**
+
 1. Cut the usual release / run packaging:
 
    ```bash
@@ -43,14 +45,26 @@ SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData -path '*/artifacts/spar
    bash scripts/emit_sparkle_appcast.sh dist/Skagway.dmg
    ```
 
-2. **Publish** both files to the downloads host (overwrite in place):
+2. **Publish both files together** to the downloads host (overwrite in place):
 
    - `https://downloads.machiilabs.com/Skagway.dmg`
    - `https://downloads.machiilabs.com/Skagway.appcast.xml`
 
-3. Prefer **short cache / no-cache** on the appcast so clients see new releases quickly. The DMG URL is stable and overwritten each release.
+   **Critical:** The appcast `length` and `sparkle:edSignature` are computed from the **exact DMG bytes** you upload. If the appcast is new but `Skagway.dmg` on the CDN is still an older build, Sparkle shows **“The update is improperly signed and could not be validated.”** Upload the DMG first (or both in the same session), then verify:
 
-4. Smoke-test: install the previous build → **Skagway → Check for Updates…** → should offer the new build.
+   ```bash
+   bash scripts/verify_sparkle_publish.sh dist/Skagway.appcast.xml
+   ```
+
+3. **Cloudflare:** A **Bypass cache** rule applies to `/Skagway.dmg` and `/Skagway.appcast.xml` — no manual purge on normal releases. (One-time purge was needed before that rule existed.)
+
+4. **Verify (required):**
+
+   ```bash
+   bash scripts/verify_sparkle_publish.sh dist/Skagway.appcast.xml
+   ```
+
+5. Smoke-test: install the previous build → **Skagway → Check for Updates…** → should offer the new build.
 
 ## In-app surfaces
 

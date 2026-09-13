@@ -31,6 +31,9 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Sparkle publish checklist** — Release workflow, `docs/SPARKLE.md`, and `package_dmg.sh` now require uploading both `Skagway.dmg` + `Skagway.appcast.xml` to R2 and passing `scripts/verify_sparkle_publish.sh` before announcing a release (prevents “improperly signed” updates when CDN serves a stale DMG).
+- **Build / install cleanup** — `build_and_install.sh` and `package_dmg.sh` now run `cleanup_stray_skagway_apps.sh` after install/package: removes DerivedData and Sparkle appcast cache copies, ejects leftover install DMG volumes, rebuilds Launch Services, and re-registers `/Applications/Skagway.app` so Launchpad does not accumulate duplicate Skagway icons.
+
 ## 1.1.0 (build 1045) - 2026-09-12
 
 - **Review mode** — Collect a set of videos while watching clips: Grid and List share focus vs collected-set semantics (plain click = focus; collect circle with plain/⌘/⇧/⌥; A to add focused row to set). Inspector and context menus respect the collected set. `ReviewSession` + unit tests (`ReviewSessionTests`, `ListReviewTableSelectionTests`).

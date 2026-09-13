@@ -40,6 +40,7 @@ This document defines how AI agents (Cursor, Claude, etc.) should work on the Sk
      - Commit **all completed/ready work** together with the version bump and changelog consolidation. Releases must not leave completed work uncommitted.
    - **Consolidate the changelog**: Move all items from the `## Unreleased` section into a new top-level release entry (`## X.Y.Z (build NNN) - date`). Clear the Unreleased section afterward. The consolidated text must correlate with the release commit message.
    - Always create an annotated tag and push tags (`git push origin HEAD --tags`).
+   - **After push — publish Sparkle (mandatory):** Upload `dist/Skagway.dmg` + `dist/Skagway.appcast.xml` to R2 (both together). Run `bash scripts/verify_sparkle_publish.sh dist/Skagway.appcast.xml` — must pass before announcing the release. See `docs/SPARKLE.md`.
 
 4. **Commit discipline**
    - For every commit: always stage **all** changes using `git add -A` (or equivalent). This includes modifications to tracked files **and** any untracked files that belong in the commit.

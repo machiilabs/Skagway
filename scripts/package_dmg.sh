@@ -242,6 +242,8 @@ echo ""
 echo "Emitting Sparkle appcast…"
 bash scripts/emit_sparkle_appcast.sh "$STABLE_DMG" "$DIST_DIR"
 
+bash scripts/cleanup_stray_skagway_apps.sh
+
 echo ""
 echo "✓ Packaged Skagway ${MARKETING} (${NEW_BUILD})"
 echo "  ${VERSIONED_DMG}"
@@ -252,4 +254,12 @@ if [[ $NOTARIZE -eq 1 ]]; then
 else
   echo "  Signed DMG only — run without --skip-notarize for public distribution."
 fi
-echo "  Publish ${STABLE_DMG} and Skagway.appcast.xml to downloads.machiilabs.com (docs/SPARKLE.md)."
+echo ""
+echo "  ═══ RELEASE: PUBLISH SPARKLE (required) ═══"
+echo "  1. Upload to R2 (machiilabs-download), overwrite in place:"
+echo "       dist/Skagway.dmg"
+echo "       dist/Skagway.appcast.xml"
+echo "  2. Verify:"
+echo "       bash scripts/verify_sparkle_publish.sh dist/Skagway.appcast.xml"
+echo "  3. Smoke-test: Skagway → Check for Updates…"
+echo "  See docs/SPARKLE.md"

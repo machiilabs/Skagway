@@ -135,6 +135,8 @@ if [[ $INSTALL -eq 1 ]]; then
     "$LSREGISTER" -f "$DEST" >/dev/null 2>&1 || true
   fi
   mdimport "$DEST" >/dev/null 2>&1 || true
+
+  bash "$(dirname "$0")/cleanup_stray_skagway_apps.sh"
 fi
 
 echo ""
