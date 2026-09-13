@@ -409,6 +409,10 @@ final class LibraryViewModel {
         didSet {
             guard oldValue != filtersDrawerMode else { return }
             UserDefaults.standard.set(filtersDrawerMode.rawValue, forKey: Self.filtersDrawerModeKey)
+            if filtersDrawerMode == .advanced, oldValue == .quick {
+                collectionFilterPreview = nil
+                _ = compileQuickFiltersIntoAdvanced()
+            }
             recomputeFilteredVideos()
         }
     }
@@ -5938,11 +5942,13 @@ final class LibraryViewModel {
     /// Quick filter state (including the selected collection) is preserved so tab toggles stay in sync.
     /// Closing without edits restores the collection Quick Filter pill; edits keep Advanced Filter active.
     func previewCollectionInAdvancedFilter(_ collection: VideoCollection) {
-        guard let group = filterGroup(for: collection), !group.isEmpty else { return }
+        guard ensureAdvancedFilterCompiledFromQuick(fallbackCollection: collection) else { return }
 
-        collectionFilterPreview = (collection, group)
         filtersDrawerMode = .advanced
-        loadAdvancedFilterEditorSession(group)
+        if case .collection = sidebarFilter,
+           let group = advancedFilterGroup, !group.isEmpty {
+            collectionFilterPreview = (collection, group)
+        }
         isCuratedWallFiltersDrawerOpen = true
     }
 
@@ -5960,6 +5966,43 @@ final class LibraryViewModel {
         filtersDrawerMode = .advanced
         loadAdvancedFilterEditorSession(group)
         isCuratedWallFiltersDrawerOpen = true
+    }
+
+    @discardableResult
+    private func compileQuickFiltersIntoAdvanced() -> Bool {
+        let input = QuickFilterCompiler.Input(
+            sidebarFilter: sidebarFilter,
+            collectionGroup: quickFilterCollectionGroup(),
+            tags: tags,
+            selectedTagIds: selectedTagIds,
+            tagFilterMode: tagFilterMode,
+            selectedRatingStars: selectedRatingStars,
+            ratingFilterOrHigher: ratingFilterOrHigher,
+            minDurationSeconds: minDurationSeconds,
+            maxDurationSeconds: maxDurationSeconds,
+            selectedQualityBuckets: selectedQualityBuckets,
+            topRatedMinRating: topRatedMinRating
+        )
+        guard let group = QuickFilterCompiler.compile(input), !group.isEmpty else { return false }
+        loadAdvancedFilterEditorSession(group)
+        return true
+    }
+
+    @discardableResult
+    private func ensureAdvancedFilterCompiledFromQuick(fallbackCollection: VideoCollection? = nil) -> Bool {
+        if compileQuickFiltersIntoAdvanced() { return true }
+        if let collection = fallbackCollection,
+           let group = filterGroup(for: collection), !group.isEmpty {
+            loadAdvancedFilterEditorSession(group)
+            return true
+        }
+        if let group = advancedFilterGroup, !group.isEmpty { return true }
+        return false
+    }
+
+    private func quickFilterCollectionGroup() -> FilterGroup? {
+        guard case .collection(let collection) = sidebarFilter, collection.isSmart else { return nil }
+        return filterGroup(for: collection)
     }
 
     private func restoreCollectionFilterPreviewIfUnchanged() {

@@ -77,6 +77,18 @@ struct SkagwayApp: App {
                 ))
                 .disabled(!appState.hasLibrary)
 
+                Button("Quick Filter") {
+                    appState.libraryViewModel?.openFiltersDrawer(mode: .quick)
+                }
+                .keyboardShortcut("q", modifiers: [.command, .option])
+                .disabled(!appState.hasLibrary)
+
+                Button("Advanced Filter") {
+                    appState.libraryViewModel?.openFiltersDrawer(mode: .advanced)
+                }
+                .keyboardShortcut("a", modifiers: [.command, .option])
+                .disabled(!appState.hasLibrary)
+
                 Button("Clear Filters") {
                     appState.libraryViewModel?.clearFilters()
                 }

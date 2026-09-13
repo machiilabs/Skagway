@@ -196,6 +196,7 @@ struct CuratedWallFiltersDrawer: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(maxWidth: 220)
+            .help("Quick (⌘⌥Q) · Advanced (⌘⌥A)")
 
             if viewModel.hasActiveFilters {
                 Text("Matching: \(viewModel.filteredVideos.count)")

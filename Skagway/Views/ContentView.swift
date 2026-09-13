@@ -1027,6 +1027,19 @@ private struct LibraryContentView: View {
             return nil
         }
 
+        // ⌘⌥Q / ⌘⌥A — Quick / Advanced filter tab (opens the drawer if it is closed).
+        if !lvm.isEditingText,
+           event.modifierFlags.intersection(commandModifiers) == [.command, .option] {
+            if event.keyCode == 12 /* 'q' */ {
+                DispatchQueue.main.async { lvm.openFiltersDrawer(mode: .quick) }
+                return nil
+            }
+            if event.keyCode == 0 /* 'a' */ {
+                DispatchQueue.main.async { lvm.openFiltersDrawer(mode: .advanced) }
+                return nil
+            }
+        }
+
         // While playing: ←/→ nudge 5s, ⌥←/⌥→ skip 15s. Takes priority over grid navigation.
         if lvm.isPlayingInline,
            [123, 124].contains(event.keyCode),

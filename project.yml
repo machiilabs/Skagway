@@ -27,7 +27,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.machiilabs.skagway
         PRODUCT_NAME: Skagway
         MARKETING_VERSION: "1.1.0"
-        CURRENT_PROJECT_VERSION: "1054"
+        CURRENT_PROJECT_VERSION: "1056"
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
         INFOPLIST_KEY_CFBundleDisplayName: Skagway

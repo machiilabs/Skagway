@@ -31,6 +31,8 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Quick → Advanced compile** — Switching to the Advanced tab compiles active Quick filters into one rule tree (e.g. collection + ANY tags + rating 4+ becomes Parent Folder equals Demo AND (Tag equals trees OR Tag equals outdoor) AND Rating is at least 4).
+- **Filter tab shortcuts** — **⌘⌥Q** (Quick) and **⌘⌥A** (Advanced) switch filter drawer tabs; opens the drawer if it is closed.
 - **Unified Filter drawer** — Single **Filter** entry point (slider icon, ⌘⇧F): Quick and Advanced are tabs inside one drawer (last tab persists). Slider uses accent fill when a filter is active and the drawer is closed. ⌘⇧V removed; opening or switching tabs no longer clears the other mode’s in-memory state — only the active tab’s stack applies to matching. Collection pill → Advanced preview keeps the Quick selection so toggling Quick/Advanced tabs does not drop the filter.
 - **Collection rule synopsis** — Selecting a smart collection in Quick Filter shows a compact summary of its conditions in the header pill (prefixed with the collection name; multiple rules show the first condition plus “…”, e.g. “Popular: Rating is at least 4 …”) and as a muted caption under the selected row in the drawer. Clicking the pill opens the collection in Advanced Filter; closing the drawer without edits keeps the collection pill (the ✕ still clears it). Fixed reopening the pill after a preview close showing a stale empty Title rule.
 - **Custom field empty filters** — Advanced Filter and Smart Collections support **is empty** / **is not empty** on custom metadata fields (unset, blank, or whitespace-only values).
