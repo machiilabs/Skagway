@@ -16,13 +16,7 @@ struct ActiveFilterPills: View {
                     HStack(spacing: 6) {
                         // Sidebar / smart filter pill
                         if let f = viewModel.sidebarFilter, f != .all {
-                            pill(text: pillText(for: f), systemImage: icon(for: f)) {
-                                viewModel.sidebarFilter = .all
-                            }
-                        } else if case .collection(let c) = viewModel.sidebarFilter {
-                            pill(text: "Collection: \(c.name)", systemImage: "folder") {
-                                viewModel.sidebarFilter = .all
-                            }
+                            sidebarFilterPill(for: f)
                         }
 
                         // Rating
@@ -32,17 +26,17 @@ struct ActiveFilterPills: View {
                                 if viewModel.ratingFilterOrHigher, rating < 5 { return "Rating \(rating)+" }
                                 return "Rating \(rating)"
                             }()
-                            pill(text: text, systemImage: rating == 0 ? "star.slash" : "star") {
+                            pill(text: text, systemImage: rating == 0 ? "star.slash" : "star", onRemove: {
                                 viewModel.clearRatingFilter()
-                            }
+                            })
                         }
 
                         // Tags
                         if !viewModel.selectedTagIds.isEmpty {
                             let count = viewModel.selectedTagIds.count
-                            pill(text: count == 1 ? "1 tag" : "\(count) tags", systemImage: "tag") {
+                            pill(text: count == 1 ? "1 tag" : "\(count) tags", systemImage: "tag", onRemove: {
                                 viewModel.clearTagFilters()
-                            }
+                            })
                         }
 
                         // Duration
@@ -57,9 +51,9 @@ struct ActiveFilterPills: View {
                                 }
                                 return "Duration"
                             }()
-                            pill(text: txt, systemImage: "clock") {
+                            pill(text: txt, systemImage: "clock", onRemove: {
                                 viewModel.clearDurationFilter()
-                            }
+                            })
                         }
 
                         // Quality
@@ -67,19 +61,19 @@ struct ActiveFilterPills: View {
                             let ordered = ResolutionBucket.allCases
                                 .map(\.rawValue)
                                 .filter { viewModel.selectedQualityBuckets.contains($0) }
-                            pill(text: "Quality: " + ordered.joined(separator: ", "), systemImage: "rectangle.and.arrow.up.right.and.arrow.down.left") {
+                            pill(text: "Quality: " + ordered.joined(separator: ", "), systemImage: "rectangle.and.arrow.up.right.and.arrow.down.left", onRemove: {
                                 viewModel.clearQualityFilter()
-                            }
+                            })
                         }
 
                         // Advanced Filter — one summary pill, not per-condition.
                         if let summary = viewModel.activeAdvancedFilterSummary {
                             pill(
                                 text: summary.count > 48 ? "Advanced Filter" : summary,
-                                systemImage: "slider.horizontal.3"
-                            ) {
-                                viewModel.clearAdvancedFilter()
-                            }
+                                systemImage: "slider.horizontal.3",
+                                onTap: { viewModel.openFiltersDrawer(mode: .advanced) },
+                                onRemove: { viewModel.clearAdvancedFilter() }
+                            )
                         }
                     }
                 }
@@ -99,29 +93,69 @@ struct ActiveFilterPills: View {
         }
     }
 
-    private func pill(text: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: systemImage)
-                    .font(.caption)
-                Text(text)
-                    .font(.caption)
+    @ViewBuilder
+    private func sidebarFilterPill(for filter: SidebarFilter) -> some View {
+        if case .collection(let collection) = filter, collection.isSmart {
+            pill(
+                text: sidebarPillText(for: filter),
+                systemImage: icon(for: filter),
+                onTap: { viewModel.previewCollectionInAdvancedFilter(collection) },
+                onRemove: { viewModel.sidebarFilter = .all }
+            )
+        } else {
+            pill(
+                text: sidebarPillText(for: filter),
+                systemImage: icon(for: filter),
+                onRemove: { viewModel.sidebarFilter = .all }
+            )
+        }
+    }
+
+    private func pill(
+        text: String,
+        systemImage: String,
+        onTap: (() -> Void)? = nil,
+        onRemove: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 4) {
+            Button {
+                if let onTap { onTap() } else { onRemove() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: systemImage)
+                        .font(.caption)
+                    Text(text)
+                        .font(.caption)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.appTextPrimary)
+
+            Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.caption2)
                     .foregroundStyle(Color.appTextTertiary)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(
-                Capsule().fill(Color.appAccent.opacity(0.12))
-            )
-            .overlay(
-                Capsule().stroke(Color.appAccent.opacity(0.25), lineWidth: 1)
-            )
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .help("Remove filter")
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.appTextPrimary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(
+            Capsule().fill(Color.appAccent.opacity(0.12))
+        )
+        .overlay(
+            Capsule().stroke(Color.appAccent.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    private func sidebarPillText(for filter: SidebarFilter) -> String {
+        if case .collection(let collection) = filter, collection.isSmart,
+           let label = viewModel.collectionFilterPillLabel(for: collection) {
+            return label
+        }
+        return pillText(for: filter)
     }
 
     private func pillText(for filter: SidebarFilter) -> String {

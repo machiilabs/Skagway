@@ -427,48 +427,25 @@ private struct LibraryContentView: View {
             if showsHeaderConversionIconOnly { conversionPill }
             if showsHeaderMoveIconOnly { movePill }
 
-            // Quick Filter drawer (⌘⇧F) — exclusive with Advanced Filter.
+            // Unified filter drawer (⌘⇧F) — Quick and Advanced are tabs inside.
             Button {
-                vm.toggleQuickFilter()
+                vm.toggleFiltersDrawer()
             } label: {
-                if vm.isQuickFilterDrawerOpen {
+                if vm.isCuratedWallFiltersDrawerOpen {
                     Image(systemName: "xmark.circle")
                 } else {
-                    Image(systemName: vm.hasActiveFilters && !vm.hasActiveAdvancedFilter
-                          ? "line.3.horizontal.decrease.circle.fill"
-                          : "line.3.horizontal.decrease.circle")
+                    Image(systemName: "slider.horizontal.3")
+                        .symbolVariant(vm.hasActiveFilters ? .fill : .none)
                 }
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Color.appTextSecondary)
-            .help(vm.isQuickFilterDrawerOpen
-                  ? "Close Quick Filter (⌘⇧F)"
-                  : "Quick Filter (⌘⇧F)")
+            .foregroundStyle(
+                vm.isCuratedWallFiltersDrawerOpen
+                    ? Color.appTextSecondary
+                    : (vm.hasActiveFilters ? Color.appAccent : Color.appTextSecondary)
+            )
+            .help(vm.isCuratedWallFiltersDrawerOpen ? "Close Filter (⌘⇧F)" : "Filter (⌘⇧F)")
             .keyboardShortcut("f", modifiers: [.command, .shift])
-
-            // Advanced Filter in the shared drawer (⌘⇧V) — exclusive with Quick Filter.
-            Button {
-                vm.toggleAdvancedFilter()
-            } label: {
-                Image(systemName: vm.isAdvancedFilterDrawerOpen
-                      ? "xmark.circle"
-                      : "slider.horizontal.3")
-                    .symbolVariant(vm.hasActiveAdvancedFilter && !vm.isAdvancedFilterDrawerOpen ? .fill : .none)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(vm.hasActiveAdvancedFilter || vm.isAdvancedFilterDrawerOpen
-                             ? Color.appAccent
-                             : Color.appTextSecondary)
-            .help({
-                if vm.isAdvancedFilterDrawerOpen {
-                    return "Close Advanced Filter (⌘⇧V)"
-                }
-                if vm.hasActiveAdvancedFilter {
-                    return "Edit Advanced Filter (⌘⇧V)"
-                }
-                return "Advanced Filter (⌘⇧V)"
-            }())
-            .keyboardShortcut("v", modifiers: [.command, .shift])
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 3)
@@ -1040,21 +1017,12 @@ private struct LibraryContentView: View {
         // Real command/option/control/shift only — arrow keys also carry `.function` + `.numericPad`.
         let commandModifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
 
-        // ⌘⇧F — toggle Quick Filter (exclusive with Advanced Filter).
+        // ⌘⇧F — toggle Filter drawer (Quick / Advanced tabs inside).
         // Fallback in addition to the .keyboardShortcut on the button.
         if event.modifierFlags.intersection(commandModifiers) == [.command, .shift],
            event.keyCode == 3 /* 'f' */ {
             DispatchQueue.main.async {
-                lvm.toggleQuickFilter()
-            }
-            return nil
-        }
-
-        // ⌘⇧V — toggle Advanced Filter (exclusive with Quick Filter).
-        if event.modifierFlags.intersection(commandModifiers) == [.command, .shift],
-           event.keyCode == 9 /* 'v' */ {
-            DispatchQueue.main.async {
-                lvm.toggleAdvancedFilter()
+                lvm.toggleFiltersDrawer()
             }
             return nil
         }

@@ -299,6 +299,10 @@ final class LibraryViewModel {
         didSet { recomputeFilteredVideos() }
     }
 
+    /// Bumped whenever `advancedFilterGroup` is loaded or cleared from outside the editor so the
+    /// drawer remounts and reloads rules (the editor keeps local `@State` while the drawer is hidden).
+    private(set) var advancedFilterEditorSessionID = UUID()
+
     var hasActiveAdvancedFilter: Bool {
         if let g = advancedFilterGroup, !g.isEmpty { return true }
         return false
@@ -306,7 +310,8 @@ final class LibraryViewModel {
 
     /// Clears the live Advanced Filter (drawer Clear / pill ✕).
     func clearAdvancedFilter() {
-        advancedFilterGroup = nil
+        collectionFilterPreview = nil
+        resetAdvancedFilterEditorSession()
     }
 
     /// Clears Quick Filter state (sidebar, tags, rating, duration, quality). Does not touch
@@ -324,113 +329,103 @@ final class LibraryViewModel {
     /// `nil` when no advanced filter is active.
     var activeAdvancedFilterSummary: String? {
         guard let group = advancedFilterGroup, !group.isEmpty else { return nil }
-        return Self.describeFilterGroup(
+        return FilterSummaryFormatter.filterGroupSummary(
             group,
-            customFields: Dictionary(
-                uniqueKeysWithValues: customMetadataFieldDefinitions.map { ($0.id, $0) }
-            )
+            customFields: customMetadataFieldDefinitionsById
         )
     }
 
-    /// Builds a compact "Quality is at least 1080 · (Tag contains marvel OR Tag contains dc)" string.
-    private static func describeFilterGroup(
-        _ group: FilterGroup,
-        customFields: [UUID: CustomMetadataFieldDefinition]
-    ) -> String {
-        let parts: [String] = group.nodes.compactMap { node in
-            switch node {
-            case .condition(let c):
-                return describeCondition(c, customFields: customFields)
-            case .group(let inner):
-                let innerParts = inner.nodes.compactMap { child -> String? in
-                    guard case .condition(let c) = child else { return nil }
-                    return describeCondition(c, customFields: customFields)
-                }
-                guard !innerParts.isEmpty else { return nil }
-                let joiner = inner.mode == .all ? " AND " : " OR "
-                let joined = innerParts.joined(separator: joiner)
-                // Parenthesize when the outer tree has more than one node, or the inner uses OR.
-                if group.nodes.count > 1 || inner.mode == .any {
-                    return "(\(joined))"
-                }
-                return joined
-            }
-        }
-        let joiner = group.mode == .all ? " · " : " OR "
-        return parts.joined(separator: joiner)
+    /// Short summary of the active smart collection's rules (capped). `nil` for albums or empty rules.
+    var activeCollectionFilterSummary: String? {
+        guard case .collection(let collection) = sidebarFilter else { return nil }
+        return collectionFilterSummary(for: collection)
     }
 
-    private static func describeCondition(
-        _ c: FilterCondition,
-        customFields: [UUID: CustomMetadataFieldDefinition]
-    ) -> String {
-        let field = c.field.label(customFields: customFields)
-        if case .builtin(.quality) = c.field {
-            let buckets = ResolutionBucket.decode(c.value)
-            let list = ResolutionBucket.allCases.map(\.rawValue).filter { buckets.contains($0) }.joined(separator: ", ")
-            let verb = c.comparison == .notEquals ? "is none of" : "is"
-            return list.isEmpty ? field : "\(field) \(verb) \(list)"
-        }
-        let op = c.comparison.label
-        if !c.comparison.usesValue {
-            return "\(field) \(op)"
-        }
-        if c.comparison.usesSecondValue, let v2 = c.value2 {
-            return "\(field) \(op) \(c.value) and \(v2)"
-        }
-        return "\(field) \(op) \(c.value)"
+    /// Compact rule synopsis for a smart collection — used by pills and the Quick Filter drawer.
+    func collectionFilterSummary(for collection: VideoCollection) -> String? {
+        filterGroupSummary(for: collection, maxConditions: FilterSummaryFormatter.collectionSynopsisMaxConditions)
     }
 
-    /// Which body the shared filters drawer shows. Quick Filter and Advanced Filter are exclusive
-    /// modes of the same drawer shell — never shown together.
-    enum FiltersDrawerMode: Equatable {
+    /// Closed-drawer pill label for a smart collection (`"Name: rule"` or `"Name: rule ..."`).
+    func collectionFilterPillLabel(for collection: VideoCollection) -> String? {
+        guard collection.isSmart,
+              let group = filterGroup(for: collection),
+              !group.isEmpty else { return nil }
+        return FilterSummaryFormatter.labeledCollectionPillText(
+            collectionName: collection.name,
+            group: group,
+            customFields: customMetadataFieldDefinitionsById
+        )
+    }
+
+    private func filterGroup(for collection: VideoCollection) -> FilterGroup? {
+        guard collection.isSmart, let collectionId = collection.id else { return nil }
+        let groups = cachedCollectionRuleGroups[collectionId] ?? []
+        let rules = cachedCollectionRules[collectionId] ?? []
+        let rulesByGroup = Dictionary(grouping: rules, by: \.groupId)
+        return CollectionRepository.filterGroup(
+            for: collection,
+            groups: groups,
+            rulesByGroup: rulesByGroup
+        )
+    }
+
+    private func filterGroupSummary(for collection: VideoCollection, maxConditions: Int?) -> String? {
+        guard let group = filterGroup(for: collection) else { return nil }
+        return FilterSummaryFormatter.filterGroupSummary(
+            group,
+            customFields: customMetadataFieldDefinitionsById,
+            maxConditions: maxConditions
+        )
+    }
+
+    private var customMetadataFieldDefinitionsById: [UUID: CustomMetadataFieldDefinition] {
+        Dictionary(uniqueKeysWithValues: customMetadataFieldDefinitions.map { ($0.id, $0) })
+    }
+
+    /// Which body the shared filters drawer shows, and which filter stack owns matching.
+    enum FiltersDrawerMode: String, Equatable {
         case quick
         case advanced
     }
 
+    /// When set, the Advanced Filter drawer was opened from a collection pill for inspection.
+    /// Closing the drawer without edits restores the collection Quick Filter instead of leaving
+    /// an Advanced Filter pill active.
+    private var collectionFilterPreview: (collection: VideoCollection, snapshot: FilterGroup)?
+
     /// Controls the top-descending filters drawer. Always forced closed on appearance (not
-    /// persisted). Toggle via header Quick Filter (⌘⇧F) or Advanced Filter (⌘⇧V).
-    var isCuratedWallFiltersDrawerOpen: Bool = false
+    /// persisted). Toggle via header Filter (⌘⇧F).
+    var isCuratedWallFiltersDrawerOpen: Bool = false {
+        didSet {
+            if oldValue, !isCuratedWallFiltersDrawerOpen {
+                restoreCollectionFilterPreviewIfUnchanged()
+            }
+        }
+    }
 
-    /// Content mode for the open drawer. Ignored while the drawer is closed; set when opening.
-    var filtersDrawerMode: FiltersDrawerMode = .quick
+    /// Quick vs Advanced tab — persisted; also selects which filter stack owns matching.
+    var filtersDrawerMode: FiltersDrawerMode = .quick {
+        didSet {
+            guard oldValue != filtersDrawerMode else { return }
+            UserDefaults.standard.set(filtersDrawerMode.rawValue, forKey: Self.filtersDrawerModeKey)
+            recomputeFilteredVideos()
+        }
+    }
 
-    /// True when the drawer is open in Advanced Filter mode (drives header button chrome).
+    /// True when the drawer is open in Advanced Filter mode.
     var isAdvancedFilterDrawerOpen: Bool {
         isCuratedWallFiltersDrawerOpen && filtersDrawerMode == .advanced
     }
 
-    /// True when the drawer is open in Quick Filter mode.
-    var isQuickFilterDrawerOpen: Bool {
-        isCuratedWallFiltersDrawerOpen && filtersDrawerMode == .quick
+    /// Filter drawer (header button / ⌘⇧F). Opens in the last-used Quick/Advanced mode.
+    func toggleFiltersDrawer() {
+        isCuratedWallFiltersDrawerOpen.toggle()
     }
 
-    /// Quick Filter control (header button / ⌘⇧F). Opening clears any Advanced Filter so the two
-    /// modes stay exclusive; closing just hides the drawer (Advanced state is already nil).
-    func toggleQuickFilter() {
-        if isQuickFilterDrawerOpen {
-            isCuratedWallFiltersDrawerOpen = false
-        } else {
-            clearAdvancedFilter()
-            filtersDrawerMode = .quick
-            isCuratedWallFiltersDrawerOpen = true
-        }
-    }
-
-    /// Advanced Filter control (header button / ⌘⇧V). Opening clears Quick Filter and shows
-    /// the Advanced editor in the drawer; toggling again closes the drawer (filter stays until Clear).
-    func toggleAdvancedFilter() {
-        if isAdvancedFilterDrawerOpen {
-            isCuratedWallFiltersDrawerOpen = false
-        } else {
-            openAdvancedFilter()
-        }
-    }
-
-    /// Enter Advanced Filter mode in the shared drawer: clear Quick Filter, show Advanced body.
-    func openAdvancedFilter() {
-        clearQuickFilters()
-        filtersDrawerMode = .advanced
+    /// Opens the filter drawer, optionally switching Quick/Advanced tab first.
+    func openFiltersDrawer(mode: FiltersDrawerMode? = nil) {
+        if let mode { filtersDrawerMode = mode }
         isCuratedWallFiltersDrawerOpen = true
     }
 
@@ -1784,6 +1779,7 @@ final class LibraryViewModel {
     private static let missingCountScannedKey = "Skagway.missingCountScanned"
     private static let filtersDrawerHeightKey = "Skagway.filtersDrawerHeight"
     private static let filterDrawerHeightModeKey = "Skagway.filterDrawerHeightMode"
+    private static let filtersDrawerModeKey = "Skagway.filtersDrawerMode"
     private static let inspectorHeroHeightKey = "Skagway.inspectorHeroHeight"
     private static let missingVideoIdsKey = "Skagway.missingVideoIds"
     private static let listColumnPreferencesKey = "Skagway.listColumnPreferences"
@@ -2549,6 +2545,10 @@ final class LibraryViewModel {
            let mode = FilterDrawerHeightMode(rawValue: v) {
             filterDrawerHeightMode = mode
         }
+        if let v = defaults.string(forKey: Self.filtersDrawerModeKey),
+           let mode = FiltersDrawerMode(rawValue: v) {
+            filtersDrawerMode = mode
+        }
         if let v = defaults.object(forKey: Self.inspectorHeroHeightKey) as? Double {
             inspectorHeroHeight = max(CGFloat(v), Self.inspectorHeroMinHeight)
         }
@@ -2815,6 +2815,7 @@ final class LibraryViewModel {
             selectedQualityBuckets: selectedQualityBuckets,
             customFieldDefinitionsById: customFieldDefinitionsById,
             advancedFilterGroup: advancedFilterGroup,
+            filtersDrawerMode: filtersDrawerMode,
             customSortField: resolvedCustomSortField,
             customSortAscending: customSortAscending,
             listCustomMetadataByVideoId: listCustomMetadataByVideoId,
@@ -2863,6 +2864,7 @@ final class LibraryViewModel {
         let selectedQualityBuckets: Set<String>
         let customFieldDefinitionsById: [UUID: CustomMetadataFieldDefinition]
         let advancedFilterGroup: FilterGroup?
+        let filtersDrawerMode: FiltersDrawerMode
         let customSortField: CustomMetadataFieldDefinition?
         let customSortAscending: Bool
         let listCustomMetadataByVideoId: [Int64: [UUID: String]]
@@ -3131,48 +3133,81 @@ final class LibraryViewModel {
             baseResult = baseResult.filter { matchIds.contains($0.id) }
         }
 
-        switch snapshot.sidebarFilter {
-        case .recentlyAdded:
-            let cutoff = Calendar.current.date(byAdding: .day, value: -snapshot.recentlyAddedDays, to: Date()) ?? Date()
-            baseResult = baseResult.filter { $0.dateAdded >= cutoff }
-        case .recentlyPlayed:
-            let cutoff = Calendar.current.date(byAdding: .day, value: -snapshot.recentlyPlayedDays, to: Date()) ?? Date()
-            baseResult = baseResult.filter { ($0.lastPlayed ?? .distantPast) >= cutoff }
-        case .topRated:
-            baseResult = baseResult.filter { $0.rating >= snapshot.topRatedMinRating }
-        case .duplicates:
-            baseResult = baseResult.filter { snapshot.duplicateVideoIds.contains($0.id) }
-        case .corrupt:
-            baseResult = baseResult.filter { isCorrupt($0) }
-        case .missing:
-            baseResult = baseResult.filter { snapshot.missingVideoIds.contains($0.id) }
-        case .recentlyConverted:
-            baseResult = baseResult.filter { snapshot.recentlyConvertedDates[$0.filePath] != nil }
-        case .recentlyApplied:
-            baseResult = baseResult.filter { snapshot.recentlyAppliedPaths.contains($0.filePath) }
-        case .lastAdded:
-            baseResult = baseResult.filter { snapshot.lastAddedPaths.contains($0.filePath) }
-        case .collection(let collection):
-            guard let collectionId = collection.id else {
-                return ([], [:])
-            }
-            if collection.kind == .album {
-                let members = Set(snapshot.cachedAlbumVideoIds[collectionId] ?? [])
-                baseResult = baseResult.filter { video in
-                    guard let dbId = video.databaseId else { return false }
-                    return members.contains(dbId)
-                }
-            } else {
-                let groups = snapshot.cachedCollectionRuleGroups[collectionId] ?? []
-                if groups.isEmpty {
+        switch snapshot.filtersDrawerMode {
+        case .quick:
+            switch snapshot.sidebarFilter {
+            case .recentlyAdded:
+                let cutoff = Calendar.current.date(byAdding: .day, value: -snapshot.recentlyAddedDays, to: Date()) ?? Date()
+                baseResult = baseResult.filter { $0.dateAdded >= cutoff }
+            case .recentlyPlayed:
+                let cutoff = Calendar.current.date(byAdding: .day, value: -snapshot.recentlyPlayedDays, to: Date()) ?? Date()
+                baseResult = baseResult.filter { ($0.lastPlayed ?? .distantPast) >= cutoff }
+            case .topRated:
+                baseResult = baseResult.filter { $0.rating >= snapshot.topRatedMinRating }
+            case .duplicates:
+                baseResult = baseResult.filter { snapshot.duplicateVideoIds.contains($0.id) }
+            case .corrupt:
+                baseResult = baseResult.filter { isCorrupt($0) }
+            case .missing:
+                baseResult = baseResult.filter { snapshot.missingVideoIds.contains($0.id) }
+            case .recentlyConverted:
+                baseResult = baseResult.filter { snapshot.recentlyConvertedDates[$0.filePath] != nil }
+            case .recentlyApplied:
+                baseResult = baseResult.filter { snapshot.recentlyAppliedPaths.contains($0.filePath) }
+            case .lastAdded:
+                baseResult = baseResult.filter { snapshot.lastAddedPaths.contains($0.filePath) }
+            case .collection(let collection):
+                guard let collectionId = collection.id else {
                     return ([], [:])
                 }
-                let rules = snapshot.cachedCollectionRules[collectionId] ?? []
-                let rulesByGroup = Dictionary(grouping: rules, by: \.groupId)
-                let matcher = collectionRepo.compileMatcher(
-                    for: collection, groups: groups, rulesByGroup: rulesByGroup,
-                    customFields: snapshot.customFieldDefinitionsById
-                )
+                if collection.kind == .album {
+                    let members = Set(snapshot.cachedAlbumVideoIds[collectionId] ?? [])
+                    baseResult = baseResult.filter { video in
+                        guard let dbId = video.databaseId else { return false }
+                        return members.contains(dbId)
+                    }
+                } else {
+                    let groups = snapshot.cachedCollectionRuleGroups[collectionId] ?? []
+                    if groups.isEmpty {
+                        return ([], [:])
+                    }
+                    let rules = snapshot.cachedCollectionRules[collectionId] ?? []
+                    let rulesByGroup = Dictionary(grouping: rules, by: \.groupId)
+                    let matcher = collectionRepo.compileMatcher(
+                        for: collection, groups: groups, rulesByGroup: rulesByGroup,
+                        customFields: snapshot.customFieldDefinitionsById
+                    )
+                    baseResult = baseResult.filter { video in
+                        let dbId = video.databaseId
+                        return matcher.matches(
+                            video,
+                            tags: snapshot.tagsByVideoId[dbId ?? -1] ?? [],
+                            customValues: dbId.flatMap { snapshot.listCustomMetadataByVideoId[$0] } ?? [:]
+                        )
+                    }
+                }
+            default:
+                break
+            }
+
+            baseResult = Self.applyRatingFilter(
+                selectedStars: snapshot.selectedRatingStars,
+                orHigher: snapshot.ratingFilterOrHigher,
+                base: baseResult
+            )
+
+            if let minD = snapshot.minDurationSeconds {
+                baseResult = baseResult.filter { ($0.duration ?? 0) >= minD }
+            }
+            if let maxD = snapshot.maxDurationSeconds {
+                baseResult = baseResult.filter { ($0.duration ?? 0) <= maxD }
+            }
+
+            baseResult = Self.applyQualityFilter(buckets: snapshot.selectedQualityBuckets, base: baseResult)
+
+        case .advanced:
+            if let group = snapshot.advancedFilterGroup, !group.isEmpty {
+                let matcher = FilterMatcher(group: group, customFields: snapshot.customFieldDefinitionsById)
                 baseResult = baseResult.filter { video in
                     let dbId = video.databaseId
                     return matcher.matches(
@@ -3182,43 +3217,12 @@ final class LibraryViewModel {
                     )
                 }
             }
-        default:
-            break
-        }
-
-        baseResult = Self.applyRatingFilter(
-            selectedStars: snapshot.selectedRatingStars,
-            orHigher: snapshot.ratingFilterOrHigher,
-            base: baseResult
-        )
-
-        // Duration range (seconds). Applied after rating for consistency with other independent filters.
-        if let minD = snapshot.minDurationSeconds {
-            baseResult = baseResult.filter { ($0.duration ?? 0) >= minD }
-        }
-        if let maxD = snapshot.maxDurationSeconds {
-            baseResult = baseResult.filter { ($0.duration ?? 0) <= maxD }
-        }
-
-        baseResult = Self.applyQualityFilter(buckets: snapshot.selectedQualityBuckets, base: baseResult)
-
-        // Advanced boolean rules. Compiled once; a nil/empty group is skipped entirely.
-        if let group = snapshot.advancedFilterGroup, !group.isEmpty {
-            let matcher = FilterMatcher(group: group, customFields: snapshot.customFieldDefinitionsById)
-            baseResult = baseResult.filter { video in
-                let dbId = video.databaseId
-                return matcher.matches(
-                    video,
-                    tags: snapshot.tagsByVideoId[dbId ?? -1] ?? [],
-                    customValues: dbId.flatMap { snapshot.listCustomMetadataByVideoId[$0] } ?? [:]
-                )
-            }
         }
 
         let tagCounts = computeTagCounts(snapshot: snapshot, baseVideos: baseResult)
 
         var result = baseResult
-        if !snapshot.selectedTagIds.isEmpty {
+        if snapshot.filtersDrawerMode == .quick, !snapshot.selectedTagIds.isEmpty {
             result = result.filter { video in
                 let videoTagIds = Set((snapshot.tagsByVideoId[video.databaseId ?? -1] ?? []).compactMap(\.id))
                 switch snapshot.tagFilterMode {
@@ -5595,17 +5599,21 @@ final class LibraryViewModel {
         !selectedRatingStars.isEmpty
     }
 
-    /// True if any non-search filter is active (sidebar/collection, tags, rating, duration, quality,
-    /// or Advanced Filter). Used for badge on Filters button and for showing the pills row.
+    /// True if the active filter stack (Quick or Advanced tab) has a non-default filter applied.
+    /// Used for the header Filter icon and the closed-drawer pills row.
     var hasActiveFilters: Bool {
-        if case .collection = sidebarFilter { return true }
-        if sidebarFilter != nil && sidebarFilter != .all { return true }
-        if !selectedTagIds.isEmpty { return true }
-        if !selectedRatingStars.isEmpty { return true }
-        if minDurationSeconds != nil || maxDurationSeconds != nil { return true }
-        if !selectedQualityBuckets.isEmpty { return true }
-        if hasActiveAdvancedFilter { return true }
-        return false
+        switch filtersDrawerMode {
+        case .quick:
+            if case .collection = sidebarFilter { return true }
+            if sidebarFilter != nil && sidebarFilter != .all { return true }
+            if !selectedTagIds.isEmpty { return true }
+            if !selectedRatingStars.isEmpty { return true }
+            if minDurationSeconds != nil || maxDurationSeconds != nil { return true }
+            if !selectedQualityBuckets.isEmpty { return true }
+            return false
+        case .advanced:
+            return hasActiveAdvancedFilter
+        }
     }
 
     /// Clears the per-star rating filter (filter strip → Rating).
@@ -5629,7 +5637,7 @@ final class LibraryViewModel {
         clearRatingFilter()
         clearDurationFilter()
         clearQualityFilter()
-        advancedFilterGroup = nil
+        resetAdvancedFilterEditorSession()
         // Note: we intentionally do not reset sidebarFilter here; caller can do if desired.
     }
 
@@ -5641,7 +5649,8 @@ final class LibraryViewModel {
         minDurationSeconds = nil
         maxDurationSeconds = nil
         selectedQualityBuckets = []
-        advancedFilterGroup = nil
+        collectionFilterPreview = nil
+        resetAdvancedFilterEditorSession()
     }
 
     func deleteTag(_ tag: Tag) async {
@@ -5925,24 +5934,65 @@ final class LibraryViewModel {
         }
     }
 
+    /// Opens a smart collection's rules in the Advanced Filter drawer from the closed-drawer pill.
+    /// Quick filter state (including the selected collection) is preserved so tab toggles stay in sync.
+    /// Closing without edits restores the collection Quick Filter pill; edits keep Advanced Filter active.
+    func previewCollectionInAdvancedFilter(_ collection: VideoCollection) {
+        guard let group = filterGroup(for: collection), !group.isEmpty else { return }
+
+        collectionFilterPreview = (collection, group)
+        filtersDrawerMode = .advanced
+        loadAdvancedFilterEditorSession(group)
+        isCuratedWallFiltersDrawerOpen = true
+    }
+
     /// Phase 4 bridge: load a Collection's rule tree into the live Advanced Filter and open the
     /// drawer (exclusive mode — clears Quick Filter). Albums have no rules — no-op.
     func editCollectionAsAdvancedFilter(_ collection: VideoCollection) {
-        guard collection.isSmart, let id = collection.id else { return }
-        let groups = cachedCollectionRuleGroups[id] ?? []
-        let rules = cachedCollectionRules[id] ?? []
-        let rulesByGroup = Dictionary(grouping: rules, by: \.groupId)
-        let group = CollectionRepository.filterGroup(for: collection, groups: groups, rulesByGroup: rulesByGroup)
-        guard !group.isEmpty else { return }
+        guard let group = filterGroup(for: collection), !group.isEmpty else { return }
 
+        collectionFilterPreview = nil
         clearQuickFilters()
         // Don't leave the sidebar stuck on this collection — Advanced Filter now owns matching.
         if case .collection(let selected) = sidebarFilter, selected.id == collection.id {
             sidebarFilter = .all
         }
-        advancedFilterGroup = group
         filtersDrawerMode = .advanced
+        loadAdvancedFilterEditorSession(group)
         isCuratedWallFiltersDrawerOpen = true
+    }
+
+    private func restoreCollectionFilterPreviewIfUnchanged() {
+        guard let preview = collectionFilterPreview else { return }
+        collectionFilterPreview = nil
+
+        guard advancedFilterGroup == preview.snapshot else { return }
+
+        filtersDrawerMode = .quick
+        sidebarFilter = .collection(resolvedCollection(for: preview.collection))
+        resetAdvancedFilterEditorSession()
+    }
+
+    private func beginAdvancedFilterEditorSession() {
+        advancedFilterEditorSessionID = UUID()
+    }
+
+    private func loadAdvancedFilterEditorSession(_ group: FilterGroup) {
+        beginAdvancedFilterEditorSession()
+        advancedFilterGroup = group
+    }
+
+    private func resetAdvancedFilterEditorSession() {
+        beginAdvancedFilterEditorSession()
+        advancedFilterGroup = nil
+    }
+
+    private func resolvedCollection(for collection: VideoCollection) -> VideoCollection {
+        guard let id = collection.id,
+              let refreshed = collections.first(where: { $0.id == id }) else {
+            return collection
+        }
+        return refreshed
     }
 
     /// Maps a working `FilterGroup` onto the two-level shape `replaceRuleGroups` expects.

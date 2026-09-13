@@ -185,11 +185,19 @@ struct CuratedWallFiltersDrawer: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text(viewModel.filtersDrawerMode == .advanced ? "Advanced Filter" : "Quick Filter")
+            Text("Filter")
                 .font(.headline)
                 .foregroundStyle(Color.appTextPrimary)
 
-            if viewModel.filtersDrawerMode == .advanced, viewModel.hasActiveAdvancedFilter {
+            Picker("Mode", selection: $viewModel.filtersDrawerMode) {
+                Text("Quick").tag(LibraryViewModel.FiltersDrawerMode.quick)
+                Text("Advanced").tag(LibraryViewModel.FiltersDrawerMode.advanced)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 220)
+
+            if viewModel.hasActiveFilters {
                 Text("Matching: \(viewModel.filteredVideos.count)")
                     .font(.callout)
                     .foregroundStyle(Color.appTextSecondary)
@@ -240,6 +248,7 @@ struct CuratedWallFiltersDrawer: View {
             customFields: viewModel.customMetadataFieldDefinitions,
             tags: viewModel.tags
         )
+        .id(viewModel.advancedFilterEditorSessionID)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -459,31 +468,43 @@ struct CuratedWallFiltersDrawer: View {
             if case .collection(let c) = viewModel.sidebarFilter, c.id == collection.id { return true }
             return false
         }()
-        Button {
-            viewModel.sidebarFilter = .collection(collection)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: collection.isAlbum ? "rectangle.stack" : "folder")
-                    .font(.caption)
-                    .foregroundStyle(isSelected ? Color.appAccent : Color.appTextTertiary)
-                    .frame(width: 14)
-                Text(collection.name)
-                    .foregroundStyle(isSelected ? Color.appTextPrimary : Color.appTextSecondary)
-                    .lineLimit(1)
-                Spacer()
-                if let id = collection.id, let c = viewModel.collectionCounts[id] {
-                    Text("\(c)").font(.caption.monospacedDigit()).foregroundStyle(Color.appTextTertiary)
+        let synopsis = collection.isSmart ? viewModel.collectionFilterSummary(for: collection) : nil
+        VStack(alignment: .leading, spacing: 2) {
+            Button {
+                viewModel.sidebarFilter = .collection(collection)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: collection.isAlbum ? "rectangle.stack" : "folder")
+                        .font(.caption)
+                        .foregroundStyle(isSelected ? Color.appAccent : Color.appTextTertiary)
+                        .frame(width: 14)
+                    Text(collection.name)
+                        .foregroundStyle(isSelected ? Color.appTextPrimary : Color.appTextSecondary)
+                        .lineLimit(1)
+                    Spacer()
+                    if let id = collection.id, let c = viewModel.collectionCounts[id] {
+                        Text("\(c)").font(.caption.monospacedDigit()).foregroundStyle(Color.appTextTertiary)
+                    }
                 }
+                .padding(.vertical, 3)
+                .padding(.horizontal, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isSelected ? Color.appAccent.opacity(0.12) : .clear)
+                )
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 3)
-            .padding(.horizontal, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isSelected ? Color.appAccent.opacity(0.12) : .clear)
-            )
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+
+            if isSelected, let synopsis, !synopsis.isEmpty {
+                Text(synopsis)
+                    .font(.caption)
+                    .foregroundStyle(Color.appTextTertiary)
+                    .lineLimit(2)
+                    .padding(.leading, 28)
+                    .padding(.trailing, 8)
+            }
         }
-        .buttonStyle(.plain)
         .contextMenu {
             if collection.isSmart {
                 Button("Edit as Advanced Filter\u{2026}") {
