@@ -248,11 +248,15 @@ extension CollectionRepository {
         for collection: VideoCollection,
         groups: [CollectionRuleGroup],
         rulesByGroup: [Int64: [CollectionRule]],
-        customFields: [UUID: CustomMetadataFieldDefinition] = [:]
+        customFields: [UUID: CustomMetadataFieldDefinition] = [:],
+        libraryContext: LibraryFilterContext? = nil,
+        collectionRepo: CollectionRepository? = nil
     ) -> FilterMatcher {
         FilterMatcher(
             group: Self.filterGroup(for: collection, groups: groups, rulesByGroup: rulesByGroup),
-            customFields: customFields
+            customFields: customFields,
+            libraryContext: libraryContext,
+            collectionRepo: collectionRepo ?? self
         )
     }
 }

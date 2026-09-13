@@ -18,8 +18,18 @@ struct FilterMatcher {
     /// - Parameter customFields: definitions for any `.custom` fields referenced, so their stored
     ///   string values can be parsed per type. A condition referencing a missing/unknown custom
     ///   field never matches.
-    init(group: FilterGroup, customFields: [UUID: CustomMetadataFieldDefinition]) {
-        self.predicate = Self.compileGroup(group, customFields: customFields)
+    init(
+        group: FilterGroup,
+        customFields: [UUID: CustomMetadataFieldDefinition],
+        libraryContext: LibraryFilterContext? = nil,
+        collectionRepo: CollectionRepository? = nil
+    ) {
+        self.predicate = Self.compileGroup(
+            group,
+            customFields: customFields,
+            libraryContext: libraryContext,
+            collectionRepo: collectionRepo
+        )
     }
 
     func matches(_ video: Video, tags: [Tag], customValues: [UUID: String]) -> Bool {
@@ -28,11 +38,28 @@ struct FilterMatcher {
 
     // MARK: - Tree compilation
 
-    private static func compileGroup(_ group: FilterGroup, customFields: [UUID: CustomMetadataFieldDefinition]) -> Predicate {
+    private static func compileGroup(
+        _ group: FilterGroup,
+        customFields: [UUID: CustomMetadataFieldDefinition],
+        libraryContext: LibraryFilterContext?,
+        collectionRepo: CollectionRepository?
+    ) -> Predicate {
         let preds: [Predicate] = group.nodes.map { node in
             switch node {
-            case .condition(let c): return compileCondition(c, customFields: customFields)
-            case .group(let g): return compileGroup(g, customFields: customFields)
+            case .condition(let c):
+                return compileCondition(
+                    c,
+                    customFields: customFields,
+                    libraryContext: libraryContext,
+                    collectionRepo: collectionRepo
+                )
+            case .group(let g):
+                return compileGroup(
+                    g,
+                    customFields: customFields,
+                    libraryContext: libraryContext,
+                    collectionRepo: collectionRepo
+                )
             }
         }
         let mode = group.mode
@@ -47,14 +74,42 @@ struct FilterMatcher {
         }
     }
 
-    private static func compileCondition(_ c: FilterCondition, customFields: [UUID: CustomMetadataFieldDefinition]) -> Predicate {
+    private static func compileCondition(
+        _ c: FilterCondition,
+        customFields: [UUID: CustomMetadataFieldDefinition],
+        libraryContext: LibraryFilterContext?,
+        collectionRepo: CollectionRepository?
+    ) -> Predicate {
         switch c.field {
         case .builtin(let attr):
+            if attr == .membership {
+                return compileMembership(c.comparison, c.value, libraryContext: libraryContext, collectionRepo: collectionRepo)
+            }
             let base = compileBuiltin(attr, c.comparison, c.value, c.value2)
             return { v, tags, _ in base(v, tags) }
         case .custom(let id):
             guard let def = customFields[id] else { return { _, _, _ in false } }
             return compileCustom(fieldId: id, valueType: def.valueType, cmp: c.comparison, value: c.value, value2: c.value2)
+        }
+    }
+
+    private static func compileMembership(
+        _ cmp: RuleComparison,
+        _ raw: String,
+        libraryContext: LibraryFilterContext?,
+        collectionRepo: CollectionRepository?
+    ) -> Predicate {
+        guard let target = MembershipTarget(storageToken: raw),
+              let context = libraryContext
+        else {
+            return { _, _, _ in false }
+        }
+        let positive = cmp == .isMemberOf
+        let negative = cmp == .isNotMemberOf
+        guard positive || negative else { return { _, _, _ in false } }
+        return { video, _, _ in
+            let hit = MembershipMatcher.matches(target, video: video, context: context)
+            return positive ? hit : !hit
         }
     }
 
@@ -142,6 +197,8 @@ struct FilterMatcher {
                 guard let date = v.creationDate else { return false }
                 return matchDay(date, cmp, lo, hi)
             }
+        case .membership:
+            return { _, _ in false }
         }
     }
 

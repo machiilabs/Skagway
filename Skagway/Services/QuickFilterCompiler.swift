@@ -41,22 +41,35 @@ enum QuickFilterCompiler {
         return FilterGroup(mode: .all, nodes: nodes)
     }
 
-    // MARK: - Sidebar / collection
+    // MARK: - Sidebar
 
     private static func sidebarNodes(from input: Input) -> [FilterNode] {
-        switch input.sidebarFilter {
-        case .collection(let collection) where collection.isSmart:
-            guard let group = input.collectionGroup, !group.isEmpty else { return [] }
-            return collectionNodes(from: group)
-        case .topRated:
-            return [.condition(FilterCondition(
-                field: .builtin(.rating),
-                comparison: .greaterThanOrEqual,
-                value: String(input.topRatedMinRating)
-            ))]
-        default:
+        guard let filter = input.sidebarFilter else { return [] }
+        switch filter {
+        case .all:
             return []
+        case .collection(let collection):
+            guard let id = collection.id else { return [] }
+            if collection.isAlbum {
+                return [membershipNode(.album(id))]
+            }
+            if collection.isSmart {
+                guard let group = input.collectionGroup, !group.isEmpty else { return [] }
+                return collectionNodes(from: group)
+            }
+            return []
+        default:
+            guard let kind = SmartLibraryKind(sidebarFilter: filter) else { return [] }
+            return [membershipNode(.smartLibrary(kind))]
         }
+    }
+
+    private static func membershipNode(_ target: MembershipTarget) -> FilterNode {
+        .condition(FilterCondition(
+            field: .builtin(.membership),
+            comparison: .isMemberOf,
+            value: target.storageToken
+        ))
     }
 
     /// Flattens smart-collection rules into sibling nodes under the compiled top-level ALL group.

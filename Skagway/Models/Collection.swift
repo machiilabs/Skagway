@@ -146,6 +146,8 @@ enum RuleAttribute: String, Codable, CaseIterable, Identifiable {
     case playCount
     case rating
     case tag
+    /// Smart library or album membership (value encodes target via `MembershipTarget`).
+    case membership
 
     var id: String { rawValue }
 
@@ -167,6 +169,7 @@ enum RuleAttribute: String, Codable, CaseIterable, Identifiable {
         case .playCount: "Plays"
         case .rating: "Rating"
         case .tag: "Tag"
+        case .membership: "Membership"
         }
     }
 
@@ -181,6 +184,8 @@ enum RuleAttribute: String, Codable, CaseIterable, Identifiable {
         case .quality:
             // Chip multi-select: "is any of" / "is none of" the selected buckets.
             return [.equals, .notEquals]
+        case .membership:
+            return [.isMemberOf, .isNotMemberOf]
         }
     }
 
@@ -211,6 +216,7 @@ enum RuleAttribute: String, Codable, CaseIterable, Identifiable {
         case .playCount: "Count"
         case .rating: "1-5"
         case .tag: "Tag name"
+        case .membership: "Smart library or album"
         }
     }
 }
@@ -235,6 +241,10 @@ enum RuleComparison: String, Codable, CaseIterable, Identifiable {
     case isEmpty
     /// Custom metadata: has a stored, non-blank value.
     case isNotEmpty
+    /// Membership: video belongs to the chosen smart library, collection, or album.
+    case isMemberOf
+    /// Membership: video does not belong to the chosen target.
+    case isNotMemberOf
 
     var id: String { rawValue }
 
@@ -253,6 +263,8 @@ enum RuleComparison: String, Codable, CaseIterable, Identifiable {
         case .between: "is between"
         case .isEmpty: "is empty"
         case .isNotEmpty: "is not empty"
+        case .isMemberOf: "is member of"
+        case .isNotMemberOf: "is not member of"
         }
     }
 

@@ -8,6 +8,8 @@ struct CollectionEditorView: View {
     var customFields: [CustomMetadataFieldDefinition] = []
     /// Existing tags, offered as a menu when a rule targets the Tag attribute.
     var tags: [Tag] = []
+    /// Smart collections and albums for Membership rule targets.
+    var collections: [VideoCollection] = []
     let onSave: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -51,6 +53,9 @@ struct CollectionEditorView: View {
     private func ruleIsValid(_ rule: EditableRule) -> Bool {
         guard rule.comparison.usesValue else { return true }
         guard !rule.value.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        if case .builtin(.membership) = rule.field {
+            return MembershipTarget(storageToken: rule.value) != nil
+        }
         if rule.comparison.usesSecondValue {
             return !rule.value2.trimmingCharacters(in: .whitespaces).isEmpty
         }
@@ -292,6 +297,8 @@ struct CollectionEditorView: View {
             }
         case .quality:
             qualityChips(rule.value)
+        case .membership:
+            MembershipTargetPicker(storageToken: rule.value, collections: collections)
         case .boolean:
             Picker("", selection: rule.value) {
                 Text("True").tag("true")
@@ -375,6 +382,8 @@ struct CollectionEditorView: View {
         case .date: value.wrappedValue = RuleDateFormat.string(from: Date())
         case .rating: value.wrappedValue = "0"
         case .boolean: value.wrappedValue = "true"
+        case .membership:
+            value.wrappedValue = MembershipTarget.smartLibrary(.recentlyAdded).storageToken
         default: break
         }
     }

@@ -95,4 +95,25 @@ final class QuickFilterCompilerTests: XCTestCase {
         )
         XCTAssertNil(QuickFilterCompiler.compile(input))
     }
+
+    func testSidebarSmartLibraryCompilesToMembership() {
+        let input = QuickFilterCompiler.Input(
+            sidebarFilter: .corrupt,
+            collectionGroup: nil,
+            tags: [],
+            selectedTagIds: [],
+            tagFilterMode: .any,
+            selectedRatingStars: [],
+            ratingFilterOrHigher: false,
+            minDurationSeconds: nil,
+            maxDurationSeconds: nil,
+            selectedQualityBuckets: [],
+            topRatedMinRating: 4
+        )
+        guard let group = QuickFilterCompiler.compile(input),
+              case .condition(let condition) = group.nodes.first else {
+            return XCTFail("Expected membership condition")
+        }
+        XCTAssertEqual(condition.value, "smartLibrary:corrupt")
+    }
 }

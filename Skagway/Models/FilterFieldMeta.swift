@@ -10,6 +10,7 @@ enum FilterFieldKind {
     case tag
     case quality
     case boolean
+    case membership
 }
 
 extension FilterField {
@@ -23,6 +24,7 @@ extension FilterField {
             case .rating: return .rating
             case .dateImported, .dateCreated: return .date
             case .quality: return .quality
+            case .membership: return .membership
             }
         case .custom(let id):
             switch customFields[id]?.valueType {
@@ -55,6 +57,8 @@ extension FilterField {
                 return [.isEmpty, .isNotEmpty, .equals, .lessThan, .greaterThan, .between]
             case .quality, .boolean:
                 return [.isEmpty, .isNotEmpty, .equals, .notEquals]
+            case .membership:
+                return [.isMemberOf, .isNotMemberOf]
             }
         }
     }

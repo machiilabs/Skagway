@@ -82,6 +82,7 @@ struct CuratedWallFiltersDrawer: View {
                 collection: nil,
                 customFields: viewModel.customMetadataFieldDefinitions,
                 tags: viewModel.tags,
+                collections: viewModel.collections,
                 onSave: { Task { await viewModel.loadCollections() } }
             )
         }
@@ -91,6 +92,7 @@ struct CuratedWallFiltersDrawer: View {
                 collection: collection,
                 customFields: viewModel.customMetadataFieldDefinitions,
                 tags: viewModel.tags,
+                collections: viewModel.collections,
                 onSave: { Task { await viewModel.loadCollections() } }
             )
         }
@@ -247,7 +249,8 @@ struct CuratedWallFiltersDrawer: View {
         AdvancedFilterRulesEditor(
             group: $viewModel.advancedFilterGroup,
             customFields: viewModel.customMetadataFieldDefinitions,
-            tags: viewModel.tags
+            tags: viewModel.tags,
+            collections: viewModel.collections
         )
         .id(viewModel.advancedFilterEditorSessionID)
         .frame(maxWidth: .infinity, alignment: .leading)

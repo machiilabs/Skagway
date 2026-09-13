@@ -10,14 +10,20 @@ enum FilterSummaryFormatter {
     static func filterGroupSummary(
         _ group: FilterGroup,
         customFields: [UUID: CustomMetadataFieldDefinition],
+        collections: [VideoCollection] = [],
         maxConditions: Int? = nil
     ) -> String? {
         guard !group.isEmpty else { return nil }
         let text: String
         if let maxConditions {
-            text = describeFilterGroupCapped(group, customFields: customFields, maxConditions: maxConditions)
+            text = describeFilterGroupCapped(
+                group,
+                customFields: customFields,
+                collections: collections,
+                maxConditions: maxConditions
+            )
         } else {
-            text = describeFilterGroup(group, customFields: customFields)
+            text = describeFilterGroup(group, customFields: customFields, collections: collections)
         }
         return text.isEmpty ? nil : text
     }
@@ -27,11 +33,12 @@ enum FilterSummaryFormatter {
         collectionName: String,
         group: FilterGroup,
         customFields: [UUID: CustomMetadataFieldDefinition],
+        collections: [VideoCollection] = [],
         maxLength: Int = 48
     ) -> String? {
         let conditions = flattenConditions(in: group)
         guard let first = conditions.first else { return nil }
-        let firstDesc = describeCondition(first, customFields: customFields)
+        let firstDesc = describeCondition(first, customFields: customFields, collections: collections)
         let hasMore = conditions.count > 1
         return truncatedCollectionLabel(
             name: collectionName,
@@ -74,12 +81,13 @@ enum FilterSummaryFormatter {
     private static func describeFilterGroupCapped(
         _ group: FilterGroup,
         customFields: [UUID: CustomMetadataFieldDefinition],
+        collections: [VideoCollection],
         maxConditions: Int
     ) -> String {
         let all = flattenConditions(in: group)
         guard !all.isEmpty else { return "" }
         let shown = all.prefix(maxConditions)
-        let parts = shown.map { describeCondition($0, customFields: customFields) }
+        let parts = shown.map { describeCondition($0, customFields: customFields, collections: collections) }
         var result = parts.joined(separator: " · ")
         let remaining = all.count - shown.count
         if remaining > 0 {
@@ -90,16 +98,17 @@ enum FilterSummaryFormatter {
 
     private static func describeFilterGroup(
         _ group: FilterGroup,
-        customFields: [UUID: CustomMetadataFieldDefinition]
+        customFields: [UUID: CustomMetadataFieldDefinition],
+        collections: [VideoCollection]
     ) -> String {
         let parts: [String] = group.nodes.compactMap { node in
             switch node {
             case .condition(let c):
-                return describeCondition(c, customFields: customFields)
+                return describeCondition(c, customFields: customFields, collections: collections)
             case .group(let inner):
                 let innerParts = inner.nodes.compactMap { child -> String? in
                     guard case .condition(let c) = child else { return nil }
-                    return describeCondition(c, customFields: customFields)
+                    return describeCondition(c, customFields: customFields, collections: collections)
                 }
                 guard !innerParts.isEmpty else { return nil }
                 let joiner = inner.mode == .all ? " AND " : " OR "
@@ -116,9 +125,14 @@ enum FilterSummaryFormatter {
 
     private static func describeCondition(
         _ c: FilterCondition,
-        customFields: [UUID: CustomMetadataFieldDefinition]
+        customFields: [UUID: CustomMetadataFieldDefinition],
+        collections: [VideoCollection]
     ) -> String {
         let field = c.field.label(customFields: customFields)
+        if case .builtin(.membership) = c.field {
+            let targetName = MembershipTarget(storageToken: c.value)?.displayLabel(collections: collections) ?? c.value
+            return "\(field) \(c.comparison.label) \(targetName)"
+        }
         if case .builtin(.quality) = c.field {
             let buckets = ResolutionBucket.decode(c.value)
             let list = ResolutionBucket.allCases.map(\.rawValue).filter { buckets.contains($0) }.joined(separator: ", ")

@@ -308,10 +308,13 @@ final class LibraryViewModel {
         return false
     }
 
-    /// Clears the live Advanced Filter (drawer Clear / pill ✕).
+    /// Clears the live Advanced Filter (drawer Clear / pill ✕) and the Quick stack that
+    /// compiled into it, so sidebar smart-library picks do not linger after dismissing Advanced.
     func clearAdvancedFilter() {
         collectionFilterPreview = nil
+        clearQuickFilters()
         resetAdvancedFilterEditorSession()
+        filtersDrawerMode = .quick
     }
 
     /// Clears Quick Filter state (sidebar, tags, rating, duration, quality). Does not touch
@@ -331,7 +334,8 @@ final class LibraryViewModel {
         guard let group = advancedFilterGroup, !group.isEmpty else { return nil }
         return FilterSummaryFormatter.filterGroupSummary(
             group,
-            customFields: customMetadataFieldDefinitionsById
+            customFields: customMetadataFieldDefinitionsById,
+            collections: collections
         )
     }
 
@@ -354,7 +358,8 @@ final class LibraryViewModel {
         return FilterSummaryFormatter.labeledCollectionPillText(
             collectionName: collection.name,
             group: group,
-            customFields: customMetadataFieldDefinitionsById
+            customFields: customMetadataFieldDefinitionsById,
+            collections: collections
         )
     }
 
@@ -375,6 +380,7 @@ final class LibraryViewModel {
         return FilterSummaryFormatter.filterGroupSummary(
             group,
             customFields: customMetadataFieldDefinitionsById,
+            collections: collections,
             maxConditions: maxConditions
         )
     }
@@ -411,7 +417,10 @@ final class LibraryViewModel {
             UserDefaults.standard.set(filtersDrawerMode.rawValue, forKey: Self.filtersDrawerModeKey)
             if filtersDrawerMode == .advanced, oldValue == .quick {
                 collectionFilterPreview = nil
-                _ = compileQuickFiltersIntoAdvanced()
+                // Mirror Quick into Advanced on tab switch; empty Quick clears stale compiled rules.
+                if !compileQuickFiltersIntoAdvanced() {
+                    resetAdvancedFilterEditorSession()
+                }
             }
             recomputeFilteredVideos()
         }
@@ -2793,6 +2802,7 @@ final class LibraryViewModel {
         let snapshot = FilterSnapshot(
             videos: videos,
             tagsByVideoId: tagsByVideoId,
+            collections: collections,
             cachedCollectionRules: cachedCollectionRules,
             cachedCollectionRuleGroups: cachedCollectionRuleGroups,
             cachedAlbumVideoIds: cachedAlbumVideoIds,
@@ -2842,6 +2852,7 @@ final class LibraryViewModel {
     private struct FilterSnapshot {
         let videos: [Video]
         let tagsByVideoId: [Int64: [Tag]]
+        let collections: [VideoCollection]
         let cachedCollectionRules: [Int64: [CollectionRule]]
         let cachedCollectionRuleGroups: [Int64: [CollectionRuleGroup]]
         let cachedAlbumVideoIds: [Int64: [Int64]]
@@ -3116,11 +3127,42 @@ final class LibraryViewModel {
         }
     }
 
+    private nonisolated static func libraryFilterContext(from snapshot: FilterSnapshot) -> LibraryFilterContext {
+        LibraryFilterContext.from(
+            duplicateVideoIds: snapshot.duplicateVideoIds,
+            missingVideoIds: snapshot.missingVideoIds,
+            recentlyAddedDays: snapshot.recentlyAddedDays,
+            recentlyPlayedDays: snapshot.recentlyPlayedDays,
+            topRatedMinRating: snapshot.topRatedMinRating,
+            recentlyConvertedDates: snapshot.recentlyConvertedDates,
+            recentlyAppliedPaths: snapshot.recentlyAppliedPaths,
+            lastAddedPaths: snapshot.lastAddedPaths,
+            thumbnailsSettled: snapshot.thumbnailsSettled,
+            cachedAlbumVideoIds: snapshot.cachedAlbumVideoIds
+        )
+    }
+
+    private func currentLibraryFilterContext() -> LibraryFilterContext {
+        LibraryFilterContext.from(
+            duplicateVideoIds: duplicateVideoIds,
+            missingVideoIds: missingVideoIds,
+            recentlyAddedDays: recentlyAddedDays,
+            recentlyPlayedDays: recentlyPlayedDays,
+            topRatedMinRating: topRatedMinRating,
+            recentlyConvertedDates: recentlyConvertedDates,
+            recentlyAppliedPaths: recentlyAppliedPaths,
+            lastAddedPaths: lastAddedPaths,
+            thumbnailsSettled: thumbnailsSettled,
+            cachedAlbumVideoIds: cachedAlbumVideoIds
+        )
+    }
+
     private nonisolated static func computeFilteredResult(snapshot: FilterSnapshot, collectionRepo: CollectionRepository) -> (videos: [Video], tagCounts: [Int64: Int]) {
         func isCorrupt(_ video: Video) -> Bool {
             video.duration == nil && video.width == nil && video.height == nil
                 || (snapshot.thumbnailsSettled && video.thumbnailPath == nil)
         }
+        let libraryContext = libraryFilterContext(from: snapshot)
         var baseResult = snapshot.videos
         let isSearching = !snapshot.searchText.isEmpty
         let isCorruptFilter = snapshot.sidebarFilter == .corrupt
@@ -3179,7 +3221,9 @@ final class LibraryViewModel {
                     let rulesByGroup = Dictionary(grouping: rules, by: \.groupId)
                     let matcher = collectionRepo.compileMatcher(
                         for: collection, groups: groups, rulesByGroup: rulesByGroup,
-                        customFields: snapshot.customFieldDefinitionsById
+                        customFields: snapshot.customFieldDefinitionsById,
+                        libraryContext: libraryContext,
+                        collectionRepo: collectionRepo
                     )
                     baseResult = baseResult.filter { video in
                         let dbId = video.databaseId
@@ -3211,7 +3255,12 @@ final class LibraryViewModel {
 
         case .advanced:
             if let group = snapshot.advancedFilterGroup, !group.isEmpty {
-                let matcher = FilterMatcher(group: group, customFields: snapshot.customFieldDefinitionsById)
+                let matcher = FilterMatcher(
+                    group: group,
+                    customFields: snapshot.customFieldDefinitionsById,
+                    libraryContext: libraryContext,
+                    collectionRepo: collectionRepo
+                )
                 baseResult = baseResult.filter { video in
                     let dbId = video.databaseId
                     return matcher.matches(
@@ -3520,7 +3569,15 @@ final class LibraryViewModel {
                 let rules = cachedCollectionRules[collectionId] ?? []
                 let rulesByGroup = Dictionary(grouping: rules, by: \.groupId)
                 let customFields = Dictionary(uniqueKeysWithValues: customMetadataFieldDefinitions.map { ($0.id, $0) })
-                let matcher = collectionRepo.compileMatcher(for: collection, groups: groups, rulesByGroup: rulesByGroup, customFields: customFields)
+                let libraryContext = currentLibraryFilterContext()
+                let matcher = collectionRepo.compileMatcher(
+                    for: collection,
+                    groups: groups,
+                    rulesByGroup: rulesByGroup,
+                    customFields: customFields,
+                    libraryContext: libraryContext,
+                    collectionRepo: collectionRepo
+                )
                 result = result.filter { video in
                     let dbId = video.databaseId
                     return matcher.matches(
@@ -5742,6 +5799,7 @@ final class LibraryViewModel {
         let repo = collectionRepo
         let customValuesById = listCustomMetadataByVideoId
         let customFields = Dictionary(uniqueKeysWithValues: customMetadataFieldDefinitions.map { ($0.id, $0) })
+        let libraryContext = currentLibraryFilterContext()
 
         let counts = await Task.detached(priority: .utility) {
             var counts: [Int64: Int] = [:]
@@ -5761,7 +5819,14 @@ final class LibraryViewModel {
                     continue
                 }
                 let rulesByGroup = Dictionary(grouping: allRules[id] ?? [], by: \.groupId)
-                let matcher = repo.compileMatcher(for: collection, groups: groups, rulesByGroup: rulesByGroup, customFields: customFields)
+                let matcher = repo.compileMatcher(
+                    for: collection,
+                    groups: groups,
+                    rulesByGroup: rulesByGroup,
+                    customFields: customFields,
+                    libraryContext: libraryContext,
+                    collectionRepo: repo
+                )
                 counts[id] = baseVideos.filter { video in
                     let dbId = video.databaseId
                     return matcher.matches(

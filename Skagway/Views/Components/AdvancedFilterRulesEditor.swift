@@ -8,9 +8,10 @@ struct AdvancedFilterRulesEditor: View {
     @Binding var group: FilterGroup?
     var customFields: [CustomMetadataFieldDefinition] = []
     var tags: [Tag] = []
+    var collections: [VideoCollection] = []
 
     @State private var outerMatchMode: MatchMode = .all
-    @State private var groups: [EditableGroup] = [EditableGroup()]
+    @State private var groups: [EditableGroup] = [EditableGroup(rules: [])]
     /// Suppresses publish→load feedback when we just wrote `group` ourselves.
     @State private var isPublishing = false
 
@@ -41,7 +42,7 @@ struct AdvancedFilterRulesEditor: View {
         var matchMode: MatchMode
         var rules: [EditableRule]
 
-        init(id: UUID = UUID(), matchMode: MatchMode = .all, rules: [EditableRule] = [EditableRule()]) {
+        init(id: UUID = UUID(), matchMode: MatchMode = .all, rules: [EditableRule] = []) {
             self.id = id
             self.matchMode = matchMode
             self.rules = rules
@@ -289,6 +290,8 @@ struct AdvancedFilterRulesEditor: View {
             }
         case .quality:
             qualityChips(rule.value)
+        case .membership:
+            MembershipTargetPicker(storageToken: rule.value, collections: collections)
         case .boolean:
             Picker("", selection: rule.value) {
                 Text("True").tag("true")
@@ -374,6 +377,8 @@ struct AdvancedFilterRulesEditor: View {
         case .date: value.wrappedValue = RuleDateFormat.string(from: Date())
         case .rating: value.wrappedValue = "0"
         case .boolean: value.wrappedValue = "true"
+        case .membership:
+            value.wrappedValue = MembershipTarget.smartLibrary(.recentlyAdded).storageToken
         default: break
         }
     }
@@ -400,7 +405,7 @@ struct AdvancedFilterRulesEditor: View {
 
     private func resetEditor(publish: Bool = true) {
         outerMatchMode = .all
-        groups = [EditableGroup()]
+        groups = [EditableGroup(rules: [])]
         if publish {
             isPublishing = true
             group = nil
@@ -411,6 +416,9 @@ struct AdvancedFilterRulesEditor: View {
     private func ruleIsValid(_ rule: EditableRule) -> Bool {
         guard rule.comparison.usesValue else { return true }
         guard !rule.value.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        if case .builtin(.membership) = rule.field {
+            return MembershipTarget(storageToken: rule.value) != nil
+        }
         if rule.comparison.usesSecondValue {
             return !rule.value2.trimmingCharacters(in: .whitespaces).isEmpty
         }
@@ -447,7 +455,7 @@ struct AdvancedFilterRulesEditor: View {
     private func loadFromBinding() {
         guard let existing = group, !existing.isEmpty else {
             outerMatchMode = .all
-            groups = [EditableGroup()]
+            groups = [EditableGroup(rules: [])]
             return
         }
         outerMatchMode = existing.mode
