@@ -14,66 +14,11 @@ struct ActiveFilterPills: View {
                 // instead of scrolling out of view as just another trailing item.
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        // Sidebar / smart filter pill
-                        if let f = viewModel.sidebarFilter, f != .all {
-                            sidebarFilterPill(for: f)
-                        }
-
-                        // Rating
-                        if let rating = viewModel.selectedRatingStars.min() {
-                            let text: String = {
-                                if rating == 0 { return "No stars" }
-                                if viewModel.ratingFilterOrHigher, rating < 5 { return "Rating \(rating)+" }
-                                return "Rating \(rating)"
-                            }()
-                            pill(text: text, systemImage: rating == 0 ? "star.slash" : "star", onRemove: {
-                                viewModel.clearRatingFilter()
-                            })
-                        }
-
-                        // Tags
-                        if !viewModel.selectedTagIds.isEmpty {
-                            let count = viewModel.selectedTagIds.count
-                            pill(text: count == 1 ? "1 tag" : "\(count) tags", systemImage: "tag", onRemove: {
-                                viewModel.clearTagFilters()
-                            })
-                        }
-
-                        // Duration
-                        if viewModel.minDurationSeconds != nil || viewModel.maxDurationSeconds != nil {
-                            let txt: String = {
-                                if let mn = viewModel.minDurationSeconds, let mx = viewModel.maxDurationSeconds {
-                                    return "\(Int(mn/60))–\(Int(mx/60)) min"
-                                } else if let mn = viewModel.minDurationSeconds {
-                                    return "≥\(Int(mn/60)) min"
-                                } else if let mx = viewModel.maxDurationSeconds {
-                                    return "≤\(Int(mx/60)) min"
-                                }
-                                return "Duration"
-                            }()
-                            pill(text: txt, systemImage: "clock", onRemove: {
-                                viewModel.clearDurationFilter()
-                            })
-                        }
-
-                        // Quality
-                        if !viewModel.selectedQualityBuckets.isEmpty {
-                            let ordered = ResolutionBucket.allCases
-                                .map(\.rawValue)
-                                .filter { viewModel.selectedQualityBuckets.contains($0) }
-                            pill(text: "Quality: " + ordered.joined(separator: ", "), systemImage: "rectangle.and.arrow.up.right.and.arrow.down.left", onRemove: {
-                                viewModel.clearQualityFilter()
-                            })
-                        }
-
-                        // Advanced Filter — one summary pill, not per-condition.
-                        if let summary = viewModel.activeAdvancedFilterSummary {
-                            pill(
-                                text: summary.count > 48 ? "Advanced Filter" : summary,
-                                systemImage: "slider.horizontal.3",
-                                onTap: { viewModel.openFiltersDrawer(mode: .advanced) },
-                                onRemove: { viewModel.clearAdvancedFilter() }
-                            )
+                        switch viewModel.filtersDrawerMode {
+                        case .quick:
+                            quickFilterPills
+                        case .advanced:
+                            advancedFilterPill
                         }
                     }
                 }
@@ -90,6 +35,73 @@ struct ActiveFilterPills: View {
             .padding(.vertical, 4)
             .background(Color.appSurface.opacity(0.4))
             .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var quickFilterPills: some View {
+        // Sidebar / smart filter pill
+        if let f = viewModel.sidebarFilter, f != .all {
+            sidebarFilterPill(for: f)
+        }
+
+        // Rating
+        if let rating = viewModel.selectedRatingStars.min() {
+            let text: String = {
+                if rating == 0 { return "No stars" }
+                if viewModel.ratingFilterOrHigher, rating < 5 { return "Rating \(rating)+" }
+                return "Rating \(rating)"
+            }()
+            pill(text: text, systemImage: rating == 0 ? "star.slash" : "star", onRemove: {
+                viewModel.clearRatingFilter()
+            })
+        }
+
+        // Tags
+        if !viewModel.selectedTagIds.isEmpty {
+            let count = viewModel.selectedTagIds.count
+            pill(text: count == 1 ? "1 tag" : "\(count) tags", systemImage: "tag", onRemove: {
+                viewModel.clearTagFilters()
+            })
+        }
+
+        // Duration
+        if viewModel.minDurationSeconds != nil || viewModel.maxDurationSeconds != nil {
+            let txt: String = {
+                if let mn = viewModel.minDurationSeconds, let mx = viewModel.maxDurationSeconds {
+                    return "\(Int(mn/60))–\(Int(mx/60)) min"
+                } else if let mn = viewModel.minDurationSeconds {
+                    return "≥\(Int(mn/60)) min"
+                } else if let mx = viewModel.maxDurationSeconds {
+                    return "≤\(Int(mx/60)) min"
+                }
+                return "Duration"
+            }()
+            pill(text: txt, systemImage: "clock", onRemove: {
+                viewModel.clearDurationFilter()
+            })
+        }
+
+        // Quality
+        if !viewModel.selectedQualityBuckets.isEmpty {
+            let ordered = ResolutionBucket.allCases
+                .map(\.rawValue)
+                .filter { viewModel.selectedQualityBuckets.contains($0) }
+            pill(text: "Quality: " + ordered.joined(separator: ", "), systemImage: "rectangle.and.arrow.up.right.and.arrow.down.left", onRemove: {
+                viewModel.clearQualityFilter()
+            })
+        }
+    }
+
+    @ViewBuilder
+    private var advancedFilterPill: some View {
+        if let summary = viewModel.activeAdvancedFilterSummary {
+            pill(
+                text: summary.count > 48 ? "Advanced Filter" : summary,
+                systemImage: "slider.horizontal.3",
+                onTap: { viewModel.openFiltersDrawer(mode: .advanced) },
+                onRemove: { viewModel.clearAdvancedFilter() }
+            )
         }
     }
 
