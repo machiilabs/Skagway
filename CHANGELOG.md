@@ -31,10 +31,9 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+## 1.1.1 (build 1066) - 2026-09-14
+
 - **Browser keyboard after text input** — Selecting a clip in the grid or list now defocuses the library search field and Inspector text inputs (new tag, custom fields) so Space starts playback and arrow keys navigate the browser again.
-
-## 1.1.1 (build 1065) - 2026-09-14
-
 - **Review mode tag targets** — Inspector tag add/remove snapshots the active target at click time so ESC, playback stop, or focus changes cannot retarget a pending tag operation onto the collected set. Stopping playback on a clip outside the set no longer auto-switches bulk inspect; Review tags show a “Tagging …” caption.
 - **Search + arrow keys** — Arrow keys navigate the filtered search result set again (library search no longer keeps focus and swallows ←/→/↑/↓; List restores table first responder after defocus).
 - **Membership filter attribute** — Advanced Filter and Smart Collections support **Membership** with **is member of** / **is not member of** for smart libraries and albums (not saved smart collections). Quick → Advanced still inlines smart collection rules; sidebar smart libraries and albums compile to membership.
