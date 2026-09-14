@@ -120,7 +120,11 @@ struct CuratedWallInspector: View {
         .onChange(of: viewModel.inspectorPrefersSelection) { _, _ in
             loadCustomFieldValues()
             bookmarkTitleDrafts = [:]
+            newTagText = ""
             Task { await viewModel.reloadBookmarksForSelection() }
+        }
+        .onChange(of: viewModel.focusedVideoId) { _, _ in
+            newTagText = ""
         }
         .onChange(of: focusedBookmarkTitleId) { old, newValue in
             viewModel.isEditingText = (newValue != nil)
@@ -723,7 +727,8 @@ struct CuratedWallInspector: View {
                     let s = fmt.string(from: newDate)
                     customFieldValues[field.id] = s
                     customFieldMixed.remove(field.id)
-                    Task { await viewModel.persistCustomMetadata(fieldId: field.id, value: s, forVideoPaths: selectedIds) }
+                    let targets = Set(viewModel.inspectorActionIds)
+                    Task { await viewModel.persistCustomMetadata(fieldId: field.id, value: s, forVideoPaths: targets) }
                 }
             )
             DatePicker("", selection: dateBinding,
@@ -893,6 +898,12 @@ struct CuratedWallInspector: View {
                 Spacer()
             }
 
+            if viewModel.isReviewMode {
+                Text(tagActionTargetCaption)
+                    .font(.caption2)
+                    .foregroundStyle(Color.appTextTertiary)
+            }
+
             // List 1 — tags on this video; tap a chip to unassign it. Packed flow (not a grid).
             if assigned.isEmpty {
                 Text("Create a tag below, or pick one from Add tags")
@@ -902,7 +913,7 @@ struct CuratedWallInspector: View {
                 FlowLayout(spacing: 4) {
                     ForEach(assigned) { tag in
                         InspectorTagChip(tag: tag, applied: true, fillWidth: false) {
-                            Task { await viewModel.removeTag(tag, fromVideos: selectedIds) }
+                            removeTagFromCurrentTarget(tag)
                         }
                     }
                 }
@@ -962,11 +973,36 @@ struct CuratedWallInspector: View {
         }
     }
 
+    private var tagActionTargetCaption: String {
+        if viewModel.inspectorIsSetMode {
+            let n = collectedSetCount
+            return n == 1 ? "Tagging collected clip" : "Tagging \(n) collected clips"
+        }
+        if let v = video {
+            return "Tagging \"\(v.displayTitle)\""
+        }
+        return "Tagging selected clip"
+    }
+
+    /// Snapshot inspector targets synchronously — `Task { … selectedIds … }` would re-read after
+    /// ESC / playback-stop switches Review mode to the collected set.
+    private func assignTagToCurrentTarget(_ name: String) {
+        let targets = Set(viewModel.inspectorActionIds)
+        guard !name.isEmpty, !targets.isEmpty else { return }
+        Task { await viewModel.addTag(name, toVideos: targets) }
+    }
+
+    private func removeTagFromCurrentTarget(_ tag: Tag) {
+        let targets = Set(viewModel.inspectorActionIds)
+        guard !targets.isEmpty else { return }
+        Task { await viewModel.removeTag(tag, fromVideos: targets) }
+    }
+
     private func createAndAssignTag() {
         let name = newTagText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !selectedIds.isEmpty else { return }
         newTagText = ""
-        Task { await viewModel.addTag(name, toVideos: selectedIds) }
+        assignTagToCurrentTarget(name)
     }
 
     /// A flexible grid of every tag in stable (alphabetical) order for the "Add tags" list.
@@ -978,7 +1014,7 @@ struct CuratedWallInspector: View {
             ForEach(tags) { tag in
                 let isApplied = appliedIds.contains(tag.id ?? -1)
                 InspectorTagChip(tag: tag, applied: false, isDisabled: isApplied) {
-                    Task { await viewModel.addTag(tag.name, toVideos: selectedIds) }
+                    assignTagToCurrentTarget(tag.name)
                 }
             }
         }

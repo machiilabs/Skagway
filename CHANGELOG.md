@@ -31,6 +31,10 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+## 1.1.1 (build 1065) - 2026-09-14
+
+- **Review mode tag targets** — Inspector tag add/remove snapshots the active target at click time so ESC, playback stop, or focus changes cannot retarget a pending tag operation onto the collected set. Stopping playback on a clip outside the set no longer auto-switches bulk inspect; Review tags show a “Tagging …” caption.
+- **Search + arrow keys** — Arrow keys navigate the filtered search result set again (library search no longer keeps focus and swallows ←/→/↑/↓; List restores table first responder after defocus).
 - **Membership filter attribute** — Advanced Filter and Smart Collections support **Membership** with **is member of** / **is not member of** for smart libraries and albums (not saved smart collections). Quick → Advanced still inlines smart collection rules; sidebar smart libraries and albums compile to membership.
 - **Quick → Advanced compile** — Switching to the Advanced tab compiles active Quick filters into one rule tree (e.g. collection + ANY tags + rating 4+ becomes Parent Folder equals Demo AND (Tag equals trees OR Tag equals outdoor) AND Rating is at least 4). Empty Quick (All Videos, no tags/rating/duration/quality) clears Advanced so a prior compile does not linger. Clearing the Advanced pill or drawer **Clear** also resets Quick (sidebar, tags, rating, etc.) and returns to the Quick tab so a dismissed filter cannot reapply from stale Quick state.
 - **Filter tab shortcuts** — **⌘⌥Q** (Quick) and **⌘⌥A** (Advanced) switch filter drawer tabs; opens the drawer if it is closed.
@@ -40,6 +44,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 - **Custom field empty filters** — Advanced Filter and Smart Collections support **is empty** / **is not empty** on custom metadata fields (unset, blank, or whitespace-only values).
 - **Sparkle publish checklist** — Release workflow, `docs/SPARKLE.md`, and `package_dmg.sh` now require uploading both `Skagway.dmg` + `Skagway.appcast.xml` to R2 and passing `scripts/verify_sparkle_publish.sh` before announcing a release (prevents “improperly signed” updates when CDN serves a stale DMG).
 - **Build / install cleanup** — `build_and_install.sh` and `package_dmg.sh` now run `cleanup_stray_skagway_apps.sh` after install/package: removes DerivedData and Sparkle appcast cache copies, ejects leftover install DMG volumes, rebuilds Launch Services, and re-registers `/Applications/Skagway.app` so Launchpad does not accumulate duplicate Skagway icons.
+- **DMG packaging** — Archive uses Automatic signing; Developer ID re-sign runs after export without explicit `--timestamp` (avoids flaky Apple timestamp server failures during Sparkle/GRDB bundle signing).
 
 ## 1.1.0 (build 1045) - 2026-09-12
 

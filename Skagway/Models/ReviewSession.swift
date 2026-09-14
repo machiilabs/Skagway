@@ -58,9 +58,10 @@ struct ReviewSession: Equatable {
     }
 
     mutating func playbackStopped() {
-        if selectedIds.count > 1 {
-            inspectorPrefersSelection = true
-        }
+        guard selectedIds.count > 1 else { return }
+        // Keep single-clip inspect when playback stops on a "maybe" outside the collected set.
+        if let focusedId, !selectedIds.contains(focusedId) { return }
+        inspectorPrefersSelection = true
     }
 
     mutating func moveFocus(step: Int, orderedIds: [String]) {

@@ -836,6 +836,13 @@ private struct LibraryContentView: View {
         .onChange(of: vm.focusSearchFieldToken) { _, _ in
             isSearchFocused = true
         }
+        .onChange(of: isSearchFocused) { _, focused in
+            vm.isLibrarySearchFocused = focused
+        }
+        .onChange(of: vm.defocusSearchFieldToken) { _, _ in
+            isSearchFocused = false
+            Self.refocusBrowserAfterTextDefocus(viewMode: vm.viewMode)
+        }
         .onChange(of: vm.isCuratedWallFiltersDrawerOpen) { _, newValue in
             // Animate the reveal factor. The well and drawer heights are driven from this CGFloat,
             // so we get smooth per-frame interpolated sizes instead of a full-height pop followed by a push.
@@ -863,15 +870,43 @@ private struct LibraryContentView: View {
     /// instead of only resigning the focused field.
     private func resignTextInputFocusForPlayback() {
         isSearchFocused = false
+        vm.isLibrarySearchFocused = false
         guard let window = NSApp.keyWindow else { return }
         if let first = window.firstResponder, first is NSText {
             window.makeFirstResponder(nil)
-            // Same list-selection highlight fix as the Escape defocus path.
-            if vm.viewMode == .list,
-               let content = window.contentView,
-               let tableView = TableScrollHelper.findTableView(in: content) {
-                window.makeFirstResponder(tableView)
-            }
+            Self.refocusBrowserAfterTextDefocus(viewMode: vm.viewMode, window: window)
+        }
+    }
+
+    /// After the library search field (or another text control) resigns focus, give List's `Table`
+    /// first responder again so row highlight and arrow keys behave normally.
+    private static func refocusBrowserAfterTextDefocus(
+        viewMode: ViewMode,
+        window: NSWindow? = NSApp.keyWindow
+    ) {
+        guard viewMode == .list,
+              let window,
+              let content = window.contentView,
+              let tableView = TableScrollHelper.findTableView(in: content)
+        else { return }
+        window.makeFirstResponder(tableView)
+    }
+
+    private static func arrowNavigationStep(for keyCode: UInt16, viewMode: ViewMode) -> Int? {
+        switch keyCode {
+        case 123: return -1
+        case 124: return 1
+        case 126: return viewMode == .grid ? -CuratedWallGrid.columns : -1
+        case 125: return viewMode == .grid ? CuratedWallGrid.columns : 1
+        default: return nil
+        }
+    }
+
+    /// Grid navigation is always handled here; List defers to `Table` unless search still owns focus.
+    private static func shouldHandleArrowNavigation(_ lvm: LibraryViewModel) -> Bool {
+        switch lvm.viewMode {
+        case .grid: return true
+        case .list: return lvm.isLibrarySearchFocused
         }
     }
 
@@ -928,15 +963,7 @@ private struct LibraryContentView: View {
                 DispatchQueue.main.async {
                     guard let window = NSApp.keyWindow else { return }
                     window.makeFirstResponder(nil)
-                    // `makeFirstResponder(nil)` only clears the field's focus — it doesn't hand
-                    // focus to anything else, so List's Table stops being first responder and its
-                    // selection highlight is stuck in AppKit's "not focused" gray style until
-                    // something becomes first responder again. Restore it explicitly.
-                    if lvm.viewMode == .list,
-                       let content = window.contentView,
-                       let tableView = TableScrollHelper.findTableView(in: content) {
-                        window.makeFirstResponder(tableView)
-                    }
+                    Self.refocusBrowserAfterTextDefocus(viewMode: lvm.viewMode, window: window)
                 }
                 return nil
             }
@@ -1061,27 +1088,31 @@ private struct LibraryContentView: View {
             }
         }
 
-        // Arrow keys — grid navigation. Handled here (same local monitor as Space/Enter/Escape) because
-        // SwiftUI `.onKeyPress` on the grid's `ScrollView` doesn't reliably receive keys inside the
-        // NSHostingView+NSSplitView the Curated Wall is hosted in. ←/→ step one video; ↑/↓ step one row.
+        // Arrow keys — grid navigation (and list when search still owns focus). Handled here (same
+        // local monitor as Space/Enter/Escape) because SwiftUI `.onKeyPress` on the grid's
+        // `ScrollView` doesn't reliably receive keys inside the NSHostingView+NSSplitView the
+        // Curated Wall is hosted in. ←/→ step one video; ↑/↓ step one row in grid, one row in list.
         // keyCodes: 123 ←, 124 →, 125 ↓, 126 ↑.
         // While playing, ←/→ are consumed above for nudge/skip; ↑/↓ still navigate the grid.
         if [123, 124, 125, 126].contains(event.keyCode),
            event.modifierFlags.intersection(commandModifiers).isEmpty,
-           lvm.viewMode == .grid,
+           shouldHandleArrowNavigation(lvm),
            !lvm.isEditingText {
-            // Let a focused text field (search, inspector fields) keep its own caret navigation.
-            if let first = NSApp.keyWindow?.firstResponder, first is NSTextView || first is NSTextField {
+            let searchFocused = lvm.isLibrarySearchFocused
+            // Inspector / notes fields keep caret navigation; library search yields to the result set.
+            if !searchFocused,
+               let first = NSApp.keyWindow?.firstResponder, first is NSTextView || first is NSTextField {
                 return event
             }
-            let step: Int
-            switch event.keyCode {
-            case 123: step = -1                     // ← previous
-            case 124: step = 1                      // → next
-            case 126: step = -CuratedWallGrid.columns   // ↑ one row up
-            default:  step = CuratedWallGrid.columns    // ↓ one row down
+            guard let step = arrowNavigationStep(for: event.keyCode, viewMode: lvm.viewMode) else {
+                return event
             }
-            DispatchQueue.main.async { lvm.navigateFilteredVideoStep(step) }
+            DispatchQueue.main.async {
+                if searchFocused {
+                    lvm.requestDefocusSearchField()
+                }
+                lvm.navigateFilteredVideoStep(step)
+            }
             return nil
         }
 
@@ -1095,11 +1126,15 @@ private struct LibraryContentView: View {
         // `.deviceIndependentFlagsMask` emptiness check never matches — test only the real modifiers.
         if event.keyCode == 115 || event.keyCode == 119,  // 115 Home, 119 End
            event.modifierFlags.intersection(commandModifiers).isEmpty,
+           shouldHandleArrowNavigation(lvm),
            !lvm.isEditingText {
-            if let first = NSApp.keyWindow?.firstResponder, first is NSTextView || first is NSTextField {
+            let searchFocused = lvm.isLibrarySearchFocused
+            if !searchFocused,
+               let first = NSApp.keyWindow?.firstResponder, first is NSTextView || first is NSTextField {
                 return event
             }
             DispatchQueue.main.async {
+                if searchFocused { lvm.requestDefocusSearchField() }
                 if event.keyCode == 115 { lvm.goToFirstVideo() } else { lvm.goToLastVideo() }
             }
             return nil

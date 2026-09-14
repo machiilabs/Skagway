@@ -660,9 +660,19 @@ final class LibraryViewModel {
     /// Bumped by the ⌘F global key monitor to request search-field focus. The FocusState it drives
     /// lives in ContentView, so this token bridges the same way `scrollCommand` does for scroll requests.
     private(set) var focusSearchFieldToken: Int = 0
+    /// Mirrored from ContentView `@FocusState` so the key monitor can tell library search apart
+    /// from Inspector text fields (which should keep arrow-key caret navigation).
+    var isLibrarySearchFocused = false
+    /// Bumped to resign library search focus and restore list-table first responder when needed.
+    private(set) var defocusSearchFieldToken: Int = 0
 
     func requestFocusSearchField() {
         focusSearchFieldToken += 1
+    }
+
+    func requestDefocusSearchField() {
+        isLibrarySearchFocused = false
+        defocusSearchFieldToken += 1
     }
 
     /// Set by renameVideo when sorted by name; consumed by applyFilteredVideos to scroll in same cycle as bump.
@@ -3834,9 +3844,9 @@ final class LibraryViewModel {
     }
 
     func notePlaybackStopped() {
-        if isReviewMode, selectedVideoIds.count > 1 {
-            inspectorPrefersSelection = true
-        }
+        guard isReviewMode, selectedVideoIds.count > 1 else { return }
+        if let focused = focusedVideoId, !selectedVideoIds.contains(focused) { return }
+        inspectorPrefersSelection = true
     }
 
     func toggleReviewMode() {

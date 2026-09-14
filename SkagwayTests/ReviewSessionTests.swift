@@ -46,11 +46,18 @@ final class ReviewSessionTests: XCTestCase {
     }
 
     func testPlaybackStopEntersSetModeWhenCollecting() {
-        var session = ReviewSession(focusedId: b, selectedIds: [a, c])
+        var session = ReviewSession(focusedId: a, selectedIds: [a, c])
         session.playbackStopped()
         XCTAssertTrue(session.isSetMode)
         XCTAssertEqual(session.actionIds, [a, c])
         XCTAssertEqual(session.reviewedId(lastSelectedId: a), a)
+    }
+
+    func testPlaybackStopKeepsSingleInspectWhenFocusOutsideSet() {
+        var session = ReviewSession(focusedId: d, selectedIds: [a, b, c])
+        session.playbackStopped()
+        XCTAssertFalse(session.isSetMode)
+        XCTAssertEqual(session.actionIds, [d])
     }
 
     func testPlaybackStopStaysOnFocusWhenSetIsEmptyOrSingle() {

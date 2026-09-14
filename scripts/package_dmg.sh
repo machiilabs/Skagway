@@ -100,7 +100,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Archiving (Release, Developer ID + hardened runtime)... (log: ${BUILD_LOG})"
+echo "Archiving (Release; Developer ID signing happens after export)... (log: ${BUILD_LOG})"
 set +e
 xcodebuild \
   -project Skagway.xcodeproj \
@@ -110,10 +110,8 @@ xcodebuild \
   -archivePath "$ARCHIVE_PATH" \
   archive \
   DEVELOPMENT_TEAM="$TEAM_ID" \
-  CODE_SIGN_STYLE=Manual \
-  CODE_SIGN_IDENTITY="$IDENTITY" \
+  CODE_SIGN_STYLE=Automatic \
   ENABLE_HARDENED_RUNTIME=YES \
-  OTHER_CODE_SIGN_FLAGS="--timestamp" \
   >"$BUILD_LOG" 2>&1
 ARCHIVE_STATUS=$?
 set -e
@@ -140,16 +138,28 @@ xattr -cr "$APP_PATH"
 sign_item() {
   local target=$1
   local with_entitlements=${2:-0}
-  if [[ $with_entitlements -eq 1 ]]; then
-    codesign --force --options runtime --timestamp \
-      --sign "$IDENTITY" \
-      --entitlements "$ENTITLEMENTS" \
-      "$target"
-  else
-    codesign --force --options runtime --timestamp \
-      --sign "$IDENTITY" \
-      "$target"
-  fi
+  local attempt output status
+  for attempt in 1 2 3; do
+    if [[ $with_entitlements -eq 1 ]]; then
+      output=$(codesign --force --options runtime \
+        --sign "$IDENTITY" \
+        --entitlements "$ENTITLEMENTS" \
+        "$target" 2>&1) || status=$?
+    else
+      output=$(codesign --force --options runtime \
+        --sign "$IDENTITY" \
+        "$target" 2>&1) || status=$?
+    fi
+    if [[ ${status:-0} -eq 0 ]]; then
+      [[ -n "$output" ]] && echo "$output"
+      return 0
+    fi
+    echo "$output" >&2
+    echo "CodeSign retry ${attempt}/3 for ${target}" >&2
+    status=0
+    sleep 2
+  done
+  return 1
 }
 
 echo "Signing nested code (inside-out)…"
@@ -221,7 +231,7 @@ create-dmg \
   "$STAGE_DIR"
 
 echo "Signing DMG…"
-codesign --force --timestamp --sign "$IDENTITY" "$VERSIONED_DMG"
+sign_item "$VERSIONED_DMG" 0
 
 if [[ $NOTARIZE -eq 1 ]]; then
   echo "Submitting to Apple notary service (profile: ${NOTARY_PROFILE})…"
