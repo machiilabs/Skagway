@@ -126,6 +126,10 @@ struct CuratedWallInspector: View {
         .onChange(of: viewModel.focusedVideoId) { _, _ in
             newTagText = ""
         }
+        .onChange(of: viewModel.defocusTextInputsToken) { _, _ in
+            focusedCustomFieldId = nil
+            focusedBookmarkTitleId = nil
+        }
         .onChange(of: focusedBookmarkTitleId) { old, newValue in
             viewModel.isEditingText = (newValue != nil)
             guard let id = old, let draft = bookmarkTitleDrafts[id] else { return }

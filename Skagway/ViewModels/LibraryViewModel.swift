@@ -663,16 +663,22 @@ final class LibraryViewModel {
     /// Mirrored from ContentView `@FocusState` so the key monitor can tell library search apart
     /// from Inspector text fields (which should keep arrow-key caret navigation).
     var isLibrarySearchFocused = false
-    /// Bumped to resign library search focus and restore list-table first responder when needed.
-    private(set) var defocusSearchFieldToken: Int = 0
+    /// Bumped to resign library search, Inspector text fields, and other inputs so Space / arrow
+    /// keys reach the browser again after the user selects a clip in the grid or list.
+    private(set) var defocusTextInputsToken: Int = 0
 
     func requestFocusSearchField() {
         focusSearchFieldToken += 1
     }
 
-    func requestDefocusSearchField() {
+    func requestDefocusTextInputs() {
         isLibrarySearchFocused = false
-        defocusSearchFieldToken += 1
+        isEditingText = false
+        defocusTextInputsToken += 1
+    }
+
+    func requestDefocusSearchField() {
+        requestDefocusTextInputs()
     }
 
     /// Set by renameVideo when sorted by name; consumed by applyFilteredVideos to scroll in same cycle as bump.
@@ -3810,6 +3816,7 @@ final class LibraryViewModel {
 
     /// Move review focus without replacing the collected set. Retargets the player when already playing.
     func setReviewFocus(_ id: String, retargetIfPlaying: Bool = true, scroll: Bool = false) {
+        requestDefocusTextInputs()
         let previous = focusedVideoId
         focusedVideoId = id
         lastSelectedVideoId = id

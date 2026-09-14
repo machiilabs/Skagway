@@ -31,6 +31,8 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Browser keyboard after text input** — Selecting a clip in the grid or list now defocuses the library search field and Inspector text inputs (new tag, custom fields) so Space starts playback and arrow keys navigate the browser again.
+
 ## 1.1.1 (build 1065) - 2026-09-14
 
 - **Review mode tag targets** — Inspector tag add/remove snapshots the active target at click time so ESC, playback stop, or focus changes cannot retarget a pending tag operation onto the collected set. Stopping playback on a clip outside the set no longer auto-switches bulk inspect; Review tags show a “Tagging …” caption.

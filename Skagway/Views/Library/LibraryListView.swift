@@ -1235,6 +1235,7 @@ struct LibraryListView: View {
     }
 
     private func selectListRow(_ video: Video) {
+        viewModel.requestDefocusTextInputs()
         lastClickedId = video.id
         if viewModel.isReviewMode {
             viewModel.setReviewFocus(video.id)
@@ -1264,6 +1265,7 @@ struct LibraryListView: View {
     }
 
     private func handleListThumbnailModifierClick(_ video: Video, flags: NSEvent.ModifierFlags) {
+        viewModel.requestDefocusTextInputs()
         if !viewModel.isReviewMode {
             if flags.contains(.command) {
                 var ids = viewModel.selectedVideoIds
@@ -1314,6 +1316,7 @@ struct LibraryListView: View {
         _ newIds: Set<String>,
         flags: NSEvent.ModifierFlags = NSEvent.modifierFlags
     ) {
+        viewModel.requestDefocusTextInputs()
         if !viewModel.isReviewMode {
             viewModel.selectedVideoIds = newIds
             return

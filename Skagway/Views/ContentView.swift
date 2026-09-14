@@ -839,9 +839,8 @@ private struct LibraryContentView: View {
         .onChange(of: isSearchFocused) { _, focused in
             vm.isLibrarySearchFocused = focused
         }
-        .onChange(of: vm.defocusSearchFieldToken) { _, _ in
-            isSearchFocused = false
-            Self.refocusBrowserAfterTextDefocus(viewMode: vm.viewMode)
+        .onChange(of: vm.defocusTextInputsToken) { _, _ in
+            resignTextInputFocusForBrowserKeyboard()
         }
         .onChange(of: vm.isCuratedWallFiltersDrawerOpen) { _, newValue in
             // Animate the reveal factor. The well and drawer heights are driven from this CGFloat,
@@ -866,16 +865,22 @@ private struct LibraryContentView: View {
         }
     }
 
-    /// Clears search / text-field focus when inline playback starts so Escape stops the player
-    /// instead of only resigning the focused field.
-    private func resignTextInputFocusForPlayback() {
+    /// Clears search and Inspector text focus so Space, arrows, and Escape reach the browser/player.
+    private func resignTextInputFocusForBrowserKeyboard() {
         isSearchFocused = false
         vm.isLibrarySearchFocused = false
+        vm.isEditingText = false
         guard let window = NSApp.keyWindow else { return }
-        if let first = window.firstResponder, first is NSText {
+        if let first = window.firstResponder,
+           first is NSText || first is NSTextView || first is NSTextField
+        {
             window.makeFirstResponder(nil)
             Self.refocusBrowserAfterTextDefocus(viewMode: vm.viewMode, window: window)
         }
+    }
+
+    private func resignTextInputFocusForPlayback() {
+        resignTextInputFocusForBrowserKeyboard()
     }
 
     /// After the library search field (or another text control) resigns focus, give List's `Table`

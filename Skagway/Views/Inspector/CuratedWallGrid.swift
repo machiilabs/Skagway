@@ -528,6 +528,7 @@ struct CuratedWallGrid: View {
     }
 
     private func handleSelection(_ video: Video, flags: NSEvent.ModifierFlags = NSEvent.modifierFlags) {
+        viewModel.requestDefocusTextInputs()
         if !viewModel.isReviewMode {
             handleStandardSelection(video, flags: flags)
             return
@@ -592,6 +593,7 @@ struct CuratedWallGrid: View {
     }
 
     private func handleCollectCircleClick(_ video: Video, flags: NSEvent.ModifierFlags) {
+        viewModel.requestDefocusTextInputs()
         var session = ReviewSession(
             focusedId: viewModel.focusedVideoId,
             selectedIds: viewModel.selectedVideoIds,
