@@ -223,6 +223,22 @@ struct VideoRepository {
         }
     }
 
+    /// Batch path remap for Location Relink. One library transaction; file names stay the same
+    /// (only the directory prefix changes). Does not touch titles, ratings, tags, or collections.
+    func relinkFilePaths(
+        mappings: [(videoId: Int64, newFilePath: String)]
+    ) async throws {
+        guard !mappings.isEmpty else { return }
+        try await dbPool.write { db in
+            for item in mappings {
+                try db.execute(
+                    sql: "UPDATE video SET filePath = ? WHERE id = ?",
+                    arguments: [item.newFilePath, item.videoId]
+                )
+            }
+        }
+    }
+
     /// Bulk set of play counts (Import Metadata). Does not touch `lastPlayed`.
     func updatePlayCount(updates: [(videoId: Int64, playCount: Int)]) async throws {
         guard !updates.isEmpty else { return }

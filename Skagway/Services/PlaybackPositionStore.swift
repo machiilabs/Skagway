@@ -35,4 +35,18 @@ enum PlaybackPositionStore {
         cache.removeValue(forKey: filePath)
         defaults.set(cache, forKey: key)
     }
+
+    /// Move resume positions when file paths change (rename / move / Location Relink).
+    static func remapPaths(_ mappings: [(from: String, to: String)]) {
+        guard !mappings.isEmpty else { return }
+        var changed = false
+        for pair in mappings {
+            guard let seconds = cache.removeValue(forKey: pair.from) else { continue }
+            cache[pair.to] = seconds
+            changed = true
+        }
+        if changed {
+            defaults.set(cache, forKey: key)
+        }
+    }
 }

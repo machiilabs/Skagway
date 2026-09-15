@@ -516,6 +516,10 @@ private struct LibraryContentView: View {
                     .transition(.opacity)
             }
 
+            if vm.sidebarFilter == .missing, vm.libraryCounts.missing > 0 {
+                missingLibraryRepairCue
+            }
+
             if vm.videos.isEmpty && !vm.hasCompletedInitialVideoLoad {
                 // Stay blank until the first video observation arrives — otherwise a populated
                 // library briefly flashes the empty-library invite while `videos` is still [].
@@ -577,6 +581,29 @@ private struct LibraryContentView: View {
                     }
             )
             .help("Drag to resize the filters drawer")
+    }
+
+    /// Quiet repair cue when browsing Missing — never auto-forces Relink (offline ≠ broken).
+    private var missingLibraryRepairCue: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "folder.badge.questionmark")
+                .foregroundStyle(Color.appTextSecondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Library folder missing")
+                    .font(.subheadline.weight(.medium))
+                Text("If you moved an entire folder tree, relink the location once — ghost clips stay visible until then.")
+                    .font(.caption)
+                    .foregroundStyle(Color.appTextSecondary)
+            }
+            Spacer(minLength: 8)
+            Button("Relink Location…") {
+                vm.beginLocationRelink(preferredOldRoot: vm.inferredMissingLibraryRoot)
+            }
+            .disabled(vm.isApplyingLocationRelink)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.appTextSecondary.opacity(0.08))
     }
 
     var body: some View {
@@ -785,6 +812,9 @@ private struct LibraryContentView: View {
                 scope: presentation.scope,
                 videoCount: presentation.videoCount
             )
+        }
+        .sheet(item: $vm.locationRelinkPresentation) { presentation in
+            LocationRelinkSheet(viewModel: vm, presentation: presentation)
         }
         .sheet(item: $vm.metadataApplyUnknownColumnsPrompt) { prompt in
             ApplyMetadataUnknownColumnsSheet(viewModel: vm, prompt: prompt)

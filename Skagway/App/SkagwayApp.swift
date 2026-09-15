@@ -259,13 +259,16 @@ struct SkagwayApp: App {
                 .keyboardShortcut("r", modifiers: [.command, .option])
                 .disabled(appState.libraryViewModel?.selectedVideoIds.isEmpty != false)
             }
-            // These default groups (Undo/Redo, Find/Spelling/Substitutions/Transformations/Speech,
-            // the entire Format menu, Print) have no relevance to a video library and nothing in
-            // the app implements their underlying actions — replacing each with empty content
-            // removes the dead menu clutter instead of leaving it permanently disabled.
-            // Wrapped in Group so `.commands` stays within CommandsBuilder’s 10-child limit.
+            // Find/Spelling/Format/Print stay empty — Relink owns Undo when a remap is pending.
             Group {
-                CommandGroup(replacing: .undoRedo) { }
+                CommandGroup(replacing: .undoRedo) {
+                    Button("Undo Relink Location") {
+                        Task { await appState.libraryViewModel?.undoLocationRelink() }
+                    }
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(appState.libraryViewModel?.locationRelinkUndo == nil
+                        || (appState.libraryViewModel?.isApplyingLocationRelink ?? false))
+                }
                 CommandGroup(replacing: .textEditing) { }
                 CommandGroup(replacing: .textFormatting) { }
                 CommandGroup(replacing: .printItem) { }
@@ -317,6 +320,16 @@ struct SkagwayApp: App {
                 .disabled(!appState.hasLibrary
                     || (appState.libraryViewModel?.isScanning ?? false)
                     || (appState.libraryViewModel?.videos.isEmpty ?? true))
+
+                Divider()
+
+                Button("Relink Location\u{2026}") {
+                    appState.libraryViewModel?.beginLocationRelink()
+                }
+                .disabled(!appState.hasLibrary
+                    || (appState.libraryViewModel?.videos.isEmpty ?? true)
+                    || (appState.libraryViewModel?.isApplyingLocationRelink ?? false))
+                .help("Reconnect clips after moving an entire library folder tree")
             }
             CommandGroup(replacing: .importExport) {
                 Button("Play in External Player") {

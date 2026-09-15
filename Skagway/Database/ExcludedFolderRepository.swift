@@ -41,4 +41,28 @@ struct ExcludedFolderRepository {
             ) ?? false
         }
     }
+
+    /// Remap exclude folders whose folderPath sits under `oldRoot` (Location Relink).
+    func remapPathsUnder(oldRoot: String, newRoot: String) async throws -> Int {
+        let folders = try await fetchAll()
+        var count = 0
+        try await dbPool.write { db in
+            for folder in folders {
+                guard let remapped = LocationRelink.remapFolderPath(
+                    folder.folderPath,
+                    oldRoot: oldRoot,
+                    newRoot: newRoot
+                ), remapped != folder.folderPath
+                else { continue }
+                guard let id = folder.id else { continue }
+                let name = URL(fileURLWithPath: remapped).lastPathComponent
+                try db.execute(
+                    sql: "UPDATE excluded_folder SET folderPath = ?, name = ? WHERE id = ?",
+                    arguments: [remapped, name, id]
+                )
+                count += 1
+            }
+        }
+        return count
+    }
 }

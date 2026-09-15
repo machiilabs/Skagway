@@ -31,6 +31,8 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Location Relink (MVP)** — Whole-tree Location A → Location B remap for missing media. File → Relink Location…, quiet “Library folder missing” cue on Missing, preview (reconnect / need attention / still missing), one Apply, Undo Relink Location. Keeps ratings, collections, tags; no re-import or ffmpeg. Soft size checks flag conflicts only.
+
 ## 1.2.0 (build 1082) - 2026-09-15
 
 - **Always-on collection** — Removed the Review toolbar toggle and ⌘3. Collect clips with ⌘-click, **A**, or Shift-click (Finder-style range from the last clicked clip). Focus and collection are separate: plain click focuses; blue checkmarks show membership. Inspector batch-edits automatically when 2+ are collected and focus is in the set.

@@ -365,6 +365,19 @@ struct CuratedWallFiltersDrawer: View {
             .foregroundStyle(Color.appTextTertiary)
             .disabled(viewModel.isRefreshingMissing)
             .help("Rescan for missing files")
+
+            if count > 0 {
+                Button {
+                    viewModel.beginLocationRelink(preferredOldRoot: viewModel.inferredMissingLibraryRoot)
+                } label: {
+                    Image(systemName: "link")
+                        .font(.caption2)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.appTextTertiary)
+                .disabled(viewModel.isApplyingLocationRelink)
+                .help("Relink Location…")
+            }
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)

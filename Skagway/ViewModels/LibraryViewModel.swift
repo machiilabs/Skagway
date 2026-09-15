@@ -817,6 +817,238 @@ final class LibraryViewModel {
         let videoCount: Int
     }
 
+    // MARK: - Location Relink
+
+    /// Non-nil while the Location Relink sheet is presented.
+    var locationRelinkPresentation: LocationRelinkPresentation? = nil
+    /// Last successful apply — powers Edit → Undo Relink Location.
+    private(set) var locationRelinkUndo: LocationRelinkUndoPayload? = nil
+    var isApplyingLocationRelink: Bool = false
+
+    struct LocationRelinkPresentation: Identifiable, Equatable {
+        let id = UUID()
+        var oldRoot: String
+        var suggestedNewRoot: String?
+    }
+
+    struct LocationRelinkUndoPayload: Equatable {
+        var oldRoot: String
+        var newRoot: String
+        /// Applied newPath → oldPath (for undo).
+        var reverseMappings: [(from: String, to: String, videoId: Int64)]
+        var appliedCount: Int
+
+        static func == (lhs: LocationRelinkUndoPayload, rhs: LocationRelinkUndoPayload) -> Bool {
+            lhs.oldRoot == rhs.oldRoot
+                && lhs.newRoot == rhs.newRoot
+                && lhs.appliedCount == rhs.appliedCount
+                && lhs.reverseMappings.map { "\($0.from)|\($0.to)|\($0.videoId)" }
+                    == rhs.reverseMappings.map { "\($0.from)|\($0.to)|\($0.videoId)" }
+        }
+    }
+
+    /// Shared missing folder when Missing has been scanned — quiet repair cue input.
+    var inferredMissingLibraryRoot: String? {
+        guard missingCountScanned, !missingVideoIds.isEmpty else { return nil }
+        return LocationRelink.inferSharedMissingRoot(
+            missingPaths: Array(missingVideoIds),
+            dataSourceRoots: []
+        )
+    }
+
+    /// Async variant that also considers Data Source roots.
+    func resolveSharedMissingRoot() async -> String? {
+        if !missingCountScanned && missingVideoIds.isEmpty {
+            await refreshMissingCount()
+        }
+        let sources = (try? await dataSourceRepo.fetchAll()) ?? []
+        return LocationRelink.inferSharedMissingRoot(
+            missingPaths: Array(missingVideoIds),
+            dataSourceRoots: sources.map(\.folderPath)
+        )
+    }
+
+    /// Opens the Relink sheet. Prefers the shared missing root; falls back to a folder picker for old root.
+    func beginLocationRelink(preferredOldRoot: String? = nil) {
+        Task { @MainActor in
+            let root: String
+            if let preferred = preferredOldRoot, !preferred.isEmpty {
+                root = LocationRelink.normalizeRoot(preferred)
+            } else if let inferred = await resolveSharedMissingRoot() {
+                root = inferred
+            } else {
+                let panel = NSOpenPanel()
+                panel.canChooseFiles = false
+                panel.canChooseDirectories = true
+                panel.allowsMultipleSelection = false
+                panel.message = "Select the old library folder location (the path that no longer exists)"
+                panel.prompt = "Use as Old Location"
+                guard panel.runModal() == .OK, let url = panel.url else { return }
+                root = LocationRelink.normalizeRoot(url.path)
+            }
+            locationRelinkPresentation = LocationRelinkPresentation(oldRoot: root, suggestedNewRoot: nil)
+        }
+    }
+
+    /// Pick the new folder for an in-progress Relink sheet.
+    func pickNewLocationForRelink() -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select the new folder that replaces the missing library location"
+        panel.prompt = "Use as New Location"
+        // Offline/unplugged volumes should not force Relink — only open when the user asks.
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return LocationRelink.normalizeRoot(url.path)
+    }
+
+    func buildLocationRelinkPreview(oldRoot: String, newRoot: String) -> LocationRelink.Preview {
+        let old = LocationRelink.normalizeRoot(oldRoot)
+        let videosUnder = videos
+            .filter { LocationRelink.isUnder(root: old, path: $0.filePath) }
+            .map { (databaseId: $0.databaseId, filePath: $0.filePath, fileSize: $0.fileSize) }
+        let existing = Set(videos.map(\.filePath))
+        return LocationRelink.buildPreview(
+            videos: videosUnder,
+            oldRoot: old,
+            newRoot: newRoot,
+            existingLibraryPaths: existing
+        )
+    }
+
+    /// Apply reconnect (and optionally flagged) mappings in one library transaction.
+    @discardableResult
+    func applyLocationRelink(
+        preview: LocationRelink.Preview,
+        includeNeedsAttention: Bool
+    ) async -> Int {
+        let mappings = LocationRelink.mappingsToApply(
+            preview: preview,
+            includeNeedsAttention: includeNeedsAttention
+        )
+        guard !mappings.isEmpty else { return 0 }
+        isApplyingLocationRelink = true
+        defer { isApplyingLocationRelink = false }
+
+        let dbMappings: [(videoId: Int64, newFilePath: String)] = mappings.compactMap { m in
+            guard let id = m.videoDatabaseId else { return nil }
+            return (id, m.newPath)
+        }
+        guard dbMappings.count == mappings.count else {
+            reportTransientError("Couldn't relink — some clips are missing a library id")
+            return 0
+        }
+
+        do {
+            try await videoRepo.relinkFilePaths(mappings: dbMappings)
+            _ = try? await dataSourceRepo.remapPathsUnder(
+                oldRoot: preview.oldRoot,
+                newRoot: preview.newRoot
+            )
+            let excludeRepo = ExcludedFolderRepository(dbPool: dbPool)
+            _ = try? await excludeRepo.remapPathsUnder(
+                oldRoot: preview.oldRoot,
+                newRoot: preview.newRoot
+            )
+        } catch {
+            reportTransientError("Couldn't relink location: \(error.localizedDescription)")
+            return 0
+        }
+
+        // Synchronous in-memory update (same race-avoidance pattern as same-volume move).
+        let pathMap = Dictionary(uniqueKeysWithValues: mappings.map { ($0.oldPath, $0.newPath) })
+        var updated = videos
+        for i in updated.indices {
+            if let neu = pathMap[updated[i].filePath] {
+                thumbnailService.migrateCacheKey(from: updated[i].filePath, to: neu)
+                updated[i].filePath = neu
+            }
+        }
+        videos = updated
+
+        for (old, neu) in pathMap {
+            remapVideoPathInSelection(from: old, to: neu)
+        }
+        PlaybackPositionStore.remapPaths(pathMap.map { (from: $0.key, to: $0.value) })
+        notifyResumePositionsChanged()
+
+        recentlyAppliedPaths = Set(recentlyAppliedPaths.map { pathMap[$0] ?? $0 })
+        lastAddedPaths = Set(lastAddedPaths.map { pathMap[$0] ?? $0 })
+
+        locationRelinkUndo = LocationRelinkUndoPayload(
+            oldRoot: preview.oldRoot,
+            newRoot: preview.newRoot,
+            reverseMappings: mappings.compactMap { m in
+                guard let id = m.videoDatabaseId else { return nil }
+                return (from: m.newPath, to: m.oldPath, videoId: id)
+            },
+            appliedCount: mappings.count
+        )
+
+        await refreshMissingCount()
+        let text = "Relinked \(mappings.count) clip\(mappings.count == 1 ? "" : "s")"
+        scanProgress = text
+        Task {
+            try? await Task.sleep(for: .seconds(5))
+            if self.scanProgress == text { self.scanProgress = "" }
+        }
+        return mappings.count
+    }
+
+    /// Reverse the last Location Relink apply.
+    @discardableResult
+    func undoLocationRelink() async -> Int {
+        guard let payload = locationRelinkUndo, !payload.reverseMappings.isEmpty else { return 0 }
+        isApplyingLocationRelink = true
+        defer { isApplyingLocationRelink = false }
+
+        let dbMappings = payload.reverseMappings.map { (videoId: $0.videoId, newFilePath: $0.to) }
+        do {
+            try await videoRepo.relinkFilePaths(mappings: dbMappings)
+            _ = try? await dataSourceRepo.remapPathsUnder(
+                oldRoot: payload.newRoot,
+                newRoot: payload.oldRoot
+            )
+            let excludeRepo = ExcludedFolderRepository(dbPool: dbPool)
+            _ = try? await excludeRepo.remapPathsUnder(
+                oldRoot: payload.newRoot,
+                newRoot: payload.oldRoot
+            )
+        } catch {
+            reportTransientError("Couldn't undo relink: \(error.localizedDescription)")
+            return 0
+        }
+
+        let pathMap = Dictionary(uniqueKeysWithValues: payload.reverseMappings.map { ($0.from, $0.to) })
+        var updated = videos
+        for i in updated.indices {
+            if let old = pathMap[updated[i].filePath] {
+                thumbnailService.migrateCacheKey(from: updated[i].filePath, to: old)
+                updated[i].filePath = old
+            }
+        }
+        videos = updated
+        for (neu, old) in pathMap {
+            remapVideoPathInSelection(from: neu, to: old)
+        }
+        PlaybackPositionStore.remapPaths(pathMap.map { (from: $0.key, to: $0.value) })
+        notifyResumePositionsChanged()
+        recentlyAppliedPaths = Set(recentlyAppliedPaths.map { pathMap[$0] ?? $0 })
+        lastAddedPaths = Set(lastAddedPaths.map { pathMap[$0] ?? $0 })
+
+        let count = payload.appliedCount
+        locationRelinkUndo = nil
+        await refreshMissingCount()
+        let text = "Undid relink (\(count) clip\(count == 1 ? "" : "s"))"
+        scanProgress = text
+        Task {
+            try? await Task.sleep(for: .seconds(5))
+            if self.scanProgress == text { self.scanProgress = "" }
+        }
+        return count
+    }
+
     func presentBulkRename(scope: MetadataExportScope) {
         let videos = videosForMetadataExport(scope: scope)
         guard !videos.isEmpty else { return }
