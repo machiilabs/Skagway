@@ -11,19 +11,21 @@ enum ListSelectionModifiers {
 
 /// Always-on split between the clip you are reviewing and the collected working set.
 ///
-/// Focus can sit outside the set (scan a maybe). The set is what bulk tag / rating / delete
-/// apply to once you ask Inspector to show it.
+/// Focus can sit outside the set (scan a maybe). With 2+ collected and review focus cleared
+/// (plain click on a collected clip), Inspector batch-edits the whole set; repeat click on
+/// the same collected clip focuses it for single inspect; further clicks toggle back to batch.
 struct ReviewSession: Equatable {
     var focusedId: String?
     var selectedIds: Set<String> = []
-    var inspectorPrefersSelection = false
 
+    /// Batch inspect when 2+ collected and review focus is cleared (plain click on a collected clip).
     var isSetMode: Bool {
-        selectedIds.count > 1 && (inspectorPrefersSelection || focusedId == nil)
+        guard selectedIds.count > 1 else { return false }
+        return focusedId == nil
     }
 
-    /// Videos Inspector tags, rates, and edits. The focused clip while reviewing; the set after
-    /// you finish collecting (or click the N-selected chip).
+    /// Videos Inspector tags, rates, and edits — the collected set when 2+ are selected
+    /// and focus is in the set; otherwise the focused clip.
     var actionIds: Set<String> {
         if isSetMode { return selectedIds }
         if let focusedId { return [focusedId] }
@@ -32,7 +34,30 @@ struct ReviewSession: Equatable {
 
     mutating func focus(_ id: String) {
         focusedId = id
-        inspectorPrefersSelection = false
+    }
+
+    mutating func clearFocus() {
+        focusedId = nil
+    }
+
+    /// Plain click (no modifiers). Collected clips alternate batch inspect (focus cleared) and
+    /// single focus on repeat clicks to the same clip.
+    @discardableResult
+    mutating func applyPlainClick(on id: String, lastClickedId: String?) -> String {
+        guard selectedIds.contains(id), selectedIds.count > 1 else {
+            focus(id)
+            return id
+        }
+        if focusedId == id {
+            clearFocus()
+            return id
+        }
+        if lastClickedId == id, focusedId == nil {
+            focus(id)
+            return id
+        }
+        clearFocus()
+        return id
     }
 
     mutating func toggleInSet(_ id: String) {
@@ -41,27 +66,25 @@ struct ReviewSession: Equatable {
         } else {
             selectedIds.insert(id)
         }
-        if selectedIds.count < 2 {
-            inspectorPrefersSelection = false
+    }
+
+    mutating func activateBatchInspectIfMultiCollected() {
+        if selectedIds.count > 1 {
+            clearFocus()
+        }
+    }
+
+    mutating func toggleInSetForCollectionEdit(_ id: String) {
+        let adding = !selectedIds.contains(id)
+        toggleInSet(id)
+        if adding {
+            activateBatchInspectIfMultiCollected()
         }
     }
 
     mutating func selectOnly(_ id: String) {
         selectedIds = [id]
         focusedId = id
-        inspectorPrefersSelection = false
-    }
-
-    mutating func inspectSet() {
-        guard selectedIds.count > 1 else { return }
-        inspectorPrefersSelection = true
-    }
-
-    mutating func playbackStopped() {
-        guard selectedIds.count > 1 else { return }
-        // Keep single-clip inspect when playback stops on a "maybe" outside the collected set.
-        if let focusedId, !selectedIds.contains(focusedId) { return }
-        inspectorPrefersSelection = true
     }
 
     mutating func moveFocus(step: Int, orderedIds: [String]) {
@@ -84,9 +107,6 @@ struct ReviewSession: Equatable {
         if let id = focusedId, !validIds.contains(id) {
             focusedId = selectedIds.first
         }
-        if selectedIds.count < 2 {
-            inspectorPrefersSelection = false
-        }
     }
 
     mutating func remapPath(from old: String, to new: String) {
@@ -107,7 +127,7 @@ struct ReviewSession: Equatable {
         return focusedId ?? lastSelectedId ?? selectedIds.first
     }
 
-    /// List `Table` selection while Review is on — mirrors Grid modifier-click semantics.
+    /// List `Table` selection — mirrors Grid modifier-click semantics.
     mutating func applyListTableSelection(
         newIds: Set<String>,
         allVideoIds: [String],
@@ -120,6 +140,7 @@ struct ReviewSession: Equatable {
 
         if flags.contains(.command), newIds == allSet, !allSet.isEmpty {
             selectedIds = newIds
+            activateBatchInspectIfMultiCollected()
             return lastClickedId
         }
 
@@ -134,23 +155,37 @@ struct ReviewSession: Equatable {
         if flags.contains(.command) {
             let clicked = newIds.subtracting(previousTable).first ?? newIds.first
             if let clicked {
-                toggleInSet(clicked)
+                toggleInSetForCollectionEdit(clicked)
             }
             return clicked ?? lastClickedId
         }
 
         if flags.contains(.shift) {
-            selectedIds.formUnion(newIds)
-            if let clicked = Self.listShiftClickEndpoint(in: newIds, anchor: lastClickedId, orderedIds: allVideoIds) {
-                focus(clicked)
-                return clicked
+            // Table `newIds` follow review focus (often focus→click). Collection range must anchor
+            // on `lastClickedId` (e.g. last ⌘-click), like Grid — not the Table's native span.
+            let anchor = lastClickedId ?? focusedId
+            let tableAnchor = previousTableFocusId ?? focusedId
+            guard let anchor,
+                  let aIdx = allVideoIds.firstIndex(of: anchor),
+                  let clicked = Self.listShiftClickEndpoint(
+                    in: newIds,
+                    anchor: tableAnchor,
+                    orderedIds: allVideoIds
+                  ),
+                  let cIdx = allVideoIds.firstIndex(of: clicked)
+            else {
+                selectedIds.formUnion(newIds)
+                activateBatchInspectIfMultiCollected()
+                return lastClickedId
             }
-            return lastClickedId
+            let range = min(aIdx, cIdx)...max(aIdx, cIdx)
+            selectedIds.formUnion(Set(range.map { allVideoIds[$0] }))
+            activateBatchInspectIfMultiCollected()
+            return clicked
         }
 
         if let id = newIds.first {
-            focus(id)
-            return id
+            return applyPlainClick(on: id, lastClickedId: lastClickedId)
         }
         return lastClickedId
     }
@@ -168,38 +203,4 @@ struct ReviewSession: Equatable {
         }
     }
 
-    /// Grid/List collect-circle clicks while Review is on. Plain or ⌘ toggles membership; ⇧
-    /// adds the range from the anchor into the set; ⌥ selects only.
-    mutating func applyCollectCircleClick(
-        id: String,
-        orderedIds: [String],
-        anchorId: String?,
-        flags: NSEvent.ModifierFlags
-    ) -> String? {
-        let optionOnly = flags.contains(.option)
-            && !flags.contains(.command)
-            && !flags.contains(.shift)
-        if optionOnly {
-            selectOnly(id)
-            return id
-        }
-
-        if flags.contains(.shift) {
-            let anchor = anchorId ?? focusedId ?? selectedIds.first
-            if let anchor,
-               let aIdx = orderedIds.firstIndex(of: anchor),
-               let idx = orderedIds.firstIndex(of: id)
-            {
-                let range = min(aIdx, idx)...max(aIdx, idx)
-                selectedIds.formUnion(range.map { orderedIds[$0] })
-                focus(id)
-                return id
-            }
-            toggleInSet(id)
-            return id
-        }
-
-        toggleInSet(id)
-        return id
-    }
 }

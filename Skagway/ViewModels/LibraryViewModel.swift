@@ -516,46 +516,14 @@ final class LibraryViewModel {
             if scanProgress == text { scanProgress = "" }
         }
     }
-    var selectedVideoIds: Set<String> = [] {
-        didSet {
-            // When Review is off, selection and focus stay in lockstep (List Table and Grid).
-            // In Review mode both views keep the collected set separate from review focus.
-            if !isReviewMode {
-                let added = selectedVideoIds.subtracting(oldValue)
-                if let newId = added.first {
-                    lastSelectedVideoId = newId
-                    focusedVideoId = newId
-                    inspectorPrefersSelection = false
-                } else if selectedVideoIds.isEmpty {
-                    lastSelectedVideoId = nil
-                    if !isReviewMode { focusedVideoId = nil }
-                } else if let last = lastSelectedVideoId, !selectedVideoIds.contains(last) {
-                    lastSelectedVideoId = selectedVideoIds.first
-                    focusedVideoId = lastSelectedVideoId
-                }
-            }
-            if selectedVideoIds.count < 2 {
-                inspectorPrefersSelection = false
-            }
-            if !isReviewMode, isPlayingInline, !isAdvancingPlayAllQueue,
-               selectedVideoIds != oldValue {
-                isPlayingInline = false
-            }
-        }
-    }
+    var selectedVideoIds: Set<String> = []
     var lastSelectedVideoId: String?
     /// Clip being reviewed (player + Inspector). May sit outside `selectedVideoIds`.
     var focusedVideoId: String?
-    /// After collecting, Inspector shows the set instead of the focused clip.
-    var inspectorPrefersSelection: Bool = false
-    /// When off (default), click and arrows are Finder-style selection. When on, they move
-    /// review focus and the collected set is built with A / the card circle.
-    var isReviewMode: Bool = false
 
     var inspectorIsSetMode: Bool {
         guard selectedVideoIds.count > 1 else { return false }
-        if !isReviewMode { return true }
-        return inspectorPrefersSelection || focusedVideoId == nil
+        return focusedVideoId == nil
     }
 
     var inspectorActionIds: Set<String> {
@@ -3814,13 +3782,30 @@ final class LibraryViewModel {
         scrollToVideoId = id
     }
 
+    /// Plain click in the browser — collected clips toggle batch inspect vs focus on repeat clicks.
+    func applyPlainReviewClick(on id: String, lastClickedId: inout String?) {
+        requestDefocusTextInputs()
+        var session = ReviewSession(focusedId: focusedVideoId, selectedIds: selectedVideoIds)
+        lastClickedId = session.applyPlainClick(on: id, lastClickedId: lastClickedId)
+        let previous = focusedVideoId
+        focusedVideoId = session.focusedId
+        if let focusedVideoId {
+            lastSelectedVideoId = focusedVideoId
+            if isPlayingInline, previous != focusedVideoId,
+               let video = filteredVideo(forPath: focusedVideoId) {
+                retargetPlayback(to: video)
+            }
+        } else if selectedVideoIds.contains(id) {
+            lastSelectedVideoId = id
+        }
+    }
+
     /// Move review focus without replacing the collected set. Retargets the player when already playing.
     func setReviewFocus(_ id: String, retargetIfPlaying: Bool = true, scroll: Bool = false) {
         requestDefocusTextInputs()
         let previous = focusedVideoId
         focusedVideoId = id
         lastSelectedVideoId = id
-        inspectorPrefersSelection = false
         if scroll { scrollToVideoId = id }
         if retargetIfPlaying, isPlayingInline, previous != id,
            let video = filteredVideo(forPath: id) {
@@ -3830,12 +3815,30 @@ final class LibraryViewModel {
 
     func toggleInCollectedSet(_ id: String) {
         var ids = selectedVideoIds
+        let adding = !ids.contains(id)
         if ids.contains(id) { ids.remove(id) } else { ids.insert(id) }
         selectedVideoIds = ids
+        if adding {
+            activateBatchInspectIfMultiCollected(lastTouchedId: id)
+        }
+    }
+
+    /// ⌘/⇧/A collection edits with 2+ clips — batch inspect (clears review focus).
+    func activateBatchInspectIfMultiCollected(lastTouchedId: String? = nil) {
+        guard selectedVideoIds.count > 1 else { return }
+        focusedVideoId = nil
+        if let lastTouchedId {
+            lastSelectedVideoId = lastTouchedId
+        }
+    }
+
+    func unionIntoCollectedSet(_ ids: Set<String>, lastTouchedId: String? = nil) {
+        guard !ids.isEmpty else { return }
+        selectedVideoIds.formUnion(ids)
+        activateBatchInspectIfMultiCollected(lastTouchedId: lastTouchedId)
     }
 
     func toggleFocusedInCollectedSet() {
-        guard isReviewMode else { return }
         guard let id = focusedVideoId ?? lastSelectedVideoId ?? selectedVideoIds.first else { return }
         toggleInCollectedSet(id)
     }
@@ -3843,45 +3846,6 @@ final class LibraryViewModel {
     func selectOnly(_ id: String, scroll: Bool = false) {
         selectedVideoIds = [id]
         setReviewFocus(id, retargetIfPlaying: isPlayingInline, scroll: scroll)
-    }
-
-    func inspectCollectedSet() {
-        guard isReviewMode, selectedVideoIds.count > 1 else { return }
-        inspectorPrefersSelection = true
-    }
-
-    func notePlaybackStopped() {
-        guard isReviewMode, selectedVideoIds.count > 1 else { return }
-        if let focused = focusedVideoId, !selectedVideoIds.contains(focused) { return }
-        inspectorPrefersSelection = true
-    }
-
-    func toggleReviewMode() {
-        if isReviewMode { exitReviewMode() } else { enterReviewMode() }
-    }
-
-    func enterReviewMode() {
-        isReviewMode = true
-        inspectorPrefersSelection = false
-        if focusedVideoId == nil {
-            focusedVideoId = lastSelectedVideoId ?? selectedVideoIds.first
-        }
-        if let id = focusedVideoId {
-            lastSelectedVideoId = id
-        }
-    }
-
-    func exitReviewMode() {
-        isReviewMode = false
-        if selectedVideoIds.isEmpty, let id = focusedVideoId {
-            selectedVideoIds = [id]
-        } else if let id = focusedVideoId, selectedVideoIds.contains(id) {
-            lastSelectedVideoId = id
-        } else if let id = selectedVideoIds.first {
-            focusedVideoId = id
-            lastSelectedVideoId = id
-        }
-        inspectorPrefersSelection = selectedVideoIds.count > 1
     }
 
     /// Keep the collected set, review focus, and last-selected id coherent when a file path changes.
@@ -3904,21 +3868,17 @@ final class LibraryViewModel {
         guard !videos.isEmpty else { return }
         var session = ReviewSession(
             focusedId: focusedVideoId ?? lastSelectedVideoId ?? selectedVideoIds.first,
-            selectedIds: selectedVideoIds,
-            inspectorPrefersSelection: inspectorPrefersSelection
+            selectedIds: selectedVideoIds
         )
         session.moveFocus(step: step, orderedIds: videos.map(\.id))
         guard let newId = session.focusedId, newId != focusedVideoId else { return }
-        if isReviewMode {
-            setReviewFocus(newId, scroll: true)
-        } else {
-            selectOnly(newId, scroll: true)
-        }
+        setReviewFocus(newId, scroll: true)
     }
 
     /// Home / End key equivalents: select the first / last video in the current filtered order and
-    /// scroll it into view. Uses `.top`/`.bottom` (not `scrollToVideoId`'s `.toRow`, which centers a
-    /// row rather than pinning it, and has no special handling for List's column header) so List's
+    /// scroll it into view. Uses `.top`/`.bottom` (not `scrollToVideoId`'s `.toRow`, which minimally
+    /// reveals off-screen rows without re-centering rows already in view, and has no special handling
+    /// for List's column header) so List's
     /// first row lands fully clear of the header instead of partially hidden under it.
     /// Select All (⌘A) for the Wall grid — List's `Table` handles ⌘A natively.
     func selectAllVideos() {
@@ -3935,21 +3895,13 @@ final class LibraryViewModel {
 
     func goToFirstVideo() {
         guard let first = filteredVideos.first else { return }
-        if isReviewMode {
-            setReviewFocus(first.id)
-        } else {
-            selectOnly(first.id)
-        }
+        setReviewFocus(first.id)
         issueScrollCommand(.top)
     }
 
     func goToLastVideo() {
         guard let last = filteredVideos.last else { return }
-        if isReviewMode {
-            setReviewFocus(last.id)
-        } else {
-            selectOnly(last.id)
-        }
+        setReviewFocus(last.id)
         issueScrollCommand(.bottom)
     }
 
@@ -5709,7 +5661,7 @@ final class LibraryViewModel {
         selectedQualityBuckets = []
     }
 
-    /// Clears tag filters and the per-star rating filter (View menu **⌘⌥C**).
+    /// Clears Quick Filter stack without resetting sidebar / smart-library selection.
     func clearFilters() {
         clearTagFilters()
         clearRatingFilter()

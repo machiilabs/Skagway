@@ -136,16 +136,10 @@ struct TableScrollHelper: NSViewRepresentable {
     }
 }
 
-/// Per-row hover for List Review collect circles — avoids a single shared id racing when
-/// pointer moves between Table rows (one row's `onHover(false)` must not clear another's).
+/// Per-row hover for List thumbnails — survives Table re-renders when the collected set changes.
 @Observable
 private final class ListRowReviewState {
-    var isRowHovering: Bool = false
-    var isBadgeHovering: Bool = false
-    /// Survives row re-renders when the collected set changes (Table `@State` would reset).
     var isThumbnailHovered: Bool = false
-
-    var showsCollectBadge: Bool { isRowHovering || isBadgeHovering }
 }
 
 private final class ListRowReviewStore {
@@ -178,7 +172,8 @@ private struct ListMouseDownHandler: NSViewRepresentable {
             mouseDownPoint = event.locationInWindow
             if ignoreModifiers || !ListSelectionModifiers.usesExtendedSelection(event.modifierFlags) {
                 onPlainMouseDown?()
-                super.mouseDown(with: event)
+                // Do not forward to the Table — plain selection is driven by review focus
+                // (same as Grid). Forwarding would double-apply batch↔focus toggles.
                 return
             }
             onModifierMouseDown?(event.modifierFlags)
@@ -514,8 +509,6 @@ private struct ListRowHoverThumbnail: View {
     var isCollected: Bool = false
     /// When set (Review mode), hover survives Table re-renders after collect clicks.
     var reviewState: ListRowReviewState? = nil
-    let onSelect: () -> Void
-    let onModifierSelect: (NSEvent.ModifierFlags) -> Void
 
     @State private var localThumbnailHovered = false
 
@@ -540,9 +533,6 @@ private struct ListRowHoverThumbnail: View {
         .frame(width: 56, height: 36)
         .appMediaFrame(cornerRadius: AppRadius.sm)
         .overlay {
-            ListMouseDownHandler(onPlainMouseDown: onSelect, onModifierMouseDown: onModifierSelect)
-        }
-        .overlay {
             ListHoverPreviewFloater(
                 isPresented: isThumbnailHovered,
                 video: video,
@@ -554,35 +544,6 @@ private struct ListRowHoverThumbnail: View {
             .allowsHitTesting(false)
         }
         .onHover { setThumbnailHovered($0) }
-    }
-}
-
-private struct ListCollectedSetBadge: View {
-    let isCollected: Bool
-    let reviewState: ListRowReviewState
-    let onCollectClick: (NSEvent.ModifierFlags) -> Void
-
-    var body: some View {
-        if isCollected || reviewState.showsCollectBadge {
-            Image(systemName: isCollected ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 14, weight: .semibold))
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.white, isCollected ? Color.appAccent : Color.white.opacity(0.55))
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                .padding(2)
-                .contentShape(Circle())
-                .overlay {
-                    ListMouseDownHandler(
-                        onPlainMouseDown: { onCollectClick([]) },
-                        onModifierMouseDown: onCollectClick,
-                        circleHitOnly: true
-                    )
-                    .frame(width: 18, height: 18)
-                }
-                .help(isCollected ? "Remove from collected set" : "Add to collected set")
-                .zIndex(1)
-                .onHover { reviewState.isBadgeHovering = $0 }
-        }
     }
 }
 
@@ -601,11 +562,8 @@ struct LibraryListView: View {
     private var tableSelectionBinding: Binding<Set<String>> {
         Binding(
             get: {
-                if viewModel.isReviewMode {
-                    if let id = viewModel.focusedVideoId { return [id] }
-                    return []
-                }
-                return viewModel.selectedVideoIds
+                if let id = viewModel.focusedVideoId { return [id] }
+                return []
             },
             set: { applyTableSelection($0) }
         )
@@ -637,9 +595,6 @@ struct LibraryListView: View {
             for delay in [0.05, 0.15, 0.35] as [Double] {
                 scrollToRow(withId: id, delay: delay)
             }
-        }
-        .onChange(of: viewModel.focusedVideoId) { _, id in
-            if let id { lastClickedId = id }
         }
         .sheet(item: $filmstripSession) { session in
             FilmstripConfigView(
@@ -869,11 +824,7 @@ struct LibraryListView: View {
         if let filePath = ids.first,
            let video = viewModel.filteredVideos.first(where: { $0.id == filePath })
         {
-            if viewModel.isReviewMode {
-                viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
-            } else {
-                viewModel.selectOnly(video.id)
-            }
+            viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
             viewModel.isPlayingInline = true
         }
     }
@@ -1124,9 +1075,15 @@ struct LibraryListView: View {
             }
         }
         .contentShape(Rectangle())
-        .onHover { hovering in
-            if viewModel.isReviewMode {
-                reviewRowStore.state(for: video.id).isRowHovering = hovering
+        .overlay {
+            if viewModel.renamingVideoId != video.id,
+               viewModel.editingTitleVideoId != video.id,
+               !viewModel.isViewingAlbum
+            {
+                ListMouseDownHandler(
+                    onPlainMouseDown: { plainClickListRow(video) },
+                    onModifierMouseDown: { handleListRowModifierClick(video, flags: $0) }
+                )
             }
         }
         .overlay {
@@ -1134,13 +1091,7 @@ struct LibraryListView: View {
                 AlbumReorderInteractionOverlay(
                     videoId: video.id,
                     title: video.displayTitle,
-                    onClick: { _ in
-                        if viewModel.isReviewMode {
-                            viewModel.setReviewFocus(video.id)
-                        } else {
-                            viewModel.selectedVideoIds = [video.id]
-                        }
-                    },
+                    onClick: { _ in viewModel.setReviewFocus(video.id) },
                     onDoubleClick: { viewModel.isPlayingInline = true },
                     onTargeted: { hovering in
                         if hovering {
@@ -1199,87 +1150,36 @@ struct LibraryListView: View {
 
     @ViewBuilder
     private func listRowThumbnail(for video: Video) -> some View {
-        if viewModel.isReviewMode {
-            let reviewState = reviewRowStore.state(for: video.id)
-            let isCollected = viewModel.selectedVideoIds.contains(video.id)
-            let thumb = ListRowHoverThumbnail(
-                video: video,
-                thumbnailService: thumbnailService,
-                hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
-                isMoving: viewModel.activeMoveVideoIds.contains(video.id),
-                isCollected: isCollected,
-                reviewState: reviewState,
-                onSelect: { selectListRow(video) },
-                onModifierSelect: { handleListThumbnailModifierClick(video, flags: $0) }
-            )
-            ZStack(alignment: .topLeading) {
-                thumb
-                ListCollectedSetBadge(
-                    isCollected: isCollected,
-                    reviewState: reviewState,
-                    onCollectClick: { handleCollectCircleClick(video, flags: $0) }
-                )
-            }
-            .frame(width: 56, height: 36)
-            .onHover { reviewState.isRowHovering = $0 }
-        } else {
+        let reviewState = reviewRowStore.state(for: video.id)
+        let isCollected = viewModel.selectedVideoIds.contains(video.id)
+        ZStack(alignment: .topLeading) {
             ListRowHoverThumbnail(
                 video: video,
                 thumbnailService: thumbnailService,
                 hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
                 isMoving: viewModel.activeMoveVideoIds.contains(video.id),
-                onSelect: { selectListRow(video) },
-                onModifierSelect: { handleListThumbnailModifierClick(video, flags: $0) }
+                isCollected: isCollected,
+                reviewState: reviewState
             )
-        }
-    }
-
-    private func selectListRow(_ video: Video) {
-        viewModel.requestDefocusTextInputs()
-        lastClickedId = video.id
-        if viewModel.isReviewMode {
-            viewModel.setReviewFocus(video.id)
-        } else {
-            viewModel.selectedVideoIds = [video.id]
-        }
-    }
-
-    private func handleCollectCircleClick(_ video: Video, flags: NSEvent.ModifierFlags) {
-        var session = ReviewSession(
-            focusedId: viewModel.focusedVideoId,
-            selectedIds: viewModel.selectedVideoIds,
-            inspectorPrefersSelection: viewModel.inspectorPrefersSelection
-        )
-        lastClickedId = session.applyCollectCircleClick(
-            id: video.id,
-            orderedIds: viewModel.filteredVideos.map(\.id),
-            anchorId: lastClickedId,
-            flags: flags
-        )
-        viewModel.focusedVideoId = session.focusedId
-        viewModel.selectedVideoIds = session.selectedIds
-        viewModel.inspectorPrefersSelection = session.inspectorPrefersSelection
-        if let id = session.focusedId {
-            viewModel.lastSelectedVideoId = id
-        }
-    }
-
-    private func handleListThumbnailModifierClick(_ video: Video, flags: NSEvent.ModifierFlags) {
-        viewModel.requestDefocusTextInputs()
-        if !viewModel.isReviewMode {
-            if flags.contains(.command) {
-                var ids = viewModel.selectedVideoIds
-                if ids.contains(video.id) { ids.remove(video.id) } else { ids.insert(video.id) }
-                viewModel.selectedVideoIds = ids
-                lastClickedId = video.id
-                return
-            }
-            if flags.contains(.shift) {
-                viewModel.selectedVideoIds = listModifierSelectionIds(for: video, flags: flags)
-                lastClickedId = video.id
-                return
+            if isCollected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Color.appAccent)
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                    .padding(2)
+                    .allowsHitTesting(false)
             }
         }
+        .frame(width: 56, height: 36)
+    }
+
+    private func plainClickListRow(_ video: Video) {
+        viewModel.applyPlainReviewClick(on: video.id, lastClickedId: &lastClickedId)
+    }
+
+    private func handleListRowModifierClick(_ video: Video, flags: NSEvent.ModifierFlags) {
+        viewModel.requestDefocusTextInputs()
         applyTableSelection(listModifierSelectionIds(for: video, flags: flags), flags: flags)
     }
 
@@ -1300,14 +1200,8 @@ struct LibraryListView: View {
     }
 
     private func effectiveContextMenuIds(tableSelection: Set<String>, for videoId: String) -> Set<String> {
-        if viewModel.isReviewMode {
-            if viewModel.selectedVideoIds.contains(videoId), !viewModel.selectedVideoIds.isEmpty {
-                return viewModel.selectedVideoIds
-            }
-            return [videoId]
-        }
-        if tableSelection.count > 1, tableSelection.contains(videoId) {
-            return tableSelection
+        if viewModel.selectedVideoIds.contains(videoId), !viewModel.selectedVideoIds.isEmpty {
+            return viewModel.selectedVideoIds
         }
         return [videoId]
     }
@@ -1317,28 +1211,29 @@ struct LibraryListView: View {
         flags: NSEvent.ModifierFlags = NSEvent.modifierFlags
     ) {
         viewModel.requestDefocusTextInputs()
-        if !viewModel.isReviewMode {
-            viewModel.selectedVideoIds = newIds
-            return
-        }
-
+        // Capture before session apply — Table can briefly move focus during ⌘-click; we must not
+        // let that clobber the range anchor (lastClickedId) before shift-click runs.
+        let anchorBeforeApply = lastClickedId
         var session = ReviewSession(
             focusedId: viewModel.focusedVideoId,
-            selectedIds: viewModel.selectedVideoIds,
-            inspectorPrefersSelection: viewModel.inspectorPrefersSelection
+            selectedIds: viewModel.selectedVideoIds
         )
         lastClickedId = session.applyListTableSelection(
             newIds: newIds,
             allVideoIds: viewModel.filteredVideos.map(\.id),
             previousTableFocusId: viewModel.focusedVideoId,
-            lastClickedId: lastClickedId,
+            lastClickedId: anchorBeforeApply,
             flags: flags
         )
         viewModel.focusedVideoId = session.focusedId
         viewModel.selectedVideoIds = session.selectedIds
-        viewModel.inspectorPrefersSelection = session.inspectorPrefersSelection
         if let id = session.focusedId {
             viewModel.lastSelectedVideoId = id
+        } else if let clicked = newIds.first, viewModel.selectedVideoIds.contains(clicked),
+                  !flags.intersection(.deviceIndependentFlagsMask).contains(.command),
+                  !flags.contains(.shift),
+                  !flags.contains(.option) {
+            viewModel.lastSelectedVideoId = clicked
         }
     }
 

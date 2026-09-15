@@ -1,41 +1,86 @@
 import SwiftUI
 
-/// Very lightweight removable pill row shown under the header when the Curated Wall filters drawer is closed
-/// but some filters (smart lib / collection / tags / rating / duration) are active.
-/// Matches the refined, low-chrome aesthetic of the wall.
+/// Removable pill row under the Curated Wall header: collected-set chip + active filter chips.
+/// Collection pill shows whenever 2+ clips are collected; filter pills only when `showFilterPills`.
 struct ActiveFilterPills: View {
     @Bindable var viewModel: LibraryViewModel
+    /// When false (filter drawer open/sliding), filter pills hide but the collection pill can remain.
+    var showFilterPills: Bool = true
+
+    private var collectedCount: Int { viewModel.selectedVideoIds.count }
+    private var showsCollection: Bool { collectedCount > 1 }
+    private var showsFilters: Bool { showFilterPills && viewModel.hasActiveFilters }
 
     var body: some View {
-        if viewModel.hasActiveFilters {
+        if showsCollection || showsFilters {
             HStack(spacing: 6) {
-                // Scrollable pills only — "Clear all" lives outside this ScrollView (below) so it
-                // stays reachable even when there are enough pills to overflow the visible width,
-                // instead of scrolling out of view as just another trailing item.
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        switch viewModel.filtersDrawerMode {
-                        case .quick:
-                            quickFilterPills
-                        case .advanced:
-                            advancedFilterPill
+                        if showsCollection {
+                            collectedSetPill
+                        }
+                        if showsFilters {
+                            switch viewModel.filtersDrawerMode {
+                            case .quick:
+                                quickFilterPills
+                            case .advanced:
+                                advancedFilterPill
+                            }
                         }
                     }
                 }
 
-                Button("Clear all") {
-                    viewModel.resetAllFilters()
+                if showsFilters {
+                    Button("Clear all") {
+                        viewModel.resetAllFilters()
+                    }
+                    .font(.caption)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.appAccent)
+                    .fixedSize()
+                    .help("Clear all filters (⌘⌥C)")
+                    .accessibilityLabel("Clear all filters")
                 }
-                .font(.caption)
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.appAccent)
-                .fixedSize()
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
             .background(Color.appSurface.opacity(0.4))
             .transition(.opacity)
         }
+    }
+
+    private var collectedSetPill: some View {
+        let label = collectedCount == 1 ? "1 clip collected" : "\(collectedCount) clips collected"
+        return HStack(spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption)
+                Text(label)
+                    .font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(Color.appAccent)
+
+            Button {
+                viewModel.deselectAllVideos()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(Color.appTextTertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Clear collection (⌘⇧A)")
+            .accessibilityLabel("Clear collection")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(
+            Capsule().fill(Color.appAccent.opacity(0.18))
+        )
+        .overlay(
+            Capsule().stroke(Color.appAccent.opacity(0.45), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label). Clear collection, ⌘⇧A.")
     }
 
     @ViewBuilder

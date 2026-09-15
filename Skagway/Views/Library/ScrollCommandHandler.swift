@@ -83,10 +83,26 @@ struct ScrollCommandHandler: NSViewRepresentable {
         case .pageUp: y = max(minY, y - page)
         case .pageDown: y = min(maxY, y + page)
         case .toRow(let index, let total):
-            // Map row → document fraction using the *actual* document height (robust to per-cell height
-            // variance), then center it. Clamped to the scrollable range.
-            let rowTop = (CGFloat(index) / CGFloat(max(1, total))) * docHeight
-            y = min(maxY, max(minY, rowTop - visibleH / 2))
+            // Reveal the target row with minimal scroll. Skip when it is already fully visible
+            // (arrow-key navigation within or across on-screen rows should not re-center the grid).
+            guard total > 0 else { break }
+            let rowHeight = docHeight / CGFloat(total)
+            let rowTop = CGFloat(index) * rowHeight
+            let rowBottom = rowTop + rowHeight
+            let padding: CGFloat = 8
+            let visibleTop = clip.bounds.origin.y
+            let visibleBottom = visibleTop + visibleH
+            if rowTop >= visibleTop + padding, rowBottom <= visibleBottom - padding {
+                return
+            }
+            if rowTop < visibleTop + padding {
+                y = max(minY, rowTop - padding)
+            } else {
+                y = min(maxY, rowBottom - visibleH + padding)
+            }
+            if abs(y - visibleTop) < 0.5 {
+                return
+            }
         case .retile:
             // Keep the current offset; the nudge-and-restore below forces a re-tile in place.
             break

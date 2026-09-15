@@ -44,6 +44,8 @@ struct CuratedWallCard: View {
     private let thumbHeight: CGFloat = 188
     private let corner: CGFloat = 8
     private let titleScrimFade: Animation = .easeInOut(duration: 0.5)
+    private let focusDash = StrokeStyle(lineWidth: 2, dash: [6, 4])
+    private let focusThumbDash = StrokeStyle(lineWidth: 1.5, dash: [5, 4])
 
     var body: some View {
         let isSelected = selectionState.isSelected
@@ -103,17 +105,7 @@ struct CuratedWallCard: View {
                             .allowsHitTesting(false)
                         }
                     }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: corner, style: .continuous)
-                            .strokeBorder(
-                                isSelected
-                                    ? Color.appAccent.opacity(0.95)
-                                    : (isFocused
-                                        ? Color.appAccent.opacity(0.55)
-                                        : Color.white.opacity(isHovering ? 0.22 : 0.10)),
-                                lineWidth: isSelected || isFocused ? 1.5 : 1
-                            )
-                    }
+                    .overlay { thumbBorder(isSelected: isSelected, isFocused: isFocused, isHovering: isHovering) }
                     .shadow(
                         color: .black.opacity(isHovering ? 0.28 : (isSelected ? 0.20 : 0.12)),
                         radius: isHovering ? 10 : 6,
@@ -184,15 +176,7 @@ struct CuratedWallCard: View {
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: corner + 2, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: corner + 2, style: .continuous)
-                .stroke(
-                    isSelected
-                        ? Color.appAccent.opacity(0.85)
-                        : (isFocused ? Color.white.opacity(0.55) : Color.clear),
-                    lineWidth: 2
-                )
-        )
+        .overlay { cardBorder(isSelected: isSelected, isFocused: isFocused) }
         .onHover { hovering in
             isHovering = hovering
             if hovering {
@@ -233,6 +217,31 @@ struct CuratedWallCard: View {
     }
 
     // MARK: - Chrome pieces (SwiftUI-only; no extra bitmap assets)
+
+    @ViewBuilder
+    private func thumbBorder(isSelected: Bool, isFocused: Bool, isHovering: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+        if isSelected {
+            shape.strokeBorder(Color.appAccent.opacity(0.95), lineWidth: 1.5)
+        } else if isFocused {
+            shape.strokeBorder(Color.appAccent.opacity(0.55), style: focusThumbDash)
+        } else {
+            shape.strokeBorder(Color.white.opacity(isHovering ? 0.22 : 0.10), lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func cardBorder(isSelected: Bool, isFocused: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: corner + 2, style: .continuous)
+        if isSelected {
+            shape.stroke(Color.appAccent.opacity(0.85), lineWidth: 2)
+            if isFocused {
+                shape.stroke(Color.white.opacity(0.55), style: focusDash)
+            }
+        } else if isFocused {
+            shape.stroke(Color.white.opacity(0.55), style: focusDash)
+        }
+    }
 
     private var thumbMedia: some View {
         Color.appSurface

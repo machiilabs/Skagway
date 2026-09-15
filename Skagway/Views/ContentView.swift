@@ -135,9 +135,7 @@ private struct LibraryContentView: View {
 
     /// Idle header count (busy progress lives in the bottom activity strip).
     private var headerStatusText: String {
-        let total = "\(vm.filteredVideos.count) videos"
-        let sel = vm.selectedVideoIds.count
-        return sel > 1 ? "\(total), \(sel) selected" : total
+        "\(vm.filteredVideos.count) videos"
     }
 
     private var isConversionActive: Bool {
@@ -385,19 +383,6 @@ private struct LibraryContentView: View {
             }
             .controlSize(.small)
 
-            Button {
-                vm.toggleReviewMode()
-            } label: {
-                Image(systemName: vm.isReviewMode ? "eye.fill" : "eye")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(vm.isReviewMode ? Color.appAccent : Color.appTextSecondary)
-            .help(vm.isReviewMode
-                  ? "Review on — click to watch, A or the circle to collect (⌘3)"
-                  : "Review — watch and collect a set without losing it (⌘3)")
-
-            Divider().frame(height: 16)
-
             sortCluster
 
             Divider().frame(height: 16)
@@ -409,19 +394,12 @@ private struct LibraryContentView: View {
             Spacer()
 
             // Video count — busy progress / errors live in the bottom activity strip.
-            Button {
-                vm.inspectCollectedSet()
-            } label: {
-                Text(headerStatusText)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.appTextTertiary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
-            .buttonStyle(.plain)
-            .disabled(!vm.isReviewMode || vm.selectedVideoIds.count < 2)
-            .help(vm.isReviewMode && vm.selectedVideoIds.count > 1 ? "Inspect the collected set" : headerStatusText)
-            .padding(.trailing, 4)
+            Text(headerStatusText)
+                .font(.system(size: 10))
+                .foregroundStyle(Color.appTextTertiary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .padding(.trailing, 4)
 
             // Icon-only queue access when the strip is not already showing that job.
             if showsHeaderConversionIconOnly { conversionPill }
@@ -532,10 +510,9 @@ private struct LibraryContentView: View {
                     .transition(.opacity)
             }
 
-            // Pills live in their own slot and only when the drawer is fully closed.
-            // Use reveal so pills don't pop in while the drawer is still sliding away.
-            if reveal < 0.001 && vm.hasActiveFilters {
-                ActiveFilterPills(viewModel: vm)
+            // Filter pills when the drawer is fully closed; collection pill stays visible while collecting.
+            if vm.selectedVideoIds.count > 1 || (reveal < 0.001 && vm.hasActiveFilters) {
+                ActiveFilterPills(viewModel: vm, showFilterPills: reveal < 0.001)
                     .transition(.opacity)
             }
 
@@ -687,7 +664,6 @@ private struct LibraryContentView: View {
                 } else {
                     vm.isPlayerFullScreen = false
                     vm.playback.stop()
-                    vm.notePlaybackStopped()
                 }
             }
             // Surprise Me auto-play: `surpriseMePickRandom()` selects a random video and (if enabled)
@@ -978,11 +954,6 @@ private struct LibraryContentView: View {
                 }
                 return nil
             }
-            // Review mode, not playing: Escape inspects the collected set.
-            if lvm.isReviewMode, lvm.selectedVideoIds.count > 1, !lvm.inspectorIsSetMode {
-                DispatchQueue.main.async { lvm.inspectCollectedSet() }
-                return nil
-            }
             return event
         }
         // Space — play/pause (or start playback). ⌥-Space — "Play from Beginning": starts (or, if
@@ -1015,10 +986,9 @@ private struct LibraryContentView: View {
             return nil
         }
 
-        // A — toggle the focused clip in the collected set (review mode only).
+        // A — toggle the focused clip in the collected set.
         if event.keyCode == 0,
            event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
-           lvm.isReviewMode,
            !lvm.isEditingText {
             if let first = NSApp.keyWindow?.firstResponder,
                first is NSTextView || first is NSTextField || first is NSText
@@ -1169,7 +1139,7 @@ private struct LibraryContentView: View {
         // runs before menu dispatch, and no snapshot-in-advance focus check here can beat the
         // menu action's at-action-time responder-chain routing.
 
-        // ⌘⇧A — Deselect All. Works in both List and grid (unlike ⌘A, `Table` has no native
+        // ⌘⇧A — Clear Collection. Works in both List and grid (unlike ⌘A, `Table` has no native
         // "deselect all" to defer to, so this needs to be handled here for List too). Unlike ⌘A,
         // there's no native text-editing meaning for ⌘⇧A to defer to, so — unless actively renaming
         // a file — this always claims the shortcut, even while a field (e.g. in the Inspector) is
@@ -1178,6 +1148,15 @@ private struct LibraryContentView: View {
            event.modifierFlags.intersection(commandModifiers) == [.command, .shift],
            !lvm.isEditingText {
             DispatchQueue.main.async { lvm.deselectAllVideos() }
+            return nil
+        }
+
+        // ⌘⌥C — Clear all filters (matches pill "Clear all" and View menu).
+        if event.keyCode == 8,  // 'c'
+           event.modifierFlags.intersection(commandModifiers) == [.command, .option],
+           !lvm.isEditingText,
+           lvm.hasActiveFilters {
+            DispatchQueue.main.async { lvm.resetAllFilters() }
             return nil
         }
 

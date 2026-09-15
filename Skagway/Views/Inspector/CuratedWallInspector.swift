@@ -117,14 +117,13 @@ struct CuratedWallInspector: View {
             bookmarkTitleDrafts = [:]
             Task { await viewModel.reloadBookmarksForSelection() }
         }
-        .onChange(of: viewModel.inspectorPrefersSelection) { _, _ in
-            loadCustomFieldValues()
-            bookmarkTitleDrafts = [:]
-            newTagText = ""
-            Task { await viewModel.reloadBookmarksForSelection() }
-        }
         .onChange(of: viewModel.focusedVideoId) { _, _ in
             newTagText = ""
+            if viewModel.selectedVideoIds.count > 1 {
+                loadCustomFieldValues()
+                bookmarkTitleDrafts = [:]
+                Task { await viewModel.reloadBookmarksForSelection() }
+            }
         }
         .onChange(of: viewModel.defocusTextInputsToken) { _, _ in
             focusedCustomFieldId = nil
@@ -358,17 +357,55 @@ struct CuratedWallInspector: View {
 
     // MARK: - Title + icon actions
 
+    /// Batch inspect header bar — warm orange so batch vs single is obvious at a glance.
+    private static let inspectorBatchBarFill = Color(red: 251 / 255, green: 146 / 255, blue: 60 / 255)
+    /// Single-clip inspect header bar — light blue, paired with batch orange.
+    private static let inspectorSingleBarFill = Color(red: 147 / 255, green: 197 / 255, blue: 253 / 255)
+    private static let inspectorModeBarText = Color(red: 10 / 255, green: 15 / 255, blue: 26 / 255)
+
+    private func inspectorModeTitleBar<Content: View>(
+        isBatch: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    .fill(isBatch ? Self.inspectorBatchBarFill : Self.inspectorSingleBarFill)
+            )
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(isBatch ? "Batch inspect, \(collectedSetCount) videos" : "Single clip inspect")
+    }
+
     private func titleAndActions(for v: Video) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if viewModel.inspectorIsSetMode {
-                Text("\(collectedSetCount) Videos Selected")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.appTextPrimary)
+                inspectorModeTitleBar(isBatch: true) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("\(collectedSetCount) Videos Selected")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Self.inspectorModeBarText)
+                        Spacer(minLength: 8)
+                        Button("Clear") {
+                            viewModel.deselectAllVideos()
+                        }
+                        .font(.callout.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Self.inspectorModeBarText.opacity(0.72))
+                        .help("Clear collection (⌘⇧A)")
+                        .accessibilityLabel("Clear collection")
+                    }
+                }
             } else {
-                Text(v.displayTitle)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.appTextPrimary)
-                    .lineLimit(2)
+                inspectorModeTitleBar(isBatch: false) {
+                    Text(v.displayTitle)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Self.inspectorModeBarText)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 if v.displayTitle != v.fileName {
                     Text(v.fileName)
@@ -405,21 +442,6 @@ struct CuratedWallInspector: View {
                     }.buttonStyle(.plain).foregroundStyle(Color.appAccent)
 
                     Spacer()
-
-                    if viewModel.isReviewMode, collectedSetCount > 0 {
-                        Button {
-                            viewModel.inspectCollectedSet()
-                        } label: {
-                            Text(collectedSetCount == 1 ? "1 selected" : "\(collectedSetCount) selected")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Color.appAccent)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(collectedSetCount < 2)
-                        .help(collectedSetCount > 1
-                              ? "Tag or edit the collected set"
-                              : "Collect more clips (A or the card checkbox) to tag them together")
-                    }
                 }
                 .font(.callout)
             }
@@ -902,11 +924,9 @@ struct CuratedWallInspector: View {
                 Spacer()
             }
 
-            if viewModel.isReviewMode {
-                Text(tagActionTargetCaption)
-                    .font(.caption2)
-                    .foregroundStyle(Color.appTextTertiary)
-            }
+            Text(tagActionTargetCaption)
+                .font(.caption2)
+                .foregroundStyle(Color.appTextTertiary)
 
             // List 1 — tags on this video; tap a chip to unassign it. Packed flow (not a grid).
             if assigned.isEmpty {
@@ -988,8 +1008,7 @@ struct CuratedWallInspector: View {
         return "Tagging selected clip"
     }
 
-    /// Snapshot inspector targets synchronously — `Task { … selectedIds … }` would re-read after
-    /// ESC / playback-stop switches Review mode to the collected set.
+    /// Snapshot inspector targets synchronously — async re-reads could retarget after focus changes.
     private func assignTagToCurrentTarget(_ name: String) {
         let targets = Set(viewModel.inspectorActionIds)
         guard !name.isEmpty, !targets.isEmpty else { return }

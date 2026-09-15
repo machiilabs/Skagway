@@ -139,10 +139,7 @@ struct CuratedWallGrid: View {
                             }
                         ))
                         .overlay(alignment: .topLeading) {
-                            if viewModel.isReviewMode {
-                                collectedSetBadge(for: video)
-                                    .frame(width: 40, height: 40, alignment: .topLeading)
-                            }
+                            collectedSetCheckmark(for: video)
                         }
                         .onHover { hovering in
                             selectionStore.state(for: video.id).isHovering = hovering
@@ -450,67 +447,6 @@ struct CuratedWallGrid: View {
         }
     }
 
-    /// AppKit click handler so ⌘/⇧/⌥ on the collect circle are reliable (SwiftUI Button is not).
-    private struct CollectCircleClickHandler: NSViewRepresentable {
-        let onClick: (NSEvent.ModifierFlags) -> Void
-
-        final class HandlerView: NSView {
-            var onClick: ((NSEvent.ModifierFlags) -> Void)?
-
-            override func mouseUp(with event: NSEvent) {
-                guard event.clickCount <= 1 else { return }
-                onClick?(event.modifierFlags)
-            }
-
-            override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-            /// Only the circle accepts clicks — pass everything else through for card hover.
-            override func hitTest(_ point: NSPoint) -> NSView? {
-                guard bounds.contains(point) else { return nil }
-                let center = NSPoint(x: bounds.midX, y: bounds.midY)
-                let radius = min(bounds.width, bounds.height) * 0.5
-                let dx = point.x - center.x
-                let dy = point.y - center.y
-                guard dx * dx + dy * dy <= radius * radius else { return nil }
-                return self
-            }
-        }
-
-        func makeNSView(context: Context) -> HandlerView {
-            let view = HandlerView()
-            view.onClick = onClick
-            return view
-        }
-
-        func updateNSView(_ nsView: HandlerView, context: Context) {
-            nsView.onClick = onClick
-        }
-    }
-
-    private struct CollectedSetBadge: View {
-        let selectionState: CardSelectionState
-        let onClick: (NSEvent.ModifierFlags) -> Void
-
-        var body: some View {
-            let isSelected = selectionState.isSelected
-            if isSelected || selectionState.isHovering {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 16, weight: .semibold))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, isSelected ? Color.appAccent : Color.white.opacity(0.55))
-                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                    .padding(.top, 12)
-                    .padding(.leading, 12)
-                    .overlay {
-                        CollectCircleClickHandler(onClick: onClick)
-                            .frame(width: 24, height: 24)
-                    }
-                    .contentShape(Circle())
-                    .help(isSelected ? "Remove from collected set" : "Add to collected set")
-            }
-        }
-    }
-
     private struct AlbumSelectionGestures: ViewModifier {
         var enabled: Bool
         let onSelect: () -> Void
@@ -529,10 +465,6 @@ struct CuratedWallGrid: View {
 
     private func handleSelection(_ video: Video, flags: NSEvent.ModifierFlags = NSEvent.modifierFlags) {
         viewModel.requestDefocusTextInputs()
-        if !viewModel.isReviewMode {
-            handleStandardSelection(video, flags: flags)
-            return
-        }
         let optionOnly = flags.contains(.option)
             && !flags.contains(.command)
             && !flags.contains(.shift)
@@ -549,74 +481,33 @@ struct CuratedWallGrid: View {
             selectionStore.sync(to: viewModel.selectedVideoIds)
             return
         }
-        if flags.contains(.shift), let anchor = lastClickedId,
+        // Shift range anchors on the last click (including ⌘-click), not review focus alone.
+        let anchor = lastClickedId ?? viewModel.focusedVideoId
+        if flags.contains(.shift), let anchor,
            let aIdx = viewModel.filteredVideos.firstIndex(where: { $0.id == anchor }),
            let idx = viewModel.filteredVideos.firstIndex(where: { $0.id == video.id }) {
             let range = min(aIdx, idx)...max(aIdx, idx)
             let rangeIds = Set(range.map { viewModel.filteredVideos[$0].id })
-            let merged = viewModel.selectedVideoIds.union(rangeIds)
-            selectionStore.sync(to: merged)
-            selectionStore.syncFocus(to: video.id)
-            DispatchQueue.main.async {
-                viewModel.selectedVideoIds = merged
-                viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
-            }
+            viewModel.unionIntoCollectedSet(rangeIds, lastTouchedId: video.id)
+            selectionStore.sync(to: viewModel.selectedVideoIds)
+            selectionStore.syncFocus(to: nil)
+            lastClickedId = video.id
             return
         }
-        lastClickedId = video.id
-        selectionStore.syncFocus(to: video.id)
-        viewModel.setReviewFocus(video.id)
+        viewModel.applyPlainReviewClick(on: video.id, lastClickedId: &lastClickedId)
+        selectionStore.syncFocus(to: viewModel.focusedVideoId)
     }
 
-    private func handleStandardSelection(_ video: Video, flags: NSEvent.ModifierFlags) {
-        let newIds: Set<String>
-        if flags.contains(.command) {
-            var ids = viewModel.selectedVideoIds
-            if ids.contains(video.id) { ids.remove(video.id) } else { ids.insert(video.id) }
-            lastClickedId = video.id
-            newIds = ids
-        } else if flags.contains(.shift), let anchor = lastClickedId,
-                  let aIdx = viewModel.filteredVideos.firstIndex(where: { $0.id == anchor }),
-                  let idx = viewModel.filteredVideos.firstIndex(where: { $0.id == video.id }) {
-            let range = min(aIdx, idx)...max(aIdx, idx)
-            newIds = Set(range.map { viewModel.filteredVideos[$0].id })
-        } else {
-            lastClickedId = video.id
-            selectionStore.sync(to: [video.id])
-            selectionStore.syncFocus(to: video.id)
-            viewModel.selectOnly(video.id)
-            return
-        }
-        selectionStore.sync(to: newIds)
-        selectionStore.syncFocus(to: video.id)
-        DispatchQueue.main.async { viewModel.selectedVideoIds = newIds }
-    }
-
-    private func handleCollectCircleClick(_ video: Video, flags: NSEvent.ModifierFlags) {
-        viewModel.requestDefocusTextInputs()
-        var session = ReviewSession(
-            focusedId: viewModel.focusedVideoId,
-            selectedIds: viewModel.selectedVideoIds,
-            inspectorPrefersSelection: viewModel.inspectorPrefersSelection
-        )
-        lastClickedId = session.applyCollectCircleClick(
-            id: video.id,
-            orderedIds: viewModel.filteredVideos.map(\.id),
-            anchorId: lastClickedId,
-            flags: flags
-        )
-        viewModel.focusedVideoId = session.focusedId
-        viewModel.selectedVideoIds = session.selectedIds
-        viewModel.inspectorPrefersSelection = session.inspectorPrefersSelection
-        selectionStore.sync(to: session.selectedIds)
-        if let focusId = session.focusedId {
-            selectionStore.syncFocus(to: focusId)
-        }
-    }
-
-    private func collectedSetBadge(for video: Video) -> some View {
-        CollectedSetBadge(selectionState: selectionStore.state(for: video.id)) { flags in
-            handleCollectCircleClick(video, flags: flags)
+    @ViewBuilder
+    private func collectedSetCheckmark(for video: Video) -> some View {
+        if selectionStore.state(for: video.id).isSelected {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, Color.appAccent)
+                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                .padding(12)
+                .allowsHitTesting(false)
         }
     }
 

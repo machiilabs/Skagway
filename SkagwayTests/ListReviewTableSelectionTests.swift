@@ -31,7 +31,7 @@ final class ListReviewTableSelectionTests: XCTestCase {
         XCTAssertEqual(session.selectedIds, [a, c])
     }
 
-    func testCommandClickTogglesIntoSetWithoutMovingFocus() {
+    func testCommandClickAddEntersBatchInspect() {
         var session = ReviewSession(focusedId: a, selectedIds: [a])
         _ = session.applyListTableSelection(
             newIds: [a, b],
@@ -40,8 +40,9 @@ final class ListReviewTableSelectionTests: XCTestCase {
             lastClickedId: a,
             flags: commandFlags()
         )
-        XCTAssertEqual(session.focusedId, a)
+        XCTAssertNil(session.focusedId)
         XCTAssertEqual(session.selectedIds, [a, b])
+        XCTAssertTrue(session.isSetMode)
     }
 
     func testCommandClickRemovesFromSet() {
@@ -57,6 +58,25 @@ final class ListReviewTableSelectionTests: XCTestCase {
         XCTAssertEqual(session.selectedIds, [a])
     }
 
+    func testShiftClickAnchorsOnLastCommandClickNotTableFocus() {
+        let v4 = ordered[0]
+        let v10 = ordered[2]
+        let v15 = ordered[3]
+        var session = ReviewSession(focusedId: v4, selectedIds: [v4, v15])
+        // Table reports focus→click span (v4…v10); collection range should be v10…v15 (last ⌘-click).
+        let last = session.applyListTableSelection(
+            newIds: [v4, ordered[1], v10],
+            allVideoIds: ordered,
+            previousTableFocusId: v4,
+            lastClickedId: v15,
+            flags: shiftFlags()
+        )
+        XCTAssertEqual(last, v10)
+        XCTAssertNil(session.focusedId)
+        XCTAssertEqual(session.selectedIds, Set([v4, v10, v15]))
+        XCTAssertTrue(session.isSetMode)
+    }
+
     func testShiftClickUnionsRangeIntoExistingSet() {
         var session = ReviewSession(focusedId: a, selectedIds: [a, d])
         let last = session.applyListTableSelection(
@@ -67,8 +87,9 @@ final class ListReviewTableSelectionTests: XCTestCase {
             flags: shiftFlags()
         )
         XCTAssertEqual(last, c)
-        XCTAssertEqual(session.focusedId, c)
+        XCTAssertNil(session.focusedId)
         XCTAssertEqual(session.selectedIds, [a, b, c, d])
+        XCTAssertTrue(session.isSetMode)
     }
 
     func testOptionClickSelectsOnly() {

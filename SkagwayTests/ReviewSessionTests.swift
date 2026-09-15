@@ -24,6 +24,8 @@ final class ReviewSessionTests: XCTestCase {
         session.moveFocus(step: 1, orderedIds: [a, b, c, d])
         XCTAssertEqual(session.focusedId, b)
         XCTAssertEqual(session.selectedIds, [a, c])
+        // Focus left the collected set — Inspector follows the focused clip.
+        XCTAssertFalse(session.isSetMode)
         XCTAssertEqual(session.actionIds, [b])
     }
 
@@ -45,55 +47,59 @@ final class ReviewSessionTests: XCTestCase {
         XCTAssertFalse(session.isSetMode)
     }
 
-    func testPlaybackStopEntersSetModeWhenCollecting() {
-        var session = ReviewSession(focusedId: a, selectedIds: [a, c])
-        session.playbackStopped()
+    func testBatchWhenFocusClearedWithMultiSet() {
+        let session = ReviewSession(focusedId: nil, selectedIds: [a, c])
         XCTAssertTrue(session.isSetMode)
         XCTAssertEqual(session.actionIds, [a, c])
         XCTAssertEqual(session.reviewedId(lastSelectedId: a), a)
     }
 
-    func testPlaybackStopKeepsSingleInspectWhenFocusOutsideSet() {
-        var session = ReviewSession(focusedId: d, selectedIds: [a, b, c])
-        session.playbackStopped()
+    func testFocusInSetUsesSingleInspect() {
+        let session = ReviewSession(focusedId: a, selectedIds: [a, c])
+        XCTAssertFalse(session.isSetMode)
+        XCTAssertEqual(session.actionIds, [a])
+    }
+
+    func testFocusOutsideSetKeepsSingleInspect() {
+        let session = ReviewSession(focusedId: d, selectedIds: [a, b, c])
         XCTAssertFalse(session.isSetMode)
         XCTAssertEqual(session.actionIds, [d])
     }
 
-    func testPlaybackStopStaysOnFocusWhenSetIsEmptyOrSingle() {
-        var empty = ReviewSession(focusedId: a, selectedIds: [])
-        empty.playbackStopped()
-        XCTAssertFalse(empty.isSetMode)
-        XCTAssertEqual(empty.actionIds, [a])
-
-        var single = ReviewSession(focusedId: a, selectedIds: [a])
-        single.playbackStopped()
-        XCTAssertFalse(single.isSetMode)
-        XCTAssertEqual(single.actionIds, [a])
-    }
-
-    func testInspectSetRequiresTwoOrMore() {
+    func testMultiSelectCmdAddEntersBatchInspect() {
         var session = ReviewSession(focusedId: a, selectedIds: [a])
-        session.inspectSet()
         XCTAssertFalse(session.isSetMode)
-
-        session.toggleInSet(b)
-        session.inspectSet()
+        session.toggleInSetForCollectionEdit(b)
+        XCTAssertNil(session.focusedId)
         XCTAssertTrue(session.isSetMode)
         XCTAssertEqual(session.actionIds, [a, b])
     }
 
-    func testFocusClearsSetMode() {
-        var session = ReviewSession(focusedId: a, selectedIds: [a, b], inspectorPrefersSelection: true)
+    func testPlainClickCollectedTogglesBatchAndFocus() {
+        var session = ReviewSession(focusedId: d, selectedIds: [a, b, c])
+        _ = session.applyPlainClick(on: a, lastClickedId: nil)
+        XCTAssertNil(session.focusedId)
         XCTAssertTrue(session.isSetMode)
-        session.focus(c)
+
+        _ = session.applyPlainClick(on: a, lastClickedId: a)
+        XCTAssertEqual(session.focusedId, a)
         XCTAssertFalse(session.isSetMode)
-        XCTAssertEqual(session.actionIds, [c])
-        XCTAssertEqual(session.selectedIds, [a, b])
+
+        _ = session.applyPlainClick(on: a, lastClickedId: a)
+        XCTAssertNil(session.focusedId)
+        XCTAssertTrue(session.isSetMode)
+    }
+
+    func testPlainClickDifferentCollectedResetsToBatch() {
+        var session = ReviewSession(focusedId: a, selectedIds: [a, b, c])
+        _ = session.applyPlainClick(on: a, lastClickedId: nil)
+        _ = session.applyPlainClick(on: b, lastClickedId: a)
+        XCTAssertNil(session.focusedId)
+        XCTAssertTrue(session.isSetMode)
     }
 
     func testPruneDropsInvalidFocusAndSetMembers() {
-        var session = ReviewSession(focusedId: d, selectedIds: [a, d], inspectorPrefersSelection: true)
+        var session = ReviewSession(focusedId: d, selectedIds: [a, d])
         session.prune(validIds: [a, b])
         XCTAssertEqual(session.selectedIds, [a])
         XCTAssertEqual(session.focusedId, a)
@@ -118,85 +124,52 @@ final class ReviewSessionTests: XCTestCase {
     }
 
     func testReviewedIdInSetModePrefersLastSelectedInSet() {
-        var session = ReviewSession(focusedId: c, selectedIds: [a, b], inspectorPrefersSelection: true)
+        var session = ReviewSession(focusedId: nil, selectedIds: [a, b])
         XCTAssertEqual(session.reviewedId(lastSelectedId: b), b)
         XCTAssertEqual(session.reviewedId(lastSelectedId: c), session.selectedIds.first)
     }
 
-    func testCollectCirclePlainToggleAddsToSetWithoutMovingFocus() {
-        var session = ReviewSession(focusedId: b, selectedIds: [])
-        let last = session.applyCollectCircleClick(
-            id: a,
-            orderedIds: [a, b, c, d],
-            anchorId: nil,
-            flags: []
-        )
-        XCTAssertEqual(last, a)
-        XCTAssertEqual(session.focusedId, b)
-        XCTAssertEqual(session.selectedIds, [a])
-    }
-
-    func testCollectCircleShiftSelectsRangeFromAnchor() {
-        var session = ReviewSession(focusedId: nil, selectedIds: [a])
-        let last = session.applyCollectCircleClick(
-            id: d,
-            orderedIds: [a, b, c, d],
-            anchorId: a,
+    func testListShiftUsesFocusedIdWhenNoLastClick() {
+        var session = ReviewSession(focusedId: b, selectedIds: [a])
+        let last = session.applyListTableSelection(
+            newIds: [a, b, c, d],
+            allVideoIds: [a, b, c, d],
+            previousTableFocusId: b,
+            lastClickedId: nil,
             flags: [.shift]
         )
         XCTAssertEqual(last, d)
-        XCTAssertEqual(session.focusedId, d)
+        XCTAssertNil(session.focusedId)
         XCTAssertEqual(session.selectedIds, [a, b, c, d])
+        XCTAssertTrue(session.isSetMode)
     }
 
-    func testCollectCircleCommandToggleDoesNotMoveFocus() {
+    func testListCommandAddEntersBatchInspect() {
         var session = ReviewSession(focusedId: c, selectedIds: [a])
-        let last = session.applyCollectCircleClick(
-            id: b,
-            orderedIds: [a, b, c, d],
-            anchorId: a,
+        let last = session.applyListTableSelection(
+            newIds: [b],
+            allVideoIds: [a, b, c, d],
+            previousTableFocusId: c,
+            lastClickedId: a,
             flags: [.command]
         )
         XCTAssertEqual(last, b)
-        XCTAssertEqual(session.focusedId, c)
+        XCTAssertNil(session.focusedId)
         XCTAssertEqual(session.selectedIds, [a, b])
+        XCTAssertTrue(session.isSetMode)
     }
 
-    func testCollectCircleOptionSelectsOnly() {
+    func testListOptionSelectsOnly() {
         var session = ReviewSession(focusedId: a, selectedIds: [a, c])
-        let last = session.applyCollectCircleClick(
-            id: b,
-            orderedIds: [a, b, c, d],
-            anchorId: a,
+        let last = session.applyListTableSelection(
+            newIds: [b],
+            allVideoIds: [a, b, c, d],
+            previousTableFocusId: a,
+            lastClickedId: a,
             flags: [.option]
         )
         XCTAssertEqual(last, b)
         XCTAssertEqual(session.focusedId, b)
         XCTAssertEqual(session.selectedIds, [b])
-    }
-
-    func testCollectCircleShiftUnionsWithExistingSet() {
-        let w = "/w.mp4"
-        let x = "/x.mp4"
-        let y = "/y.mp4"
-        let z = "/z.mp4"
-        let ordered = [a, b, c, d, w, x, y, z]
-
-        var session = ReviewSession(focusedId: nil, selectedIds: [a, b, c, d])
-        _ = session.applyCollectCircleClick(
-            id: w,
-            orderedIds: ordered,
-            anchorId: d,
-            flags: []
-        )
-        let last = session.applyCollectCircleClick(
-            id: z,
-            orderedIds: ordered,
-            anchorId: w,
-            flags: [.shift]
-        )
-        XCTAssertEqual(last, z)
-        XCTAssertEqual(session.focusedId, z)
-        XCTAssertEqual(session.selectedIds, [a, b, c, d, w, x, y, z])
     }
 }

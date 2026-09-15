@@ -44,13 +44,6 @@ struct SkagwayApp: App {
                 .keyboardShortcut("2", modifiers: .command)
                 .disabled(!appState.hasLibrary)
 
-                Toggle("Review", isOn: Binding(
-                    get: { appState.libraryViewModel?.isReviewMode ?? false },
-                    set: { _ in appState.libraryViewModel?.toggleReviewMode() }
-                ))
-                .keyboardShortcut("3", modifiers: .command)
-                .disabled(!appState.hasLibrary)
-
                 Divider()
 
                 Button("Scroll to Selection") {
@@ -90,12 +83,11 @@ struct SkagwayApp: App {
                 .disabled(!appState.hasLibrary)
 
                 Button("Clear Filters") {
-                    appState.libraryViewModel?.clearFilters()
+                    appState.libraryViewModel?.resetAllFilters()
                 }
                 .keyboardShortcut("c", modifiers: [.command, .option])
                 .disabled(!appState.hasLibrary
-                    || ((appState.libraryViewModel?.selectedTagIds.isEmpty ?? true)
-                        && !(appState.libraryViewModel?.isRatingFilterActive ?? false)))
+                    || !(appState.libraryViewModel?.hasActiveFilters ?? false))
 
                 Button("Toggle Thumbnail / Filmstrip") {
                     appState.libraryViewModel?.showThumbnailInDetail.toggle()
@@ -228,7 +220,7 @@ struct SkagwayApp: App {
                 }
                 .keyboardShortcut("a", modifiers: .command)
 
-                Button("Deselect All") {
+                Button("Clear Collection") {
                     appState.libraryViewModel?.deselectAllVideos()
                 }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
@@ -237,9 +229,8 @@ struct SkagwayApp: App {
                 Button("Toggle in Selection") {
                     appState.libraryViewModel?.toggleFocusedInCollectedSet()
                 }
-                .disabled(!(appState.libraryViewModel?.isReviewMode ?? false)
-                    || (appState.libraryViewModel?.focusedVideoId == nil
-                        && appState.libraryViewModel?.selectedVideoIds.isEmpty != false))
+                .disabled(appState.libraryViewModel?.focusedVideoId == nil
+                    && appState.libraryViewModel?.selectedVideoIds.isEmpty != false)
 
                 Divider()
 
