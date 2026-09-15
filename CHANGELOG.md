@@ -31,16 +31,15 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
-- **Review simplification** — Review is always on: removed the toolbar eye toggle and ⌘3. Collect clips with ⌘-click, **A**, or Shift-click (range from focused clip); blue checkmarks show membership only (no collect circles). Inspector batch-edits the set automatically when 2+ are collected and focus is in the set; focus outside the set shows that clip. Tag caption always shows the active target.
-- **Collected-set pill** — When 2+ clips are collected, an accent removable pill (“N clips collected ✕”) appears in the pill row (alongside filter pills when active); Inspector batch header adds **Clear**. **⌘⇧A** / Edit → Clear Collection clears the set; focus unchanged.
-- **Clear all filters (⌘⌥C)** — View → Clear Filters and the pill-row **Clear all** now call `resetAllFilters()` (sidebar, tags, rating, duration, quality, Advanced). **⌘⌥C** works from the key monitor when filters are active.
-- **Grid Shift-click anchor** — Shift-click range now starts from the last clicked clip (including ⌘-click), not from review focus when focus stayed on an earlier plain click.
-- **List Shift-click anchor** — Shift-click range unions from `lastClickedId` (last ⌘-click) to the shift-clicked row, not the Table’s focus→click span. Stopped syncing `lastClickedId` from review focus (Table briefly moves focus on ⌘-click, which had reset the anchor).
-- **Focused card ring** — Review focus uses a dashed outer ring on grid cards (collected clips keep solid accent + checkmark).
-- **Collected click toggle** — Plain click on a collected clip enters batch inspect without moving focus; repeat clicks on the same clip toggle batch ↔ single focus (Grid and List title/thumbnail row). Non-collected clips still plain-click to focus.
-- **Inspector mode title bar** — Inspector header uses a full-width bar: orange for batch inspect (“N Videos Selected”), light blue for single-clip inspect (display title); dark text on both for clear mode at a glance.
-- **Batch on collect** — ⌘-click, **A**, and Shift-click to add clips to the collection now enter batch inspect automatically when 2+ are collected (clears review focus, orange title bar).
-- **Grid arrow-key scroll** — Arrow navigation no longer re-centers the focused row when it is already fully visible; the grid only scrolls enough to reveal off-screen rows.
+## 1.2.0 (build 1082) - 2026-09-15
+
+- **Always-on collection** — Removed the Review toolbar toggle and ⌘3. Collect clips with ⌘-click, **A**, or Shift-click (Finder-style range from the last clicked clip). Focus and collection are separate: plain click focuses; blue checkmarks show membership. Inspector batch-edits automatically when 2+ are collected and focus is in the set.
+- **Collected-set pill** — When 2+ clips are collected, an accent removable pill (“N clips collected ✕”) appears in the pill row; Inspector batch header adds **Clear**. **⌘⇧A** / Edit → Clear Collection clears the set without moving focus.
+- **Batch and single inspect** — Orange Inspector title bar for the collected set; light blue for one clip. Plain click on a collected clip toggles batch ↔ single inspect (Grid and List). ⌘/⇧/**A** collection enters batch inspect when 2+ are collected.
+- **Focused card ring** — Focus uses a dashed outer ring on grid cards (collected clips keep solid accent + checkmark).
+- **Clear all filters (⌘⌥C)** — View → Clear Filters and pill-row **Clear all** reset sidebar, tags, rating, duration, quality, and Advanced together.
+- **Grid / List Shift-click** — Range selection anchors from the last clicked clip (including ⌘-click), not stale focus.
+- **Grid arrow-key scroll** — Arrow navigation only scrolls when the focused row is off-screen.
 
 ## 1.1.1 (build 1066) - 2026-09-14
 
