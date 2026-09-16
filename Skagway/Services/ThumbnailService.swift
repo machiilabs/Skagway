@@ -1093,58 +1093,105 @@ final class ThumbnailService: @unchecked Sendable {
     }
 
     func migrateCacheKey(from oldFilePath: String, to newFilePath: String) {
+        guard oldFilePath != newFilePath else { return }
+        migrateCacheKeys([(from: oldFilePath, to: newFilePath)], onProgress: nil)
+    }
+
+    /// Batch thumb/filmstrip/detail cache remaps for Location Relink.
+    /// Lists the cache directory once (not once per clip). Skips pairs where `from == to`.
+    /// `onProgress` reports remapped clip count (changed paths only).
+    func migrateCacheKeys(
+        _ mappings: [(from: String, to: String)],
+        onProgress: ((Int, Int) -> Void)?
+    ) {
+        let changed = mappings.filter { $0.from != $0.to }
+        guard !changed.isEmpty else {
+            onProgress?(0, 0)
+            return
+        }
+
         managementLock.lock()
         defer { managementLock.unlock() }
-        let oldDiskURL = thumbnailURL(for: oldFilePath)
-        let newDiskURL = thumbnailURL(for: newFilePath)
-        if FileManager.default.fileExists(atPath: oldDiskURL.path) {
-            try? FileManager.default.moveItem(at: oldDiskURL, to: newDiskURL)
-        }
-        let oldFilmstripURL = filmstripURL(for: oldFilePath)
-        let newFilmstripURL = filmstripURL(for: newFilePath)
-        if FileManager.default.fileExists(atPath: oldFilmstripURL.path) {
-            try? FileManager.default.moveItem(at: oldFilmstripURL, to: newFilmstripURL)
-        }
-        let oldH = pathHashString(for: oldFilePath)
-        let newH = pathHashString(for: newFilePath)
+
         let fm = FileManager.default
-        if let contents = try? fm.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil) {
-            for url in contents {
-                let name = url.lastPathComponent
-                guard name.hasPrefix(oldH) else { continue }
-                if name == "\(oldH)_detail.jpg" {
-                    let dest = cacheDirectory.appendingPathComponent("\(newH)_detail_1080.jpg")
-                    if !fm.fileExists(atPath: dest.path) {
-                        try? fm.moveItem(at: url, to: dest)
-                    }
-                    continue
-                }
-                guard name.hasPrefix("\(oldH)_detail_"), name.hasSuffix(".jpg") else { continue }
-                let rest = String(name.dropFirst(oldH.count))
-                let newName = "\(newH)\(rest)"
-                let newURL = cacheDirectory.appendingPathComponent(newName)
-                try? fm.moveItem(at: url, to: newURL)
+        let cacheContents = (try? fm.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+
+        var hashRemap: [String: String] = [:]
+        hashRemap.reserveCapacity(changed.count)
+
+        let total = changed.count
+        for (index, pair) in changed.enumerated() {
+            let oldH = pathHashString(for: pair.from)
+            let newH = pathHashString(for: pair.to)
+            hashRemap[oldH] = newH
+
+            let oldDiskURL = thumbnailURL(for: pair.from)
+            let newDiskURL = thumbnailURL(for: pair.to)
+            if fm.fileExists(atPath: oldDiskURL.path), !fm.fileExists(atPath: newDiskURL.path) {
+                try? fm.moveItem(at: oldDiskURL, to: newDiskURL)
             }
+
+            let oldFilmstripURL = filmstripURL(for: pair.from)
+            let newFilmstripURL = filmstripURL(for: pair.to)
+            if fm.fileExists(atPath: oldFilmstripURL.path), !fm.fileExists(atPath: newFilmstripURL.path) {
+                try? fm.moveItem(at: oldFilmstripURL, to: newFilmstripURL)
+            }
+
+            let oldKey = pair.from as NSString
+            let newKey = pair.to as NSString
+            if let image = memoryCache.object(forKey: oldKey) {
+                memoryCache.setObject(image, forKey: newKey)
+                memoryCache.removeObject(forKey: oldKey)
+            }
+            let oldFsKey = filmstripMemoryKey(for: pair.from)
+            let newFsKey = filmstripMemoryKey(for: pair.to)
+            if let image = memoryCache.object(forKey: oldFsKey) {
+                memoryCache.setObject(image, forKey: newFsKey)
+                memoryCache.removeObject(forKey: oldFsKey)
+            }
+            memoryCache.removeObject(forKey: (pair.from + Self.detailPreviewCachePrefix) as NSString)
+            for edge in Self.detailPreviewLongEdgeChoices {
+                let oldDetailKey = detailPreviewMemoryKey(filePath: pair.from, longEdge: edge)
+                let newDetailKey = detailPreviewMemoryKey(filePath: pair.to, longEdge: edge)
+                if let image = memoryCache.object(forKey: oldDetailKey) {
+                    memoryCache.setObject(image, forKey: newDetailKey)
+                    memoryCache.removeObject(forKey: oldDetailKey)
+                }
+            }
+
+            onProgress?(index + 1, total)
         }
-        let oldKey = oldFilePath as NSString
-        let newKey = newFilePath as NSString
-        if let image = memoryCache.object(forKey: oldKey) {
-            memoryCache.setObject(image, forKey: newKey)
-            memoryCache.removeObject(forKey: oldKey)
-        }
-        let oldFsKey = filmstripMemoryKey(for: oldFilePath)
-        let newFsKey = filmstripMemoryKey(for: newFilePath)
-        if let image = memoryCache.object(forKey: oldFsKey) {
-            memoryCache.setObject(image, forKey: newFsKey)
-            memoryCache.removeObject(forKey: oldFsKey)
-        }
-        memoryCache.removeObject(forKey: (oldFilePath + Self.detailPreviewCachePrefix) as NSString)
-        for edge in Self.detailPreviewLongEdgeChoices {
-            let oldDetailKey = detailPreviewMemoryKey(filePath: oldFilePath, longEdge: edge)
-            let newDetailKey = detailPreviewMemoryKey(filePath: newFilePath, longEdge: edge)
-            if let image = memoryCache.object(forKey: oldDetailKey) {
-                memoryCache.setObject(image, forKey: newDetailKey)
-                memoryCache.removeObject(forKey: oldDetailKey)
+
+        // One pass over on-disk detail variants (and any leftover hash-prefixed files).
+        for url in cacheContents {
+            let name = url.lastPathComponent
+            guard name.count >= 64 else { continue }
+            let oldH = String(name.prefix(64))
+            guard let newH = hashRemap[oldH], newH != oldH else { continue }
+
+            if name == "\(oldH).jpg" {
+                let dest = cacheDirectory.appendingPathComponent("\(newH).jpg")
+                if !fm.fileExists(atPath: dest.path) {
+                    try? fm.moveItem(at: url, to: dest)
+                }
+                continue
+            }
+            if name == "\(oldH)_detail.jpg" {
+                let dest = cacheDirectory.appendingPathComponent("\(newH)_detail_1080.jpg")
+                if !fm.fileExists(atPath: dest.path) {
+                    try? fm.moveItem(at: url, to: dest)
+                }
+                continue
+            }
+            if name.hasPrefix("\(oldH)_") {
+                let rest = String(name.dropFirst(oldH.count))
+                let dest = cacheDirectory.appendingPathComponent("\(newH)\(rest)")
+                if !fm.fileExists(atPath: dest.path) {
+                    try? fm.moveItem(at: url, to: dest)
+                }
             }
         }
     }

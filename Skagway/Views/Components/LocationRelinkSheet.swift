@@ -281,9 +281,14 @@ struct LocationRelinkSheet: View {
 
     private var relinkProgressSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let progress = viewModel.locationRelinkProgress, progress.total > 0 {
-                ProgressView(value: progress.fraction)
-                    .progressViewStyle(.linear)
+            if let progress = viewModel.locationRelinkProgress {
+                if progress.total > 0 {
+                    ProgressView(value: progress.fraction)
+                        .progressViewStyle(.linear)
+                } else {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                }
                 Text(progress.statusText)
                     .font(.caption)
                     .foregroundStyle(Color.appTextSecondary)

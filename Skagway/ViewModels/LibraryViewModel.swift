@@ -824,10 +824,19 @@ final class LibraryViewModel {
     /// Last successful apply — powers Edit → Undo Relink Location.
     private(set) var locationRelinkUndo: LocationRelinkUndoPayload? = nil
     var isApplyingLocationRelink: Bool = false
-    /// Determinate progress while Re-link / undo is writing path remaps (`nil` when idle).
+    /// Determinate progress while Re-link is running (`nil` when idle).
     private(set) var locationRelinkProgress: LocationRelinkApplyProgress? = nil
 
     struct LocationRelinkApplyProgress: Equatable {
+        enum Phase: String, Equatable {
+            case updatingPaths = "Updating paths"
+            case updatingFolders = "Updating library folders"
+            case movingThumbnails = "Moving thumbnails"
+            case updatingLibrary = "Updating library"
+            case checkingMissing = "Checking missing"
+        }
+
+        var phase: Phase
         var current: Int
         var total: Int
 
@@ -837,7 +846,10 @@ final class LibraryViewModel {
         }
 
         var statusText: String {
-            "Re-linking \(current) of \(total)…"
+            if total > 0 {
+                return "\(phase.rawValue)… \(current)/\(total)"
+            }
+            return "\(phase.rawValue)…"
         }
     }
 
@@ -950,8 +962,9 @@ final class LibraryViewModel {
         )
     }
 
-    /// Apply reconnect (and optionally flagged) mappings. Progress is reported per clip batch.
-    /// Identical old/new roots are allowed (intentional same-folder testing).
+    /// Apply reconnect (and optionally flagged) mappings.
+    /// Progress covers every phase through missing refresh — bar reaches 100% only when Done-ready.
+    /// Identical old/new roots are allowed; thumb renames are skipped when paths are unchanged.
     @discardableResult
     func applyLocationRelink(
         preview: LocationRelink.Preview,
@@ -964,7 +977,6 @@ final class LibraryViewModel {
         guard !mappings.isEmpty else { return 0 }
         isApplyingLocationRelink = true
         let total = mappings.count
-        locationRelinkProgress = LocationRelinkApplyProgress(current: 0, total: total)
         defer {
             isApplyingLocationRelink = false
             locationRelinkProgress = nil
@@ -979,47 +991,115 @@ final class LibraryViewModel {
             return 0
         }
 
+        // Phase 1 — DB path updates
+        locationRelinkProgress = LocationRelinkApplyProgress(
+            phase: .updatingPaths, current: 0, total: total
+        )
         do {
-            // Chunked writes so the Re-link step can show determinate clip progress.
             let chunkSize = 40
             var done = 0
             while done < dbMappings.count {
                 let end = min(done + chunkSize, dbMappings.count)
                 try await videoRepo.relinkFilePaths(mappings: Array(dbMappings[done..<end]))
                 done = end
-                locationRelinkProgress = LocationRelinkApplyProgress(current: done, total: total)
+                locationRelinkProgress = LocationRelinkApplyProgress(
+                    phase: .updatingPaths, current: done, total: total
+                )
                 await Task.yield()
             }
-            _ = try? await dataSourceRepo.remapPathsUnder(
-                oldRoot: preview.oldRoot,
-                newRoot: preview.newRoot
-            )
-            let excludeRepo = ExcludedFolderRepository(dbPool: dbPool)
-            _ = try? await excludeRepo.remapPathsUnder(
-                oldRoot: preview.oldRoot,
-                newRoot: preview.newRoot
-            )
         } catch {
             reportTransientError("Couldn't relink location: \(error.localizedDescription)")
             return 0
         }
 
-        // Synchronous in-memory update (same race-avoidance pattern as same-volume move).
-        let pathMap = Dictionary(uniqueKeysWithValues: mappings.map { ($0.oldPath, $0.newPath) })
+        // Phase 2 — data sources / excludes
+        locationRelinkProgress = LocationRelinkApplyProgress(
+            phase: .updatingFolders, current: 0, total: 2
+        )
+        _ = try? await dataSourceRepo.remapPathsUnder(
+            oldRoot: preview.oldRoot,
+            newRoot: preview.newRoot
+        )
+        locationRelinkProgress = LocationRelinkApplyProgress(
+            phase: .updatingFolders, current: 1, total: 2
+        )
+        let excludeRepo = ExcludedFolderRepository(dbPool: dbPool)
+        _ = try? await excludeRepo.remapPathsUnder(
+            oldRoot: preview.oldRoot,
+            newRoot: preview.newRoot
+        )
+        locationRelinkProgress = LocationRelinkApplyProgress(
+            phase: .updatingFolders, current: 2, total: 2
+        )
+        await Task.yield()
+
+        let pathPairs = mappings.map { (from: $0.oldPath, to: $0.newPath) }
+        let changedPairs = pathPairs.filter { $0.from != $0.to }
+
+        // Phase 3 — thumb/filmstrip cache (one directory listing; skip same-path)
+        if changedPairs.isEmpty {
+            locationRelinkProgress = LocationRelinkApplyProgress(
+                phase: .movingThumbnails, current: 0, total: 0
+            )
+        } else {
+            locationRelinkProgress = LocationRelinkApplyProgress(
+                phase: .movingThumbnails, current: 0, total: changedPairs.count
+            )
+            let progressBox = RelinkThumbProgressBox()
+            let thumbService = thumbnailService
+            let migrateTask = Task.detached(priority: .userInitiated) {
+                thumbService.migrateCacheKeys(changedPairs) { current, _ in
+                    progressBox.set(current)
+                }
+            }
+            var migrateFinished = false
+            while !migrateFinished {
+                locationRelinkProgress = LocationRelinkApplyProgress(
+                    phase: .movingThumbnails,
+                    current: progressBox.get(),
+                    total: changedPairs.count
+                )
+                migrateFinished = await withTaskGroup(of: Bool.self) { group in
+                    group.addTask {
+                        try? await Task.sleep(for: .milliseconds(50))
+                        return false
+                    }
+                    group.addTask {
+                        _ = await migrateTask.value
+                        return true
+                    }
+                    let first = await group.next() ?? false
+                    group.cancelAll()
+                    return first
+                }
+            }
+            locationRelinkProgress = LocationRelinkApplyProgress(
+                phase: .movingThumbnails, current: changedPairs.count, total: changedPairs.count
+            )
+        }
+        await Task.yield()
+
+        // Phase 4a — in-memory bookkeeping
+        locationRelinkProgress = LocationRelinkApplyProgress(
+            phase: .updatingLibrary, current: 0, total: 1
+        )
+        let pathMap = Dictionary(uniqueKeysWithValues: pathPairs.map { ($0.from, $0.to) })
         var updated = videos
         for i in updated.indices {
-            if let neu = pathMap[updated[i].filePath] {
-                thumbnailService.migrateCacheKey(from: updated[i].filePath, to: neu)
+            if let neu = pathMap[updated[i].filePath], neu != updated[i].filePath {
                 updated[i].filePath = neu
             }
         }
         videos = updated
 
-        for (old, neu) in pathMap {
+        for (old, neu) in pathMap where old != neu {
             remapVideoPathInSelection(from: old, to: neu)
         }
-        PlaybackPositionStore.remapPaths(pathMap.map { (from: $0.key, to: $0.value) })
-        notifyResumePositionsChanged()
+        let positionRemaps = pathPairs.filter { $0.from != $0.to }
+        if !positionRemaps.isEmpty {
+            PlaybackPositionStore.remapPaths(positionRemaps)
+            notifyResumePositionsChanged()
+        }
 
         recentlyAppliedPaths = Set(recentlyAppliedPaths.map { pathMap[$0] ?? $0 })
         lastAddedPaths = Set(lastAddedPaths.map { pathMap[$0] ?? $0 })
@@ -1033,9 +1113,59 @@ final class LibraryViewModel {
             },
             appliedCount: mappings.count
         )
+        locationRelinkProgress = LocationRelinkApplyProgress(
+            phase: .updatingLibrary, current: 1, total: 1
+        )
+        await Task.yield()
 
-        locationRelinkProgress = LocationRelinkApplyProgress(current: total, total: total)
-        await refreshMissingCount()
+        // Phase 4b — missing refresh with clip progress
+        let snapshot = videos
+        let missingTotal = snapshot.count
+        locationRelinkProgress = LocationRelinkApplyProgress(
+            phase: .checkingMissing, current: 0, total: max(missingTotal, 1)
+        )
+        var missIds = Set<String>()
+        let missChunk = 250
+        var missDone = 0
+        while missDone < snapshot.count {
+            let end = min(missDone + missChunk, snapshot.count)
+            let slice = Array(snapshot[missDone..<end])
+            let chunkMiss = await Task.detached(priority: .userInitiated) {
+                let fm = FileManager.default
+                return Set(slice.filter { !fm.fileExists(atPath: $0.filePath) }.map(\.id))
+            }.value
+            missIds.formUnion(chunkMiss)
+            missDone = end
+            locationRelinkProgress = LocationRelinkApplyProgress(
+                phase: .checkingMissing, current: missDone, total: missingTotal
+            )
+            await Task.yield()
+        }
+        missingVideoIds = missIds
+        missingCountScanned = true
+        UserDefaults.standard.set(true, forKey: Self.missingCountScannedKey)
+        UserDefaults.standard.set(Array(missIds), forKey: Self.missingVideoIdsKey)
+        libraryCounts = LibraryCounts(
+            all: libraryCounts.all,
+            recentlyAdded: libraryCounts.recentlyAdded,
+            recentlyPlayed: libraryCounts.recentlyPlayed,
+            topRated: libraryCounts.topRated,
+            duplicates: libraryCounts.duplicates,
+            corrupt: libraryCounts.corrupt,
+            missing: missIds.count,
+            recentlyConverted: libraryCounts.recentlyConverted,
+            recentlyApplied: libraryCounts.recentlyApplied,
+            lastAdded: libraryCounts.lastAdded,
+            byRating: libraryCounts.byRating
+        )
+        recomputeFilteredVideos()
+
+        // Hold 100% briefly so the UI can paint Done-ready state.
+        locationRelinkProgress = LocationRelinkApplyProgress(
+            phase: .checkingMissing, current: missingTotal, total: max(missingTotal, 1)
+        )
+        await Task.yield()
+
         let text = "Relinked \(mappings.count) clip\(mappings.count == 1 ? "" : "s")"
         scanProgress = text
         Task {
@@ -1070,19 +1200,27 @@ final class LibraryViewModel {
         }
 
         let pathMap = Dictionary(uniqueKeysWithValues: payload.reverseMappings.map { ($0.from, $0.to) })
+        let undoPairs = payload.reverseMappings.map { (from: $0.from, to: $0.to) }
+        let changedUndo = undoPairs.filter { $0.from != $0.to }
+        if !changedUndo.isEmpty {
+            await Task.detached(priority: .userInitiated) { [thumbnailService] in
+                thumbnailService.migrateCacheKeys(changedUndo, onProgress: nil)
+            }.value
+        }
         var updated = videos
         for i in updated.indices {
-            if let old = pathMap[updated[i].filePath] {
-                thumbnailService.migrateCacheKey(from: updated[i].filePath, to: old)
+            if let old = pathMap[updated[i].filePath], old != updated[i].filePath {
                 updated[i].filePath = old
             }
         }
         videos = updated
-        for (neu, old) in pathMap {
+        for (neu, old) in pathMap where neu != old {
             remapVideoPathInSelection(from: neu, to: old)
         }
-        PlaybackPositionStore.remapPaths(pathMap.map { (from: $0.key, to: $0.value) })
-        notifyResumePositionsChanged()
+        if !changedUndo.isEmpty {
+            PlaybackPositionStore.remapPaths(changedUndo)
+            notifyResumePositionsChanged()
+        }
         recentlyAppliedPaths = Set(recentlyAppliedPaths.map { pathMap[$0] ?? $0 })
         lastAddedPaths = Set(lastAddedPaths.map { pathMap[$0] ?? $0 })
 
@@ -6419,5 +6557,23 @@ final class LibraryViewModel {
         await refreshTagsByVideoId()
         await refreshCollectionCounts()
         startObserving()
+    }
+}
+
+/// Thread-safe counter for Relink thumb-migration progress (updated off the main actor).
+private final class RelinkThumbProgressBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func set(_ newValue: Int) {
+        lock.lock()
+        value = newValue
+        lock.unlock()
+    }
+
+    func get() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
     }
 }
