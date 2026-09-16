@@ -259,6 +259,13 @@ enum LocationRelink {
         case stillMissing
     }
 
+    enum MatchSource: Equatable {
+        /// Relative path under a whole-folder old→new root pair.
+        case wholeFolder
+        /// Basename (+ soft size) under a user-chosen Evidence Destination.
+        case evidenceDestination(root: String)
+    }
+
     struct Candidate: Equatable, Identifiable {
         var id: String { oldPath }
         var videoDatabaseId: Int64?
@@ -268,12 +275,21 @@ enum LocationRelink {
         var kind: MatchKind
         var expectedSize: Int64?
         var foundSize: Int64?
+        var matchSource: MatchSource = .wholeFolder
+
+        /// Destination root used for basename matches (nil for whole-folder relative remaps).
+        var evidenceDestination: String? {
+            if case .evidenceDestination(let root) = matchSource { return root }
+            return nil
+        }
     }
 
     struct Preview: Equatable {
         var oldRoot: String
         var newRoot: String
         var candidates: [Candidate]
+        /// User-chosen Evidence Destination folders for this session (may be empty).
+        var evidenceDestinations: [String] = []
 
         var reconnectCount: Int { candidates.filter { $0.kind == .reconnect }.count }
         var needsAttentionCount: Int {
@@ -283,6 +299,12 @@ enum LocationRelink {
             }.count
         }
         var stillMissingCount: Int { candidates.filter { $0.kind == .stillMissing }.count }
+
+        /// True when this preview includes a whole-folder root remap (data sources/excludes).
+        var hasWholeFolderRemap: Bool {
+            !oldRoot.isEmpty && !newRoot.isEmpty
+                && oldRoot.caseInsensitiveCompare(newRoot) != .orderedSame
+        }
     }
 
     /// Build a dry-run preview for remapping every video under `oldRoot` to `newRoot`.
@@ -403,5 +425,401 @@ enum LocationRelink {
         )
         guard !oldRoot.isEmpty else { return .failure(.emptyPath) }
         return .success((oldRoot: oldRoot, newRoot: folder))
+    }
+
+    // MARK: - Situational missing banner
+
+    /// Cheap local classification for the Missing / focus banner (no telemetry).
+    enum MissingBannerSituation: Equatable {
+        /// Inferred shared root (or orphan parent) is not on disk.
+        case parentGone(folderName: String)
+        /// Parent folder exists; one or more children under it are missing.
+        case parentPresent(missingCount: Int)
+        /// Missing clips fan out across distinct parents with no single plausible root.
+        case scattered
+    }
+
+    struct BannerCopy: Equatable {
+        var title: String
+        var body: String
+        var cta: String
+        var icon: String
+    }
+
+    /// Classify missing situation for banner copy.
+    ///
+    /// Prefer the focused orphan when provided; otherwise the Missing set.
+    /// Ambiguous → prefer parentPresent over parentGone when the parent exists;
+    /// prefer scattered only when multi-root scatter is clear.
+    static func classifyMissingSituation(
+        missingPaths: [String],
+        focusPath: String? = nil,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> MissingBannerSituation {
+        let paths = missingPaths.map(normalizeRoot).filter { !$0.isEmpty }
+        guard !paths.isEmpty else { return .parentPresent(missingCount: 0) }
+
+        if let focusRaw = focusPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !focusRaw.isEmpty
+        {
+            let focus = normalizeRoot(focusRaw)
+            if paths.contains(where: { $0.caseInsensitiveCompare(focus) == .orderedSame }) {
+                return classifyAroundParent(
+                    of: focus,
+                    allMissing: paths,
+                    fileExists: fileExists
+                )
+            }
+        }
+
+        let parents = Set(
+            paths.map {
+                normalizeRoot(URL(fileURLWithPath: $0).deletingLastPathComponent().path)
+            }
+        )
+
+        if let shared = inferSharedMissingRoot(missingPaths: paths, dataSourceRoots: []),
+           isSelectableOldRoot(shared)
+        {
+            if fileExists(shared) {
+                return .parentPresent(missingCount: paths.count)
+            }
+            let name = URL(fileURLWithPath: shared).lastPathComponent
+            return .parentGone(folderName: name.isEmpty ? shared : name)
+        }
+
+        if parents.count >= 2 {
+            return .scattered
+        }
+
+        if let onlyParent = parents.first {
+            if fileExists(onlyParent) {
+                return .parentPresent(missingCount: paths.count)
+            }
+            let name = URL(fileURLWithPath: onlyParent).lastPathComponent
+            return .parentGone(folderName: name.isEmpty ? onlyParent : name)
+        }
+
+        return .scattered
+    }
+
+    private static func classifyAroundParent(
+        of filePath: String,
+        allMissing: [String],
+        fileExists: (String) -> Bool
+    ) -> MissingBannerSituation {
+        let parent = normalizeRoot(
+            URL(fileURLWithPath: filePath).deletingLastPathComponent().path
+        )
+        let underParent = allMissing.filter { isUnder(root: parent, path: $0) }
+        let count = max(underParent.count, 1)
+        if fileExists(parent) {
+            return .parentPresent(missingCount: count)
+        }
+        let name = URL(fileURLWithPath: parent).lastPathComponent
+        return .parentGone(folderName: name.isEmpty ? parent : name)
+    }
+
+    /// Exact customer-facing banner strings (Reconnect UX).
+    static func bannerCopy(for situation: MissingBannerSituation) -> BannerCopy {
+        switch situation {
+        case .parentGone(let folderName):
+            return BannerCopy(
+                title: "Folder moved or missing",
+                body: "Clips that lived under “\(folderName)” can’t be found. Point Skagway at that folder’s new location.",
+                cta: "Reconnect…",
+                icon: "folder.badge.questionmark"
+            )
+        case .parentPresent(let missingCount):
+            let n = max(missingCount, 1)
+            let clipWord = n == 1 ? "clip" : "clips"
+            return BannerCopy(
+                title: "Some clips are missing",
+                body: "\(n) \(clipWord) are gone from this folder. Other clips here are fine — locate where the missing ones moved.",
+                cta: "Reconnect…",
+                icon: "doc.badge.ellipsis"
+            )
+        case .scattered:
+            return BannerCopy(
+                title: "Clips moved to different places",
+                body: "Missing clips don’t share one new folder. Add destinations where they landed, then review matches.",
+                cta: "Reconnect…",
+                icon: "folder.badge.gearshape"
+            )
+        }
+    }
+
+    /// Default sheet mode hint from banner classification.
+    enum ReconnectMode: String, Equatable, CaseIterable, Identifiable {
+        case wholeFolder
+        case destinations
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .wholeFolder: return "Whole folder"
+            case .destinations: return "Destinations"
+            }
+        }
+
+        static func suggested(for situation: MissingBannerSituation) -> ReconnectMode {
+            switch situation {
+            case .parentGone: return .wholeFolder
+            case .parentPresent, .scattered: return .destinations
+            }
+        }
+    }
+
+    // MARK: - Evidence Destinations (multi-destination basename match)
+
+    struct IndexedFile: Equatable {
+        var path: String
+        var basename: String
+        var size: Int64?
+    }
+
+    /// Bounded index of video files under a user-chosen Evidence Destination.
+    struct DestinationIndex: Equatable {
+        var root: String
+        /// Lowercased basename → files found under this destination.
+        var byBasename: [String: [IndexedFile]]
+
+        var fileCount: Int { byBasename.values.reduce(0) { $0 + $1.count } }
+    }
+
+    private static let defaultVideoExtensions: Set<String> = [
+        "mp4", "mov", "m4v", "avi", "mkv", "wmv", "flv", "webm", "mpg", "mpeg",
+        "3gp", "ts", "mts", "vob", "ogv", "divx", "dv", "m2ts", "mxf"
+    ]
+
+    /// Recursively index video files under `root` only (no volume-wide scan).
+    static func indexEvidenceDestination(
+        root: String,
+        maxFiles: Int = 50_000,
+        videoExtensions: Set<String> = defaultVideoExtensions,
+        fileSize: (String) -> Int64? = { path in
+            (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value
+        }
+    ) -> DestinationIndex {
+        let rootNorm = normalizeRoot(root)
+        guard !rootNorm.isEmpty else {
+            return DestinationIndex(root: rootNorm, byBasename: [:])
+        }
+
+        var byBasename: [String: [IndexedFile]] = [:]
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: URL(fileURLWithPath: rootNorm),
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return DestinationIndex(root: rootNorm, byBasename: [:])
+        }
+
+        var counted = 0
+        while let item = enumerator.nextObject() {
+            if counted >= maxFiles { break }
+            let url: URL
+            if let u = item as? URL {
+                url = u
+            } else if let path = item as? String {
+                url = URL(fileURLWithPath: path)
+            } else {
+                continue
+            }
+            let ext = url.pathExtension.lowercased()
+            guard videoExtensions.contains(ext) else { continue }
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+            if let isFile = values?.isRegularFile, !isFile { continue }
+            let path = normalizeRoot(url.path)
+            let base = url.lastPathComponent
+            byBasename[base.lowercased(), default: []].append(
+                IndexedFile(path: path, basename: base, size: fileSize(path))
+            )
+            counted += 1
+        }
+        return DestinationIndex(root: rootNorm, byBasename: byBasename)
+    }
+
+    /// Build a session preview: optional whole-folder relative remap, then basename match
+    /// leftovers under Evidence Destinations.
+    static func buildSessionPreview(
+        videos: [(databaseId: Int64?, filePath: String, fileSize: Int64)],
+        wholeFolder: (oldRoot: String, newRoot: String)?,
+        destinationIndexes: [DestinationIndex],
+        existingLibraryPaths: Set<String>,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        fileSize: (String) -> Int64? = { path in
+            (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value
+        }
+    ) -> Preview {
+        var reservedNew = Set(existingLibraryPaths.map(normalizeRoot))
+        var byOldPath: [String: Candidate] = [:]
+
+        if let pair = wholeFolder {
+            let old = normalizeRoot(pair.oldRoot)
+            let neu = normalizeRoot(pair.newRoot)
+            for v in videos where isUnder(root: old, path: v.filePath) {
+                reservedNew.remove(normalizeRoot(v.filePath))
+            }
+            let folderPreview = buildPreview(
+                videos: videos,
+                oldRoot: old,
+                newRoot: neu,
+                existingLibraryPaths: existingLibraryPaths,
+                fileExists: fileExists,
+                fileSize: fileSize
+            )
+            for c in folderPreview.candidates {
+                byOldPath[normalizeRoot(c.oldPath)] = c
+                if c.kind != .stillMissing {
+                    reservedNew.insert(normalizeRoot(c.newPath))
+                }
+            }
+        }
+
+        // Basename match for leftovers (still missing or never covered by whole-folder).
+        let coveredReady = Set(
+            byOldPath.values
+                .filter { $0.kind != .stillMissing }
+                .map { normalizeRoot($0.oldPath) }
+        )
+
+        for video in videos {
+            let oldNorm = normalizeRoot(video.filePath)
+            if coveredReady.contains(oldNorm) { continue }
+
+            let basename = URL(fileURLWithPath: video.filePath).lastPathComponent
+            let key = basename.lowercased()
+            var hits: [(destination: String, file: IndexedFile)] = []
+            for index in destinationIndexes {
+                if let files = index.byBasename[key] {
+                    for file in files {
+                        hits.append((index.root, file))
+                    }
+                }
+            }
+
+            let candidate: Candidate
+            if hits.isEmpty {
+                if let existing = byOldPath[oldNorm], existing.kind == .stillMissing {
+                    continue
+                }
+                candidate = Candidate(
+                    videoDatabaseId: video.databaseId,
+                    oldPath: video.filePath,
+                    newPath: video.filePath,
+                    relativePath: basename,
+                    kind: .stillMissing,
+                    expectedSize: video.fileSize > 0 ? video.fileSize : nil,
+                    foundSize: nil,
+                    matchSource: destinationIndexes.first.map { .evidenceDestination(root: $0.root) } ?? .wholeFolder
+                )
+            } else if hits.count == 1, let hit = hits.first {
+                let destNorm = normalizeRoot(hit.file.path)
+                let found = hit.file.size ?? fileSize(destNorm)
+                let kind: MatchKind
+                if reservedNew.contains(destNorm),
+                   destNorm.caseInsensitiveCompare(oldNorm) != .orderedSame
+                {
+                    kind = .needsAttention(reason: "Another library clip already uses this path")
+                } else if let found, video.fileSize > 0, found != video.fileSize {
+                    kind = .needsAttention(
+                        reason: "File size differs (library \(video.fileSize), disk \(found))"
+                    )
+                } else {
+                    kind = .reconnect
+                }
+                if kind != .stillMissing {
+                    reservedNew.insert(destNorm)
+                }
+                candidate = Candidate(
+                    videoDatabaseId: video.databaseId,
+                    oldPath: video.filePath,
+                    newPath: hit.file.path,
+                    relativePath: basename,
+                    kind: kind,
+                    expectedSize: video.fileSize > 0 ? video.fileSize : nil,
+                    foundSize: found,
+                    matchSource: .evidenceDestination(root: hit.destination)
+                )
+            } else {
+                // Ambiguous basename — propose first hit, flag Needs attention.
+                let sortedHits = hits.sorted {
+                    comparePathsByComponents($0.file.path, $1.file.path) == .orderedAscending
+                }
+                let hit = sortedHits[0]
+                let destNorm = normalizeRoot(hit.file.path)
+                let found = hit.file.size ?? fileSize(destNorm)
+                let pathsPreview = sortedHits.prefix(3).map(\.file.path).joined(separator: "; ")
+                let reason = "\(hits.count) matches for “\(basename)” — pick carefully (\(pathsPreview))"
+                reservedNew.insert(destNorm)
+                candidate = Candidate(
+                    videoDatabaseId: video.databaseId,
+                    oldPath: video.filePath,
+                    newPath: hit.file.path,
+                    relativePath: basename,
+                    kind: .needsAttention(reason: reason),
+                    expectedSize: video.fileSize > 0 ? video.fileSize : nil,
+                    foundSize: found,
+                    matchSource: .evidenceDestination(root: hit.destination)
+                )
+            }
+            byOldPath[oldNorm] = candidate
+        }
+
+        var candidates = Array(byOldPath.values)
+        candidates.sort {
+            $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending
+        }
+
+        let oldRoot = wholeFolder.map { normalizeRoot($0.oldRoot) } ?? ""
+        let newRoot = wholeFolder.map { normalizeRoot($0.newRoot) } ?? ""
+        return Preview(
+            oldRoot: oldRoot,
+            newRoot: newRoot,
+            candidates: candidates,
+            evidenceDestinations: destinationIndexes.map(\.root)
+        )
+    }
+
+    /// Group candidates for Destinations UI: Ready / Needs attention / Unmatched per destination.
+    static func groupEvidenceCandidates(
+        _ candidates: [Candidate]
+    ) -> (
+        byDestination: [(destination: String, ready: [Candidate], needsAttention: [Candidate])],
+        unmatched: [Candidate]
+    ) {
+        var unmatched: [Candidate] = []
+        var readyByDest: [String: [Candidate]] = [:]
+        var attentionByDest: [String: [Candidate]] = [:]
+        var destOrder: [String] = []
+
+        func noteDest(_ dest: String) {
+            if !destOrder.contains(where: { $0.caseInsensitiveCompare(dest) == .orderedSame }) {
+                destOrder.append(dest)
+            }
+        }
+
+        for c in candidates {
+            switch c.kind {
+            case .stillMissing:
+                unmatched.append(c)
+            case .reconnect:
+                let dest = c.evidenceDestination ?? "(whole folder)"
+                noteDest(dest)
+                readyByDest[dest, default: []].append(c)
+            case .needsAttention:
+                let dest = c.evidenceDestination ?? "(whole folder)"
+                noteDest(dest)
+                attentionByDest[dest, default: []].append(c)
+            }
+        }
+
+        let grouped = destOrder.map { dest in
+            (destination: dest, ready: readyByDest[dest] ?? [], needsAttention: attentionByDest[dest] ?? [])
+        }
+        return (grouped, unmatched)
     }
 }

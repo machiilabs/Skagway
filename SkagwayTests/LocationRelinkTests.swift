@@ -261,4 +261,231 @@ final class LocationRelinkTests: XCTestCase {
         ]))
         XCTAssertFalse(applied.allSatisfy { $0.newPath == "/new/Lib/a.mp4" })
     }
+
+    // MARK: - Banner situation + copy
+
+    func testClassifyParentGoneWhenParentMissing() {
+        let situation = LocationRelink.classifyMissingSituation(
+            missingPaths: [
+                "/Volumes/Gone/Media/a.mp4",
+                "/Volumes/Gone/Media/b.mp4"
+            ],
+            fileExists: { _ in false }
+        )
+        if case .parentGone(let name) = situation {
+            XCTAssertEqual(name, "Media")
+        } else {
+            XCTFail("expected parentGone, got \(situation)")
+        }
+        let copy = LocationRelink.bannerCopy(for: situation)
+        XCTAssertEqual(copy.title, "Folder moved or missing")
+        XCTAssertTrue(copy.body.contains("Media"))
+        XCTAssertEqual(copy.cta, "Reconnect…")
+        XCTAssertEqual(copy.icon, "folder.badge.questionmark")
+    }
+
+    func testClassifyParentPresentWhenParentExists() {
+        let parent = "/Volumes/Live/Shows"
+        let situation = LocationRelink.classifyMissingSituation(
+            missingPaths: [
+                "\(parent)/a.mp4",
+                "\(parent)/b.mp4"
+            ],
+            focusPath: "\(parent)/a.mp4",
+            fileExists: { $0 == parent || $0.hasPrefix("/Volumes/Live") }
+        )
+        if case .parentPresent(let count) = situation {
+            XCTAssertEqual(count, 2)
+        } else {
+            XCTFail("expected parentPresent, got \(situation)")
+        }
+        let copy = LocationRelink.bannerCopy(for: situation)
+        XCTAssertEqual(copy.title, "Some clips are missing")
+        XCTAssertTrue(copy.body.contains("2 clips"))
+        XCTAssertEqual(copy.cta, "Reconnect…")
+        XCTAssertEqual(copy.icon, "doc.badge.ellipsis")
+    }
+
+    func testClassifyScatteredAcrossDistinctParents() {
+        let situation = LocationRelink.classifyMissingSituation(
+            missingPaths: [
+                "/Volumes/A/One/a.mp4",
+                "/Volumes/B/Two/b.mp4"
+            ],
+            fileExists: { _ in false }
+        )
+        XCTAssertEqual(situation, .scattered)
+        let copy = LocationRelink.bannerCopy(for: situation)
+        XCTAssertEqual(copy.title, "Clips moved to different places")
+        XCTAssertEqual(copy.cta, "Reconnect…")
+        XCTAssertEqual(copy.icon, "folder.badge.gearshape")
+    }
+
+    func testBannerCopyPrefersBOverAWhenParentExistsWithoutSharedRoot() {
+        // Single parent that exists → parentPresent even if inferSharedMissingRoot is thin.
+        let parent = "/Users/sam/Films/Action"
+        let situation = LocationRelink.classifyMissingSituation(
+            missingPaths: ["\(parent)/only.mp4"],
+            fileExists: { $0 == parent }
+        )
+        if case .parentPresent = situation {
+            // ok
+        } else {
+            XCTFail("expected parentPresent, got \(situation)")
+        }
+    }
+
+    // MARK: - Evidence Destinations multi-dest
+
+    func testMultiDestBasenameMatchAcrossTwoFolders() {
+        let videos: [(Int64?, String, Int64)] = [
+            (1, "/old/Lib/drone.mp4", 100),
+            (2, "/old/Other/wedding.mp4", 200),
+            (3, "/old/Lib/gone.mp4", 50)
+        ]
+        let destA = LocationRelink.DestinationIndex(
+            root: "/Volumes/Media2/Drone",
+            byBasename: [
+                "drone.mp4": [
+                    LocationRelink.IndexedFile(
+                        path: "/Volumes/Media2/Drone/drone.mp4",
+                        basename: "drone.mp4",
+                        size: 100
+                    )
+                ]
+            ]
+        )
+        let destB = LocationRelink.DestinationIndex(
+            root: "/Volumes/Archive/Weddings",
+            byBasename: [
+                "wedding.mp4": [
+                    LocationRelink.IndexedFile(
+                        path: "/Volumes/Archive/Weddings/wedding.mp4",
+                        basename: "wedding.mp4",
+                        size: 200
+                    )
+                ]
+            ]
+        )
+        let preview = LocationRelink.buildSessionPreview(
+            videos: videos,
+            wholeFolder: nil,
+            destinationIndexes: [destA, destB],
+            existingLibraryPaths: Set(videos.map(\.1)),
+            fileExists: { _ in true },
+            fileSize: { path in
+                switch path {
+                case "/Volumes/Media2/Drone/drone.mp4": return 100
+                case "/Volumes/Archive/Weddings/wedding.mp4": return 200
+                default: return nil
+                }
+            }
+        )
+        XCTAssertEqual(preview.reconnectCount, 2)
+        XCTAssertEqual(preview.stillMissingCount, 1)
+        XCTAssertFalse(preview.hasWholeFolderRemap)
+        let applied = LocationRelink.mappingsToApply(preview: preview, includeNeedsAttention: false)
+        XCTAssertEqual(Set(applied.map(\.newPath)), Set([
+            "/Volumes/Media2/Drone/drone.mp4",
+            "/Volumes/Archive/Weddings/wedding.mp4"
+        ]))
+
+        let grouped = LocationRelink.groupEvidenceCandidates(preview.candidates)
+        XCTAssertEqual(grouped.unmatched.count, 1)
+        XCTAssertEqual(grouped.byDestination.count, 2)
+    }
+
+    func testMultiDestAmbiguousBasenameNeedsAttention() {
+        let videos: [(Int64?, String, Int64)] = [
+            (1, "/old/clip_001.mp4", 100)
+        ]
+        let dest = LocationRelink.DestinationIndex(
+            root: "/Volumes/Pool",
+            byBasename: [
+                "clip_001.mp4": [
+                    LocationRelink.IndexedFile(
+                        path: "/Volumes/Pool/A/clip_001.mp4",
+                        basename: "clip_001.mp4",
+                        size: 100
+                    ),
+                    LocationRelink.IndexedFile(
+                        path: "/Volumes/Pool/B/clip_001.mp4",
+                        basename: "clip_001.mp4",
+                        size: 999
+                    )
+                ]
+            ]
+        )
+        let preview = LocationRelink.buildSessionPreview(
+            videos: videos,
+            wholeFolder: nil,
+            destinationIndexes: [dest],
+            existingLibraryPaths: Set(videos.map(\.1))
+        )
+        XCTAssertEqual(preview.needsAttentionCount, 1)
+        XCTAssertEqual(preview.reconnectCount, 0)
+        if case .needsAttention(let reason) = preview.candidates[0].kind {
+            XCTAssertTrue(reason.contains("2 matches"))
+        } else {
+            XCTFail("expected needsAttention")
+        }
+    }
+
+    func testSessionPreviewWholeFolderThenDestinationsForLeftovers() {
+        let videos: [(Int64?, String, Int64)] = [
+            (1, "/old/Lib/keep/a.mp4", 10),
+            (2, "/old/Lib/keep/b.mp4", 20),
+            (3, "/old/Elsewhere/c.mp4", 30)
+        ]
+        let dest = LocationRelink.DestinationIndex(
+            root: "/new/Extra",
+            byBasename: [
+                "c.mp4": [
+                    LocationRelink.IndexedFile(path: "/new/Extra/c.mp4", basename: "c.mp4", size: 30)
+                ]
+            ]
+        )
+        let preview = LocationRelink.buildSessionPreview(
+            videos: videos,
+            wholeFolder: (oldRoot: "/old/Lib", newRoot: "/new/Lib"),
+            destinationIndexes: [dest],
+            existingLibraryPaths: Set(videos.map(\.1)),
+            fileExists: { path in
+                path == "/new/Lib/keep/a.mp4"
+                    || path == "/new/Lib/keep/b.mp4"
+                    || path == "/new/Extra/c.mp4"
+            },
+            fileSize: { path in
+                switch path {
+                case "/new/Lib/keep/a.mp4": return 10
+                case "/new/Lib/keep/b.mp4": return 20
+                case "/new/Extra/c.mp4": return 30
+                default: return nil
+                }
+            }
+        )
+        XCTAssertTrue(preview.hasWholeFolderRemap)
+        XCTAssertEqual(preview.reconnectCount, 3)
+        let applied = Set(LocationRelink.mappingsToApply(preview: preview, includeNeedsAttention: true).map(\.newPath))
+        XCTAssertEqual(applied, Set([
+            "/new/Lib/keep/a.mp4",
+            "/new/Lib/keep/b.mp4",
+            "/new/Extra/c.mp4"
+        ]))
+    }
+
+    func testReconnectModeSuggestedFromSituation() {
+        XCTAssertEqual(
+            LocationRelink.ReconnectMode.suggested(for: .parentGone(folderName: "X")),
+            .wholeFolder
+        )
+        XCTAssertEqual(
+            LocationRelink.ReconnectMode.suggested(for: .parentPresent(missingCount: 3)),
+            .destinations
+        )
+        XCTAssertEqual(
+            LocationRelink.ReconnectMode.suggested(for: .scattered),
+            .destinations
+        )
+    }
 }

@@ -140,7 +140,7 @@ struct OverlayInlinePlayerView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 280)
                 if missingOnDisk {
-                    Text("Library folder missing — repair links if you moved the folder tree.")
+                    Text("File missing — reconnect if you moved the folder or clips.")
                         .font(.caption)
                         .foregroundStyle(Color.appTextSecondary)
                         .multilineTextAlignment(.center)
@@ -151,14 +151,21 @@ struct OverlayInlinePlayerView: View {
                         Button {
                             let path = (playback.currentVideo ?? video).filePath
                             let preferred = viewModel.libraryFolderMissingBannerPreferredRoot
+                            let mode = LocationRelink.ReconnectMode.suggested(
+                                for: viewModel.libraryFolderMissingBannerSituation
+                            )
                             // Sheet first — never an outside “Opening…” wait. Then clear the floating
                             // Playback Failed surface so the sheet isn’t buried under the overlay.
-                            viewModel.beginLocationRelink(preferredOldRoot: preferred)
+                            viewModel.beginLocationRelink(
+                                preferredOldRoot: preferred,
+                                initialMode: mode,
+                                startAtNewFolder: mode == .wholeFolder && preferred != nil
+                            )
                             viewModel.noteLibraryFileMissing(path: path)
                             playback.dismissError()
                             viewModel.isPlayingInline = false
                         } label: {
-                            Text("Repair Links…")
+                            Text("Reconnect…")
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(Color.appAccent)

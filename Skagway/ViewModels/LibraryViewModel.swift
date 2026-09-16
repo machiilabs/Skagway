@@ -837,7 +837,7 @@ final class LibraryViewModel {
 
     struct LocationRelinkApplyProgress: Equatable {
         enum Phase: String, Equatable {
-            case updatingPaths = "Repairing paths"
+            case updatingPaths = "Updating paths"
             case updatingFolders = "Updating library folders"
             case movingThumbnails = "Moving thumbnails"
             case updatingLibrary = "Updating library"
@@ -871,6 +871,10 @@ final class LibraryViewModel {
         /// 0…1 while building (nil = indeterminate start).
         var catalogBuildFraction: Double?
         var suggestedNewRoot: String?
+        /// Whole folder vs Evidence Destinations — suggested from banner situation.
+        var initialMode: LocationRelink.ReconnectMode = .wholeFolder
+        /// Happy-path: skip old-folder step when the preferred root is already known.
+        var startAtNewFolder: Bool = false
     }
 
     struct LocationRelinkUndoPayload: Equatable {
@@ -910,9 +914,36 @@ final class LibraryViewModel {
             || (sidebarFilter == .missing && missingCountScanned && !missingVideoIds.isEmpty)
     }
 
-    /// Preferred root for the banner’s Repair Links… button.
+    /// Preferred root for the banner’s Reconnect… button.
     var libraryFolderMissingBannerPreferredRoot: String? {
         repairLinksBannerPreferredRoot ?? inferredMissingLibraryRoot
+    }
+
+    /// Situational banner classification (parent gone / parent present / scattered).
+    var libraryFolderMissingBannerSituation: LocationRelink.MissingBannerSituation {
+        let paths = Array(missingVideoIds)
+        let focus: String? = showRepairLinksBannerFromMissingClick ? focusedVideoId : nil
+        return LocationRelink.classifyMissingSituation(
+            missingPaths: paths.isEmpty && focus != nil ? [focus!] : paths,
+            focusPath: focus
+        )
+    }
+
+    /// Exact customer-facing banner copy for the current situation.
+    var libraryFolderMissingBannerCopy: LocationRelink.BannerCopy {
+        LocationRelink.bannerCopy(for: libraryFolderMissingBannerSituation)
+    }
+
+    /// Missing-clip count for Reconnect Destinations UI (avoids exposing private set).
+    var reconnectMissingClipCount: Int { missingVideoIds.count }
+
+    /// Sample basenames for the Destinations missing-set summary.
+    var reconnectMissingSampleNames: [String] {
+        Array(
+            missingVideoIds
+                .prefix(8)
+                .map { URL(fileURLWithPath: $0).lastPathComponent }
+        )
     }
 
     /// Async variant that also considers Data Source roots.
@@ -945,21 +976,30 @@ final class LibraryViewModel {
         }.value
     }
 
-    /// Opens the Repair Links sheet immediately, then fills the folder list in the background.
+    /// Opens the unified Reconnect sheet immediately, then fills the folder list in the background.
     /// Never blocks the click — callers must not show an outside “Opening…” state.
-    func beginLocationRelink(preferredOldRoot: String? = nil) {
+    /// Banner and File → Reconnect… share this entry (one product story).
+    func beginLocationRelink(
+        preferredOldRoot: String? = nil,
+        initialMode: LocationRelink.ReconnectMode? = nil,
+        startAtNewFolder: Bool = false
+    ) {
         guard locationRelinkPresentation == nil else { return }
         let requestedPreferred: String? = {
             guard let preferredOldRoot, !preferredOldRoot.isEmpty else { return nil }
             return LocationRelink.normalizeRoot(preferredOldRoot)
         }()
+        let mode = initialMode
+            ?? LocationRelink.ReconnectMode.suggested(for: libraryFolderMissingBannerSituation)
         // Present the sheet in this click turn — catalog work starts only after SwiftUI can paint.
         locationRelinkPresentation = LocationRelinkPresentation(
             preferredOldRoot: requestedPreferred,
             candidates: [],
             isLoadingCandidates: true,
             catalogBuildFraction: nil,
-            suggestedNewRoot: nil
+            suggestedNewRoot: nil,
+            initialMode: mode,
+            startAtNewFolder: startAtNewFolder && requestedPreferred != nil
         )
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -967,6 +1007,19 @@ final class LibraryViewModel {
                 await self.loadLocationRelinkCandidates(requestedPreferred: requestedPreferred)
             }
         }
+    }
+
+    /// Banner CTA — same Reconnect product; happy-path jumps toward Choose new folder when possible.
+    func beginReconnectFromBanner() {
+        let preferred = libraryFolderMissingBannerPreferredRoot
+        let situation = libraryFolderMissingBannerSituation
+        let mode = LocationRelink.ReconnectMode.suggested(for: situation)
+        let skipOld = mode == .wholeFolder && preferred != nil
+        beginLocationRelink(
+            preferredOldRoot: preferred,
+            initialMode: mode,
+            startAtNewFolder: skipOld
+        )
     }
 
     private func updateLocationRelinkCatalogProgress(_ fraction: Double) {
@@ -992,7 +1045,7 @@ final class LibraryViewModel {
         guard var presentation = locationRelinkPresentation else { return }
         guard !candidates.isEmpty else {
             locationRelinkPresentation = nil
-            reportTransientError("No library folder paths available to repair")
+            reportTransientError("No library folder paths available to reconnect")
             return
         }
         let preferred: String?
@@ -1014,7 +1067,7 @@ final class LibraryViewModel {
         locationRelinkPresentation = presentation
     }
 
-    /// Pick the new folder for an in-progress Repair Links sheet.
+    /// Pick the new folder for an in-progress Reconnect sheet (Whole folder mode).
     func pickNewLocationForRelink() -> String? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -1022,124 +1075,78 @@ final class LibraryViewModel {
         panel.allowsMultipleSelection = false
         panel.message = "Select the new folder that replaces the missing library location"
         panel.prompt = "Use as New Location"
-        // Offline/unplugged volumes should not force Repair Links — only open when the user asks.
+        // Offline/unplugged volumes should not force Reconnect — only open when the user asks.
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         return LocationRelink.normalizeRoot(url.path)
     }
 
-    /// Resolve which missing clip anchors "Find missing folder…".
-    /// Avoids `FileManager.fileExists` — probing offline/NAS library paths can block the main
-    /// thread for tens of seconds before the open panel appears.
-    func orphanPathForFindMissingFile() -> String? {
-        let candidates = [
-            focusedVideoId,
-            lastSelectedVideoId,
-            selectedVideoIds.first
-        ].compactMap { $0 }
-        for path in candidates where missingVideoIds.contains(path) {
-            return path
-        }
-        // Banner was raised for a focused missing clip — trust that path without an FS probe.
-        if showRepairLinksBannerFromMissingClick, let focused = focusedVideoId {
-            return focused
-        }
-        return candidates.first
-    }
-
-    /// Banner entry. Schedules a **folder** open panel on the next main-queue turn, then presents
-    /// it as a sheet on the key window (`beginSheetModal`) — not nested `runModal()` from async Task.
-    ///
-    /// User picks the new folder that contains the moved clips. Remap scope is the orphan’s parent
-    /// → chosen folder (`oldRoot/rel` → `newRoot/rel`); siblings rematch by basename.
-    func beginFindMissingFile(for orphanPath: String? = nil) {
-        guard !isApplyingLocationRelink else { return }
-        guard locationRelinkPresentation == nil else { return }
-
-        guard let orphan = orphanPath ?? orphanPathForFindMissingFile() else {
-            reportTransientError("Select a missing clip first, then Find missing folder…")
-            return
-        }
-
-        let orphanFolderName = URL(fileURLWithPath: orphan).deletingLastPathComponent().lastPathComponent
-        // Leave the SwiftUI button/update turn before AppKit presents UI.
-        DispatchQueue.main.async { [weak self] in
-            self?.presentFindMissingFolderOpenPanel(orphan: orphan, orphanFolderName: orphanFolderName)
-        }
-    }
-
-    private func presentFindMissingFolderOpenPanel(orphan: String, orphanFolderName: String) {
+    /// Pick an Evidence Destination folder (Destinations mode).
+    func pickEvidenceDestination() -> String? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.message = orphanFolderName.isEmpty
-            ? "Select the folder that now contains the missing clips"
-            : "Select the folder that replaces “\(orphanFolderName)” (contains the missing clips)"
-        panel.prompt = "Use This Folder"
-
-        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-            Task { @MainActor in
-                self?.finishFindMissingFolder(orphan: orphan, response: response, panel: panel)
-            }
-        }
-
-        if let window = NSApp.keyWindow
-            ?? NSApp.mainWindow
-            ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeKey })
-        {
-            panel.beginSheetModal(for: window, completionHandler: finish)
-        } else {
-            // No window to sheet onto — still avoid calling runModal from the SwiftUI click turn
-            // (we're already on a deferred main-queue block).
-            finish(panel.runModal())
-        }
+        panel.message = "Select a folder that contains some of the missing clips"
+        panel.prompt = "Add Destination"
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return LocationRelink.normalizeRoot(url.path)
     }
 
-    private func finishFindMissingFolder(
-        orphan: String,
-        response: NSApplication.ModalResponse,
-        panel: NSOpenPanel
-    ) {
-        guard response == .OK, let url = panel.url else { return }
-
-        let located = LocationRelink.normalizeRoot(url.path)
-        switch LocationRelink.rootsFromLocatedFolder(orphanPath: orphan, locatedFolder: located) {
-        case .failure(.emptyPath):
-            reportTransientError("Couldn't use that folder path")
-        case .success(let roots):
-            Task { @MainActor in
-                await self.applyFindMissingFileRemap(oldRoot: roots.oldRoot, newRoot: roots.newRoot)
+    /// Index video files under a user-chosen Evidence Destination (bounded, local only).
+    func indexEvidenceDestination(at path: String) async -> LocationRelink.DestinationIndex {
+        let root = LocationRelink.normalizeRoot(path)
+        let extensions = VideoExtensionManager.shared.enabledExtensions
+        return await Task.detached(priority: .userInitiated) {
+            if extensions.isEmpty {
+                return LocationRelink.indexEvidenceDestination(root: root)
             }
-        }
-    }
-
-    /// Parent-folder remap after the user located the new folder. Preview FS checks run off MainActor.
-    @discardableResult
-    private func applyFindMissingFileRemap(oldRoot: String, newRoot: String) async -> Int {
-        let old = LocationRelink.normalizeRoot(oldRoot)
-        let neu = LocationRelink.normalizeRoot(newRoot)
-        let videosUnder = videos
-            .filter { LocationRelink.isUnder(root: old, path: $0.filePath) }
-            .map { (databaseId: $0.databaseId, filePath: $0.filePath, fileSize: $0.fileSize) }
-        let existing = Set(videos.map(\.filePath))
-
-        // Soft disk checks (exists/size) for every sibling — keep off MainActor so dismiss isn’t frozen.
-        let preview = await Task.detached(priority: .userInitiated) {
-            LocationRelink.buildPreview(
-                videos: videosUnder,
-                oldRoot: old,
-                newRoot: neu,
-                existingLibraryPaths: existing
+            return LocationRelink.indexEvidenceDestination(
+                root: root,
+                videoExtensions: extensions
             )
         }.value
+    }
 
-        let applyable = LocationRelink.mappingsToApply(preview: preview, includeNeedsAttention: true)
-        guard !applyable.isEmpty else {
-            reportTransientError("No clips under that folder could be reconnected")
-            return 0
+    /// Session preview: optional whole-folder remap + Evidence Destination basename matches.
+    /// When destinations are present, scopes unmatched work to currently missing clips
+    /// (plus anything under the whole-folder old root).
+    func buildReconnectSessionPreview(
+        wholeFolder: (oldRoot: String, newRoot: String)?,
+        destinationIndexes: [LocationRelink.DestinationIndex]
+    ) -> LocationRelink.Preview {
+        let existing = Set(videos.map(\.filePath))
+        var scoped = videos
+        if !missingVideoIds.isEmpty {
+            let missing = missingVideoIds
+            if let old = wholeFolder?.oldRoot, !old.isEmpty {
+                scoped = videos.filter {
+                    missing.contains($0.filePath)
+                        || LocationRelink.isUnder(root: old, path: $0.filePath)
+                }
+            } else {
+                scoped = videos.filter { missing.contains($0.filePath) }
+            }
+        } else if let old = wholeFolder?.oldRoot, !old.isEmpty {
+            scoped = videos.filter { LocationRelink.isUnder(root: old, path: $0.filePath) }
         }
-        // Soft size / collision flags still remap — user explicitly located the folder.
-        return await applyLocationRelink(preview: preview, includeNeedsAttention: true)
+        let tuples = scoped.map {
+            (databaseId: $0.databaseId, filePath: $0.filePath, fileSize: $0.fileSize)
+        }
+        return LocationRelink.buildSessionPreview(
+            videos: tuples,
+            wholeFolder: wholeFolder,
+            destinationIndexes: destinationIndexes,
+            existingLibraryPaths: existing
+        )
+    }
+
+    /// Banner / legacy Find missing entry — opens the unified Reconnect sheet (same product).
+    func beginFindMissingFile(for orphanPath: String? = nil) {
+        if let orphan = orphanPath {
+            noteLibraryFileMissing(path: orphan)
+            updateRepairLinksBannerPreferredRoot(forMissingPath: orphan)
+        }
+        beginReconnectFromBanner()
     }
 
     func buildLocationRelinkPreview(oldRoot: String, newRoot: String) -> LocationRelink.Preview {
@@ -1181,7 +1188,7 @@ final class LibraryViewModel {
             return (id, m.newPath)
         }
         guard dbMappings.count == mappings.count else {
-            reportTransientError("Couldn't repair links — some clips are missing a library id")
+            reportTransientError("Couldn't reconnect — some clips are missing a library id")
             return 0
         }
 
@@ -1202,26 +1209,28 @@ final class LibraryViewModel {
                 await Task.yield()
             }
         } catch {
-            reportTransientError("Couldn't repair links: \(error.localizedDescription)")
+            reportTransientError("Couldn't reconnect: \(error.localizedDescription)")
             return 0
         }
 
-        // Phase 2 — data sources / excludes
+        // Phase 2 — data sources / excludes (whole-folder remount only)
         locationRelinkProgress = LocationRelinkApplyProgress(
             phase: .updatingFolders, current: 0, total: 2
         )
-        _ = try? await dataSourceRepo.remapPathsUnder(
-            oldRoot: preview.oldRoot,
-            newRoot: preview.newRoot
-        )
-        locationRelinkProgress = LocationRelinkApplyProgress(
-            phase: .updatingFolders, current: 1, total: 2
-        )
-        let excludeRepo = ExcludedFolderRepository(dbPool: dbPool)
-        _ = try? await excludeRepo.remapPathsUnder(
-            oldRoot: preview.oldRoot,
-            newRoot: preview.newRoot
-        )
+        if preview.hasWholeFolderRemap {
+            _ = try? await dataSourceRepo.remapPathsUnder(
+                oldRoot: preview.oldRoot,
+                newRoot: preview.newRoot
+            )
+            locationRelinkProgress = LocationRelinkApplyProgress(
+                phase: .updatingFolders, current: 1, total: 2
+            )
+            let excludeRepo = ExcludedFolderRepository(dbPool: dbPool)
+            _ = try? await excludeRepo.remapPathsUnder(
+                oldRoot: preview.oldRoot,
+                newRoot: preview.newRoot
+            )
+        }
         locationRelinkProgress = LocationRelinkApplyProgress(
             phase: .updatingFolders, current: 2, total: 2
         )
@@ -1380,7 +1389,7 @@ final class LibraryViewModel {
         )
         await Task.yield()
 
-        let text = "Repaired \(mappings.count) clip\(mappings.count == 1 ? "" : "s")"
+        let text = "Reconnected \(mappings.count) clip\(mappings.count == 1 ? "" : "s")"
         scanProgress = text
         showRepairLinksBannerFromMissingClick = false
         repairLinksBannerPreferredRoot = nil
@@ -1391,7 +1400,7 @@ final class LibraryViewModel {
         return mappings.count
     }
 
-    /// Reverse the last Location Relink apply.
+    /// Reverse the last Reconnect apply.
     @discardableResult
     func undoLocationRelink() async -> Int {
         guard let payload = locationRelinkUndo, !payload.reverseMappings.isEmpty else { return 0 }
@@ -1401,17 +1410,21 @@ final class LibraryViewModel {
         let dbMappings = payload.reverseMappings.map { (videoId: $0.videoId, newFilePath: $0.to) }
         do {
             try await videoRepo.relinkFilePaths(mappings: dbMappings)
-            _ = try? await dataSourceRepo.remapPathsUnder(
-                oldRoot: payload.newRoot,
-                newRoot: payload.oldRoot
-            )
-            let excludeRepo = ExcludedFolderRepository(dbPool: dbPool)
-            _ = try? await excludeRepo.remapPathsUnder(
-                oldRoot: payload.newRoot,
-                newRoot: payload.oldRoot
-            )
+            let canRemapFolders = !payload.oldRoot.isEmpty && !payload.newRoot.isEmpty
+                && payload.oldRoot.caseInsensitiveCompare(payload.newRoot) != .orderedSame
+            if canRemapFolders {
+                _ = try? await dataSourceRepo.remapPathsUnder(
+                    oldRoot: payload.newRoot,
+                    newRoot: payload.oldRoot
+                )
+                let excludeRepo = ExcludedFolderRepository(dbPool: dbPool)
+                _ = try? await excludeRepo.remapPathsUnder(
+                    oldRoot: payload.newRoot,
+                    newRoot: payload.oldRoot
+                )
+            }
         } catch {
-            reportTransientError("Couldn't undo repair: \(error.localizedDescription)")
+            reportTransientError("Couldn't undo reconnect: \(error.localizedDescription)")
             return 0
         }
 
@@ -1459,7 +1472,7 @@ final class LibraryViewModel {
         locationRelinkUndo = nil
         recomputeFilteredVideos()
         await refreshMissingCount()
-        let text = "Undid repair (\(count) clip\(count == 1 ? "" : "s"))"
+        let text = "Undid reconnect (\(count) clip\(count == 1 ? "" : "s"))"
         scanProgress = text
         Task {
             try? await Task.sleep(for: .seconds(5))

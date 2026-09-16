@@ -267,10 +267,10 @@ struct SkagwayApp: App {
                 .keyboardShortcut("r", modifiers: [.command, .option])
                 .disabled(appState.libraryViewModel?.selectedVideoIds.isEmpty != false)
             }
-            // Find/Spelling/Format/Print stay empty — Repair Links owns Undo when a remap is pending.
+            // Find/Spelling/Format/Print stay empty — Reconnect owns Undo when a remap is pending.
             Group {
                 CommandGroup(replacing: .undoRedo) {
-                    Button("Undo Repair Links") {
+                    Button("Undo Reconnect") {
                         Task { await appState.libraryViewModel?.undoLocationRelink() }
                     }
                     .keyboardShortcut("z", modifiers: .command)
@@ -331,13 +331,13 @@ struct SkagwayApp: App {
 
                 Divider()
 
-                Button("Repair Links\u{2026}") {
+                Button("Reconnect\u{2026}") {
                     appState.libraryViewModel?.beginLocationRelink()
                 }
                 .disabled(!appState.hasLibrary
                     || (appState.libraryViewModel?.videos.isEmpty ?? true)
                     || (appState.libraryViewModel?.isApplyingLocationRelink ?? false))
-                .help("Repair catalog links after moving an entire library folder tree")
+                .help("Reconnect missing clips after a folder move or scattered remount")
             }
             CommandGroup(replacing: .importExport) {
                 Button("Play in External Player") {

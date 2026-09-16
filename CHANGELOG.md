@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Reconnect (unified Relink UX)** — One product for banner + File menu: situational Missing banner copy (parent gone / parent present / scattered), **Reconnect…** CTA, Whole folder happy path (preview → apply → Undo), and **Evidence Destinations** multi-folder basename (+ soft size) matching with Ready / Needs attention / Unmatched. No silent rewrite; offline ≠ force reconnect; no telemetry. Edit → **Undo Reconnect**.
 - **Storyboard hit targets + density** — Collage cells still seek/play (times sidecar). Title and fat footer chrome select only. Compact (default) vs Comfortable packing toggle sits beside the Grid/List/Storyboard control when Storyboard is active; preference is Storyboard-only.
 - **Fix: Storyboard click-to-play seek mismatch** — Collage bake now stores each cell’s sample time (`{hash}_storyboard_times.json`); click seeks to that time (precise AVPlayer seek). Filmstrip→storyboard remaps no longer jump to a different even-split slot. Legacy collages without times rebake automatically.
 - **Find missing folder…** — Missing-folder banner opens a **folder** sheet (`beginSheetModal`) for the orphan’s parent location (not a file hunt, not the Repair Links wizard). Chosen folder remaps all clips under the missing parent via relative paths / basename siblings; reuses Repair Links apply (DB, thumbs/storyboards, progress, Undo). File → **Repair Links…** stays the whole-Location wizard.

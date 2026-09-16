@@ -368,7 +368,7 @@ struct CuratedWallFiltersDrawer: View {
 
             if count > 0 {
                 Button {
-                    viewModel.beginLocationRelink(preferredOldRoot: viewModel.libraryFolderMissingBannerPreferredRoot)
+                    viewModel.beginReconnectFromBanner()
                 } label: {
                     Image(systemName: "link")
                         .font(.caption2)
@@ -376,7 +376,7 @@ struct CuratedWallFiltersDrawer: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.appTextTertiary)
                 .disabled(viewModel.isApplyingLocationRelink)
-                .help("Repair Links…")
+                .help("Reconnect…")
             }
         }
         .padding(.vertical, 4)

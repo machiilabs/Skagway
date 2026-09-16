@@ -541,7 +541,7 @@ private struct LibraryContentView: View {
             if vm.shouldShowLibraryFolderMissingBanner {
                 missingLibraryRepairCue
                     // Stay above wall content; floating player can still cover it — Playback Failed
-                    // also offers Repair Links… for that case.
+                    // also offers Reconnect… for that case.
                     .zIndex(2)
             }
 
@@ -608,26 +608,24 @@ private struct LibraryContentView: View {
             .help("Drag to resize the filters drawer")
     }
 
-    /// Quiet repair cue — Missing filter, or after focusing a clip whose file is gone.
-    /// Banner offers Find missing folder… (folder picker → parent-folder remap). File → Repair Links…
-    /// remains the whole-Location wizard.
+    /// Situational Missing / focus banner — CTA opens the unified Reconnect sheet.
     private var missingLibraryRepairCue: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "folder.badge.questionmark")
+        let copy = vm.libraryFolderMissingBannerCopy
+        return HStack(spacing: 10) {
+            Image(systemName: copy.icon)
                 .foregroundStyle(Color.appTextSecondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Library folder missing")
+                Text(copy.title)
                     .font(.subheadline.weight(.medium))
-                Text("If you moved an entire folder tree, repair the links once — ghost clips stay visible until then.")
+                Text(copy.body)
                     .font(.caption)
                     .foregroundStyle(Color.appTextSecondary)
             }
             Spacer(minLength: 8)
             Button {
-                // Defer + sheet modal lives in beginFindMissingFile — do not wrap in Task/async.
-                vm.beginFindMissingFile()
+                vm.beginReconnectFromBanner()
             } label: {
-                Text("Find missing folder…")
+                Text(copy.cta)
             }
             .disabled(vm.isApplyingLocationRelink)
         }
