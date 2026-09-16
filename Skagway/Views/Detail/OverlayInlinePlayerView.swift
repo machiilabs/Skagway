@@ -150,26 +150,20 @@ struct OverlayInlinePlayerView: View {
                     if missingOnDisk {
                         Button {
                             let path = (playback.currentVideo ?? video).filePath
-                            // Open the sheet first so large libraries never feel frozen on this click.
-                            viewModel.beginLocationRelink(
-                                preferredOldRoot: viewModel.libraryFolderMissingBannerPreferredRoot
-                            )
+                            let preferred = viewModel.libraryFolderMissingBannerPreferredRoot
+                            // Sheet first — never an outside “Opening…” wait. Then clear the floating
+                            // Playback Failed surface so the sheet isn’t buried under the overlay.
+                            viewModel.beginLocationRelink(preferredOldRoot: preferred)
                             viewModel.noteLibraryFileMissing(path: path)
+                            playback.dismissError()
+                            viewModel.isPlayingInline = false
                         } label: {
-                            if viewModel.isPreparingLocationRelink {
-                                HStack(spacing: 6) {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                    Text("Opening…")
-                                }
-                            } else {
-                                Text("Repair Links…")
-                            }
+                            Text("Repair Links…")
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(Color.appAccent)
                         .controlSize(.small)
-                        .disabled(viewModel.isPreparingLocationRelink || viewModel.isApplyingLocationRelink)
+                        .disabled(viewModel.isApplyingLocationRelink)
 
                         Button("Open in External Player") {
                             playback.openInExternalPlayer(video)
@@ -177,7 +171,7 @@ struct OverlayInlinePlayerView: View {
                         .buttonStyle(.bordered)
                         .tint(Color.appAccent)
                         .controlSize(.small)
-                        .disabled(viewModel.isPreparingLocationRelink)
+
                     } else {
                         Button("Open in External Player") {
                             playback.openInExternalPlayer(video)
@@ -193,7 +187,6 @@ struct OverlayInlinePlayerView: View {
                     .buttonStyle(.bordered)
                     .tint(Color.appAccent)
                     .controlSize(.small)
-                    .disabled(viewModel.isPreparingLocationRelink)
                 }
             }
             .padding(AppSpacing.lg)

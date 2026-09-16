@@ -868,6 +868,8 @@ final class LibraryViewModel {
         var candidates: [LocationRelink.OldRootCandidate]
         /// True while the catalog folder list is still building off the main actor.
         var isLoadingCandidates: Bool
+        /// 0…1 while building (nil = indeterminate start).
+        var catalogBuildFraction: Double?
         var suggestedNewRoot: String?
     }
 
@@ -927,7 +929,9 @@ final class LibraryViewModel {
 
     /// Known Location A options from catalog paths + data sources (never a filesystem picker).
     /// Heavy path-prefix work runs off the main actor so opening Repair Links stays responsive.
-    func locationRelinkOldRootCandidates() async -> [LocationRelink.OldRootCandidate] {
+    func locationRelinkOldRootCandidates(
+        onProgress: (@Sendable (Double) -> Void)? = nil
+    ) async -> [LocationRelink.OldRootCandidate] {
         let sources = (try? await dataSourceRepo.fetchAll()) ?? []
         let sourcePaths = sources.map(\.folderPath)
         // Snapshot paths on the main actor, then leave immediately for the detached collect.
@@ -935,59 +939,79 @@ final class LibraryViewModel {
         return await Task.detached(priority: .userInitiated) {
             LocationRelink.collectOldRootCandidates(
                 videoPaths: videoPaths,
-                dataSourceRoots: sourcePaths
+                dataSourceRoots: sourcePaths,
+                onProgress: onProgress
             )
         }.value
     }
 
-    /// True while catalog folder candidates are loading inside the already-open Repair Links sheet.
-    private(set) var isPreparingLocationRelink: Bool = false
-
     /// Opens the Repair Links sheet immediately, then fills the folder list in the background.
-    /// Never blocks the click on large libraries — the sheet shows “Building folder list…”.
+    /// Never blocks the click — callers must not show an outside “Opening…” state.
     func beginLocationRelink(preferredOldRoot: String? = nil) {
         guard locationRelinkPresentation == nil else { return }
         let requestedPreferred: String? = {
             guard let preferredOldRoot, !preferredOldRoot.isEmpty else { return nil }
             return LocationRelink.normalizeRoot(preferredOldRoot)
         }()
-        // Present first with loading UI — do not wait for the catalog.
+        // Present the sheet in this click turn — catalog work starts only after SwiftUI can paint.
         locationRelinkPresentation = LocationRelinkPresentation(
             preferredOldRoot: requestedPreferred,
             candidates: [],
             isLoadingCandidates: true,
+            catalogBuildFraction: nil,
             suggestedNewRoot: nil
         )
-        isPreparingLocationRelink = true
-        Task { @MainActor in
-            defer { isPreparingLocationRelink = false }
-            // Let SwiftUI present + paint the sheet before any catalog MainActor work.
-            await Task.yield()
-            await Task.yield()
-            let candidates = await locationRelinkOldRootCandidates()
-            guard var presentation = locationRelinkPresentation else { return }
-            guard !candidates.isEmpty else {
-                locationRelinkPresentation = nil
-                reportTransientError("No library folder paths available to repair")
-                return
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.loadLocationRelinkCandidates(requestedPreferred: requestedPreferred)
             }
-            let preferred: String?
-            if let requestedPreferred,
-               candidates.contains(where: { $0.path.caseInsensitiveCompare(requestedPreferred) == .orderedSame })
-            {
-                preferred = requestedPreferred
-            } else if let inferred = await resolveSharedMissingRoot(),
-                      candidates.contains(where: { $0.path.caseInsensitiveCompare(inferred) == .orderedSame })
-            {
-                preferred = inferred
-            } else {
-                preferred = candidates.first?.path
-            }
-            presentation.candidates = candidates
-            presentation.preferredOldRoot = preferred
-            presentation.isLoadingCandidates = false
-            locationRelinkPresentation = presentation
         }
+    }
+
+    private func updateLocationRelinkCatalogProgress(_ fraction: Double) {
+        guard var presentation = locationRelinkPresentation, presentation.isLoadingCandidates else { return }
+        let clamped = min(1, max(0, fraction))
+        if let existing = presentation.catalogBuildFraction,
+           clamped < 1,
+           abs(existing - clamped) < 0.01
+        {
+            return
+        }
+        presentation.catalogBuildFraction = clamped
+        locationRelinkPresentation = presentation
+    }
+
+    private func loadLocationRelinkCandidates(requestedPreferred: String?) async {
+        guard locationRelinkPresentation?.isLoadingCandidates == true else { return }
+        let candidates = await locationRelinkOldRootCandidates { [weak self] fraction in
+            Task { @MainActor in
+                self?.updateLocationRelinkCatalogProgress(fraction)
+            }
+        }
+        guard var presentation = locationRelinkPresentation else { return }
+        guard !candidates.isEmpty else {
+            locationRelinkPresentation = nil
+            reportTransientError("No library folder paths available to repair")
+            return
+        }
+        let preferred: String?
+        if let requestedPreferred,
+           candidates.contains(where: { $0.path.caseInsensitiveCompare(requestedPreferred) == .orderedSame })
+        {
+            preferred = requestedPreferred
+        } else if let inferred = await resolveSharedMissingRoot(),
+                  candidates.contains(where: { $0.path.caseInsensitiveCompare(inferred) == .orderedSame })
+        {
+            preferred = inferred
+        } else {
+            preferred = candidates.first?.path
+        }
+        presentation.candidates = candidates
+        presentation.preferredOldRoot = preferred
+        presentation.isLoadingCandidates = false
+        presentation.catalogBuildFraction = 1
+        locationRelinkPresentation = presentation
     }
 
     /// Pick the new folder for an in-progress Repair Links sheet.

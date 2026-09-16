@@ -137,7 +137,8 @@ enum LocationRelink {
     /// Does **not** consult the live filesystem — missing/offline roots stay choosable.
     static func collectOldRootCandidates(
         videoPaths: [String],
-        dataSourceRoots: [String]
+        dataSourceRoots: [String],
+        onProgress: (@Sendable (Double) -> Void)? = nil
     ) -> [OldRootCandidate] {
         let videos = videoPaths.map(normalizeRoot).filter { !$0.isEmpty }
         let sources = Array(Set(dataSourceRoots.map(normalizeRoot).filter { !$0.isEmpty }))
@@ -153,11 +154,13 @@ enum LocationRelink {
             tags[p, default: []].insert(source)
         }
 
+        onProgress?(0.02)
         for source in sources {
             note(source, .dataSource)
         }
 
-        for video in videos {
+        let videoTotal = max(videos.count, 1)
+        for (index, video) in videos.enumerated() {
             let parent = URL(fileURLWithPath: video).deletingLastPathComponent().path
             let owningSource = sources.first { isUnder(root: $0, path: video) }
 
@@ -187,17 +190,26 @@ enum LocationRelink {
                     depth += 1
                 }
             }
+            if index == videos.count - 1 || index % 128 == 0 {
+                onProgress?(0.05 + 0.70 * Double(index + 1) / Double(videoTotal))
+            }
         }
 
         var result: [OldRootCandidate] = []
-        for path in candidatePaths {
+        let pathList = Array(candidatePaths)
+        let pathTotal = max(pathList.count, 1)
+        for (index, path) in pathList.enumerated() {
             let videoCount = videos.filter { isUnder(root: path, path: $0) }.count
             let src = tags[path] ?? [.libraryFolder]
             // Keep zero-video data sources; drop empty library-only folders.
             if videoCount == 0 && !src.contains(.dataSource) { continue }
             result.append(OldRootCandidate(path: path, videoCount: videoCount, sources: src))
+            if index == pathList.count - 1 || index % 16 == 0 {
+                onProgress?(0.75 + 0.24 * Double(index + 1) / Double(pathTotal))
+            }
         }
 
+        onProgress?(1.0)
         return result.sorted {
             $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
         }

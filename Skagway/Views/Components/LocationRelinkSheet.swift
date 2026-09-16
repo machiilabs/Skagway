@@ -44,6 +44,7 @@ struct LocationRelinkSheet: View {
                 preferredOldRoot: nil,
                 candidates: [],
                 isLoadingCandidates: true,
+                catalogBuildFraction: nil,
                 suggestedNewRoot: nil
             )
     }
@@ -204,8 +205,13 @@ struct LocationRelinkSheet: View {
             Text("Building folder list…")
                 .font(.callout.weight(.medium))
                 .foregroundStyle(Color.appTextPrimary)
-            ProgressView()
-                .progressViewStyle(.linear)
+            if let fraction = presentation.catalogBuildFraction {
+                ProgressView(value: fraction)
+                    .progressViewStyle(.linear)
+            } else {
+                ProgressView()
+                    .progressViewStyle(.linear)
+            }
             Text("Scanning library folders — Continue unlocks when this finishes.")
                 .font(.caption)
                 .foregroundStyle(Color.appTextSecondary)
