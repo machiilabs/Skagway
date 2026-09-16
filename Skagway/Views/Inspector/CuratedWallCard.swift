@@ -20,6 +20,8 @@ struct CuratedWallCard: View {
     var resumeFraction: Double? = nil
     /// When false (e.g. main floating player is open), skip live hover scrub to avoid fighting AVFoundation.
     var hoverPreviewEnabled: Bool = true
+    /// Bumped after Repair Links / filmstrip regen so `.task(id:)` reloads even if path identity is sticky.
+    var thumbnailReloadId: Int = 0
     /// Accent grip drawn on the thumbnail while an album is the active filter (visual only).
     var showAlbumReorderHandle: Bool = false
     var renameFocus: FocusState<Bool>.Binding
@@ -200,11 +202,14 @@ struct CuratedWallCard: View {
             stopHoverPreview()
             selectionState.isHovering = false
         }
-        .task(id: "\(video.filePath)|\(video.thumbnailPath ?? "")") {
+        .task(id: "\(video.filePath)|\(video.thumbnailPath ?? "")|\(thumbnailReloadId)") {
+            // Clear first so a recycled LazyVGrid cell never keeps a pre-remap still.
+            thumbnail = nil
+            detailUpgradeTask?.cancel()
+            detailUpgradeTask = nil
             if let lo = thumbnailService.loadThumbnail(for: video.filePath) {
                 thumbnail = lo
             }
-            detailUpgradeTask?.cancel()
             detailUpgradeTask = Task {
                 if let hi = await thumbnailService.detailPreviewImage(for: video, longEdge: 720) {
                     guard !Task.isCancelled else { return }

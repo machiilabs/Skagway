@@ -120,6 +120,7 @@ struct CuratedWallGrid: View {
                             isMoving: isMoving,
                             resumeFraction: resumeFraction(for: video),
                             hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
+                            thumbnailReloadId: viewModel.filmstripRefreshId,
                             showAlbumReorderHandle: viewModel.isViewingAlbum,
                             renameFocus: $renameFocus,
                             onCommitRename: { commitRename(video) },
@@ -128,7 +129,7 @@ struct CuratedWallGrid: View {
                             onCancelTitle: cancelTitleEdit,
                             onRenameEditingChanged: { viewModel.isEditingText = $0 }
                         )
-                        .id(video.id)
+                        .id("\(video.id)|\(viewModel.filmstripRefreshId)")
                         .contentShape(Rectangle())
                         .modifier(AlbumSelectionGestures(
                             enabled: !viewModel.isViewingAlbum,

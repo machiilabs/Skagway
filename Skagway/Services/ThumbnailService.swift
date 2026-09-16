@@ -1122,6 +1122,10 @@ final class ThumbnailService: @unchecked Sendable {
     /// Lists the cache directory once (not once per clip). Skips pairs where `from == to`.
     /// When the old poster exists, it **replaces** any file already at the new path-hash
     /// (custom posters must not lose to a pre-generated frame at the destination).
+    ///
+    /// Order matters: move **all** on-disk variants first, then warm `NSCache` from the new
+    /// paths. Warming detail memory before the detail file is moved left auto-frames in cache
+    /// until process restart (disk was already correct).
     /// `onProgress` reports remapped clip count (changed paths only).
     func migrateCacheKeys(
         _ mappings: [(from: String, to: String)],
@@ -1146,6 +1150,7 @@ final class ThumbnailService: @unchecked Sendable {
         hashRemap.reserveCapacity(changed.count)
 
         let total = changed.count
+        // Pass 1 — move every cache file for each pair; clear memory; do not warm yet.
         for (index, pair) in changed.enumerated() {
             let oldH = pathHashString(for: pair.from)
             let newH = pathHashString(for: pair.to)
@@ -1161,36 +1166,32 @@ final class ThumbnailService: @unchecked Sendable {
                 to: filmstripURL(for: pair.to),
                 fm: fm
             )
+            for edge in Self.detailPreviewLongEdgeChoices {
+                moveOrReplaceCacheFile(
+                    from: detailPreviewURL(for: pair.from, longEdge: edge),
+                    to: detailPreviewURL(for: pair.to, longEdge: edge),
+                    fm: fm
+                )
+            }
+            moveOrReplaceCacheFile(
+                from: legacyDetailPreviewURL(for: pair.from),
+                to: legacyDetailPreviewURL(for: pair.to),
+                fm: fm
+            )
 
-            // Drop stale memory for both keys, then warm from migrated disk so UI
-            // loadThumbnail / detailPreview don't keep a pre-remap auto-frame.
             let oldKey = pair.from as NSString
             let newKey = pair.to as NSString
             memoryCache.removeObject(forKey: oldKey)
             memoryCache.removeObject(forKey: newKey)
-            if let image = NSImage(contentsOf: thumbnailURL(for: pair.to)) {
-                memoryCache.setObject(image, forKey: newKey)
-            }
-            let oldFsKey = filmstripMemoryKey(for: pair.from)
-            let newFsKey = filmstripMemoryKey(for: pair.to)
-            memoryCache.removeObject(forKey: oldFsKey)
-            memoryCache.removeObject(forKey: newFsKey)
-            if let image = NSImage(contentsOf: filmstripURL(for: pair.to)) {
-                memoryCache.setObject(image, forKey: newFsKey)
-            }
+            memoryCache.removeObject(forKey: filmstripMemoryKey(for: pair.from))
+            memoryCache.removeObject(forKey: filmstripMemoryKey(for: pair.to))
             memoryCache.removeObject(forKey: (pair.from + Self.detailPreviewCachePrefix) as NSString)
+            memoryCache.removeObject(forKey: (pair.to + Self.detailPreviewCachePrefix) as NSString)
             for edge in Self.detailPreviewLongEdgeChoices {
-                let oldDetailKey = detailPreviewMemoryKey(filePath: pair.from, longEdge: edge)
-                let newDetailKey = detailPreviewMemoryKey(filePath: pair.to, longEdge: edge)
-                memoryCache.removeObject(forKey: oldDetailKey)
-                memoryCache.removeObject(forKey: newDetailKey)
-                if let image = NSImage(contentsOf: detailPreviewURL(for: pair.to, longEdge: edge)) {
-                    memoryCache.setObject(image, forKey: newDetailKey)
-                }
+                memoryCache.removeObject(forKey: detailPreviewMemoryKey(filePath: pair.from, longEdge: edge))
+                memoryCache.removeObject(forKey: detailPreviewMemoryKey(filePath: pair.to, longEdge: edge))
             }
 
-            // Drop any in-flight generation for both keys so a late auto-frame can't overwrite
-            // the migrated custom poster.
             inflightLock.lock()
             inflightThumbnails[pair.from]?.cancel()
             inflightThumbnails[pair.to]?.cancel()
@@ -1213,7 +1214,7 @@ final class ThumbnailService: @unchecked Sendable {
             onProgress?(index + 1, total)
         }
 
-        // One pass over on-disk detail variants (and any leftover hash-prefixed files).
+        // Pass 2 — leftover hash-prefixed files from the pre-move directory listing.
         for url in cacheContents {
             let name = url.lastPathComponent
             guard name.count >= 64 else { continue }
@@ -1234,6 +1235,21 @@ final class ThumbnailService: @unchecked Sendable {
                 let rest = String(name.dropFirst(oldH.count))
                 let dest = cacheDirectory.appendingPathComponent("\(newH)\(rest)")
                 moveOrReplaceCacheFile(from: url, to: dest, fm: fm)
+            }
+        }
+
+        // Pass 3 — warm memory only after every disk move finished.
+        for pair in changed {
+            if let image = NSImage(contentsOf: thumbnailURL(for: pair.to)) {
+                memoryCache.setObject(image, forKey: pair.to as NSString)
+            }
+            if let image = NSImage(contentsOf: filmstripURL(for: pair.to)) {
+                memoryCache.setObject(image, forKey: filmstripMemoryKey(for: pair.to))
+            }
+            for edge in Self.detailPreviewLongEdgeChoices {
+                if let image = NSImage(contentsOf: detailPreviewURL(for: pair.to, longEdge: edge)) {
+                    memoryCache.setObject(image, forKey: detailPreviewMemoryKey(filePath: pair.to, longEdge: edge))
+                }
             }
         }
     }
