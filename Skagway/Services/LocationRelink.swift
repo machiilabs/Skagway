@@ -390,8 +390,12 @@ enum LocationRelink {
         orphanPath: String,
         locatedFolder: String
     ) -> Result<(oldRoot: String, newRoot: String), FindMissingFolderRootsError> {
-        let orphan = normalizeRoot(orphanPath)
-        let folder = normalizeRoot(locatedFolder)
+        let orphanRaw = orphanPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let folderRaw = locatedFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !orphanRaw.isEmpty, !folderRaw.isEmpty else { return .failure(.emptyPath) }
+
+        let orphan = normalizeRoot(orphanRaw)
+        let folder = normalizeRoot(folderRaw)
         guard !orphan.isEmpty, !folder.isEmpty else { return .failure(.emptyPath) }
 
         let oldRoot = normalizeRoot(
