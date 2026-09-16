@@ -40,6 +40,29 @@ enum LocationRelink {
         return String(p[start...])
     }
 
+    /// Path segments for sorting (no empty/`/` components).
+    static func pathSortComponents(_ path: String) -> [String] {
+        URL(fileURLWithPath: normalizeRoot(path)).pathComponents.filter { $0 != "/" && !$0.isEmpty }
+    }
+
+    /// Component-wise path order: compare each segment case-insensitively; a shorter
+    /// equal-prefix path sorts before a longer one.
+    ///
+    /// So `/Volumes/Media` and `/Volumes/Media/Shows` both sort before `/Volumes/Media 2`
+    /// (full-string compare wrongly puts `Media 2` first because space < `/`).
+    static func comparePathComponentWise(_ lhs: String, _ rhs: String) -> ComparisonResult {
+        let a = pathSortComponents(lhs)
+        let b = pathSortComponents(rhs)
+        let n = min(a.count, b.count)
+        for i in 0..<n {
+            let cmp = a[i].localizedCaseInsensitiveCompare(b[i])
+            if cmp != .orderedSame { return cmp }
+        }
+        if a.count < b.count { return .orderedAscending }
+        if a.count > b.count { return .orderedDescending }
+        return .orderedSame
+    }
+
     static func join(root: String, relative: String) -> String {
         let r = normalizeRoot(root)
         if relative.isEmpty { return r }
@@ -211,7 +234,7 @@ enum LocationRelink {
 
         onProgress?(1.0)
         return result.sorted {
-            $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
+            comparePathComponentWise($0.path, $1.path) == .orderedAscending
         }
     }
 
