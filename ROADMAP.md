@@ -26,7 +26,7 @@ Key qualities:
 - **Duplicates**: `ContentFingerprint` (size + first/last bytes) with “Not a Duplicate”
 - **Tags** and **custom metadata** (per-library; sort and list columns)
 - **Search** across title, file name, original file name, tags, and custom fields
-- Smart libraries: **Missing** (manual filesystem refresh) and **Corrupt** (metadata + recheck on select); **Location Relink** reconnects a moved folder tree from Missing / File menu
+- Smart libraries: **Missing** (manual filesystem refresh) and **Corrupt** (metadata + recheck on select); **Repair Links** reconnects a moved folder tree from Missing / File menu
 - Drag-and-drop import; empty-library invite; **exclude folders** from Scan; Last Added
 - Library titles; Bulk Rename; library home + **per-library** thumbnail/filmstrip cache
 
@@ -73,7 +73,7 @@ Distribution stays Developer ID DMG. **No Mac App Store** — do not scope MAS/s
 
 ### Phase 2 — Power User & Organization Features
 - **Done (landed before 1.0, not a 1.0 blocker):** search beyond filename; exclude folders from Scan; Bulk Rename and other multi-select batch actions
-- **Location Relink (MVP on `feat/location-relink`):** whole-tree Location A → B remap for Missing; preview + Apply + Undo; no re-import
+- **Repair Links (MVP on `feat/location-relink`):** whole-tree Location A → B remap for Missing; preview + Repair + Undo; no re-import
 - **Still Phase 2 (not required for 1.0):** auto-import / watch folders; auto-tagging ideas
 - **Notes:** do **not** add a built-in notes field. Users who want one create a custom **Text** field (multiline). That type already sorts, filters, searches, and exports.
 

@@ -5,7 +5,7 @@ import AppKit
 ///
 /// 1. Old folder from catalog paths (never a vanished-folder filesystem picker)
 /// 2. New folder via normal chooser (old folder stays visible) + match preview
-/// 3. Confirm and **Re-link**
+/// 3. Confirm and **Repair**
 struct LocationRelinkSheet: View {
     @Bindable var viewModel: LibraryViewModel
     let presentation: LibraryViewModel.LocationRelinkPresentation
@@ -22,7 +22,7 @@ struct LocationRelinkSheet: View {
             switch self {
             case .oldFolder: return "Old folder"
             case .newFolder: return "New folder"
-            case .confirm: return "Re-link"
+            case .confirm: return "Repair"
             case .done: return "Done"
             }
         }
@@ -60,7 +60,7 @@ struct LocationRelinkSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Relink Location")
+            Text("Repair Links")
                 .font(.title2.weight(.semibold))
 
             if step != .done {
@@ -244,11 +244,11 @@ struct LocationRelinkSheet: View {
         }
     }
 
-    // MARK: - Step 3: Confirm / Re-link
+    // MARK: - Step 3: Confirm / Repair
 
     private var confirmStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(isApplying ? "Re-linking…" : "Confirm re-link")
+            Text(isApplying ? "Repairing…" : "Confirm repair")
                 .font(.headline)
             Text("This updates library paths only — files stay where they are. Ratings, collections, and tags are kept. You can undo afterward.")
                 .font(.callout)
@@ -273,7 +273,7 @@ struct LocationRelinkSheet: View {
             if isApplying {
                 relinkProgressSection
             } else {
-                Text("\(reconnectableCount) clip\(reconnectableCount == 1 ? "" : "s") will be re-linked.")
+                Text("\(reconnectableCount) clip\(reconnectableCount == 1 ? "" : "s") will be repaired.")
                     .font(.subheadline.weight(.medium))
             }
         }
@@ -296,7 +296,7 @@ struct LocationRelinkSheet: View {
             } else {
                 ProgressView()
                     .progressViewStyle(.linear)
-                Text("Re-linking…")
+                Text("Repairing…")
                     .font(.caption)
                     .foregroundStyle(Color.appTextSecondary)
             }
@@ -307,13 +307,13 @@ struct LocationRelinkSheet: View {
     private var doneStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(
-                "Re-linked \(appliedCount) clip\(appliedCount == 1 ? "" : "s").",
+                "Repaired \(appliedCount) clip\(appliedCount == 1 ? "" : "s").",
                 systemImage: "checkmark.circle.fill"
             )
             .font(.title3.weight(.semibold))
             .foregroundStyle(Color.appTextPrimary)
 
-            Text("Use Edit → Undo Relink Location if you need to reverse this.")
+            Text("Use Edit → Undo Repair Links if you need to reverse this.")
                 .foregroundStyle(Color.appTextSecondary)
 
             labeledPathCard(label: "From", path: oldRoot, detail: nil)
@@ -347,7 +347,7 @@ struct LocationRelinkSheet: View {
 
     private func summaryRow(_ preview: LocationRelink.Preview) -> some View {
         HStack(spacing: 16) {
-            Label("\(preview.reconnectCount) reconnect", systemImage: "link")
+            Label("\(preview.reconnectCount) ready", systemImage: "link")
             Label("\(preview.needsAttentionCount) need attention", systemImage: "exclamationmark.triangle")
             Label("\(preview.stillMissingCount) still missing", systemImage: "questionmark.circle")
             Spacer()
@@ -437,7 +437,7 @@ struct LocationRelinkSheet: View {
                 }
                 .disabled(isApplying)
                 Spacer()
-                Button("Re-link") {
+                Button("Repair") {
                     Task { await runRelink() }
                 }
                 .keyboardShortcut(.defaultAction)

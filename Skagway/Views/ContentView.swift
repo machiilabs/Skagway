@@ -583,7 +583,7 @@ private struct LibraryContentView: View {
             .help("Drag to resize the filters drawer")
     }
 
-    /// Quiet repair cue when browsing Missing — never auto-forces Relink (offline ≠ broken).
+    /// Quiet repair cue when browsing Missing — never auto-forces Repair Links (offline ≠ broken).
     private var missingLibraryRepairCue: some View {
         HStack(spacing: 10) {
             Image(systemName: "folder.badge.questionmark")
@@ -591,12 +591,12 @@ private struct LibraryContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Library folder missing")
                     .font(.subheadline.weight(.medium))
-                Text("If you moved an entire folder tree, relink the location once — ghost clips stay visible until then.")
+                Text("If you moved an entire folder tree, repair the links once — ghost clips stay visible until then.")
                     .font(.caption)
                     .foregroundStyle(Color.appTextSecondary)
             }
             Spacer(minLength: 8)
-            Button("Relink Location…") {
+            Button("Repair Links…") {
                 vm.beginLocationRelink(preferredOldRoot: vm.inferredMissingLibraryRoot)
             }
             .disabled(vm.isApplyingLocationRelink)

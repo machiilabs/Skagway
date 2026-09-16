@@ -821,15 +821,15 @@ final class LibraryViewModel {
 
     /// Non-nil while the Location Relink sheet is presented.
     var locationRelinkPresentation: LocationRelinkPresentation? = nil
-    /// Last successful apply — powers Edit → Undo Relink Location.
+    /// Last successful apply — powers Edit → Undo Repair Links.
     private(set) var locationRelinkUndo: LocationRelinkUndoPayload? = nil
     var isApplyingLocationRelink: Bool = false
-    /// Determinate progress while Re-link is running (`nil` when idle).
+    /// Determinate progress while Repair Links is running (`nil` when idle).
     private(set) var locationRelinkProgress: LocationRelinkApplyProgress? = nil
 
     struct LocationRelinkApplyProgress: Equatable {
         enum Phase: String, Equatable {
-            case updatingPaths = "Updating paths"
+            case updatingPaths = "Repairing paths"
             case updatingFolders = "Updating library folders"
             case movingThumbnails = "Moving thumbnails"
             case updatingLibrary = "Updating library"
@@ -907,12 +907,12 @@ final class LibraryViewModel {
         )
     }
 
-    /// Opens the Relink sheet. Old location is chosen from known library paths — never via NSOpenPanel.
+    /// Opens the Repair Links sheet. Old location is chosen from known library paths — never via NSOpenPanel.
     func beginLocationRelink(preferredOldRoot: String? = nil) {
         Task { @MainActor in
             let candidates = await locationRelinkOldRootCandidates()
             guard !candidates.isEmpty else {
-                reportTransientError("No library folder paths available to relink")
+                reportTransientError("No library folder paths available to repair")
                 return
             }
             let preferred: String?
@@ -935,7 +935,7 @@ final class LibraryViewModel {
         }
     }
 
-    /// Pick the new folder for an in-progress Relink sheet.
+    /// Pick the new folder for an in-progress Repair Links sheet.
     func pickNewLocationForRelink() -> String? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -943,7 +943,7 @@ final class LibraryViewModel {
         panel.allowsMultipleSelection = false
         panel.message = "Select the new folder that replaces the missing library location"
         panel.prompt = "Use as New Location"
-        // Offline/unplugged volumes should not force Relink — only open when the user asks.
+        // Offline/unplugged volumes should not force Repair Links — only open when the user asks.
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         return LocationRelink.normalizeRoot(url.path)
     }
@@ -987,7 +987,7 @@ final class LibraryViewModel {
             return (id, m.newPath)
         }
         guard dbMappings.count == mappings.count else {
-            reportTransientError("Couldn't relink — some clips are missing a library id")
+            reportTransientError("Couldn't repair links — some clips are missing a library id")
             return 0
         }
 
@@ -1008,7 +1008,7 @@ final class LibraryViewModel {
                 await Task.yield()
             }
         } catch {
-            reportTransientError("Couldn't relink location: \(error.localizedDescription)")
+            reportTransientError("Couldn't repair links: \(error.localizedDescription)")
             return 0
         }
 
@@ -1166,7 +1166,7 @@ final class LibraryViewModel {
         )
         await Task.yield()
 
-        let text = "Relinked \(mappings.count) clip\(mappings.count == 1 ? "" : "s")"
+        let text = "Repaired \(mappings.count) clip\(mappings.count == 1 ? "" : "s")"
         scanProgress = text
         Task {
             try? await Task.sleep(for: .seconds(5))
@@ -1195,7 +1195,7 @@ final class LibraryViewModel {
                 newRoot: payload.oldRoot
             )
         } catch {
-            reportTransientError("Couldn't undo relink: \(error.localizedDescription)")
+            reportTransientError("Couldn't undo repair: \(error.localizedDescription)")
             return 0
         }
 
@@ -1227,7 +1227,7 @@ final class LibraryViewModel {
         let count = payload.appliedCount
         locationRelinkUndo = nil
         await refreshMissingCount()
-        let text = "Undid relink (\(count) clip\(count == 1 ? "" : "s"))"
+        let text = "Undid repair (\(count) clip\(count == 1 ? "" : "s"))"
         scanProgress = text
         Task {
             try? await Task.sleep(for: .seconds(5))
