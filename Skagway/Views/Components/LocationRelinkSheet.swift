@@ -1,22 +1,40 @@
 import SwiftUI
 import AppKit
 
-/// Preview + Apply sheet for whole-tree Location A → Location B remapping.
+/// Step-by-step Location A → Location B remapping wizard.
 ///
-/// Old location is chosen from known catalog/data-source paths (never a filesystem picker —
-/// that folder usually no longer exists). New location still uses a normal folder picker.
+/// 1. Old folder from catalog paths (never a vanished-folder filesystem picker)
+/// 2. New folder via normal chooser (old folder stays visible) + match preview
+/// 3. Confirm and **Re-link**
 struct LocationRelinkSheet: View {
     @Bindable var viewModel: LibraryViewModel
     let presentation: LibraryViewModel.LocationRelinkPresentation
 
     @Environment(\.dismiss) private var dismiss
 
+    private enum Step: Int, CaseIterable {
+        case oldFolder = 1
+        case newFolder = 2
+        case confirm = 3
+        case done = 4
+
+        var title: String {
+            switch self {
+            case .oldFolder: return "Old folder"
+            case .newFolder: return "New folder"
+            case .confirm: return "Re-link"
+            case .done: return "Done"
+            }
+        }
+    }
+
+    @State private var step: Step = .oldFolder
     @State private var oldRoot: String = ""
     @State private var newRoot: String = ""
     @State private var oldRootSearch: String = ""
     @State private var preview: LocationRelink.Preview?
     @State private var includeNeedsAttention = false
-    @State private var appliedCount: Int?
+    @State private var appliedCount: Int = 0
 
     private var isApplying: Bool { viewModel.isApplyingLocationRelink }
 
@@ -29,23 +47,45 @@ struct LocationRelinkSheet: View {
         }
     }
 
+    private var selectedOldCandidate: LocationRelink.OldRootCandidate? {
+        presentation.candidates.first {
+            $0.path.caseInsensitiveCompare(oldRoot) == .orderedSame
+        }
+    }
+
+    private var reconnectableCount: Int {
+        guard let preview else { return 0 }
+        return preview.reconnectCount + (includeNeedsAttention ? preview.needsAttentionCount : 0)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("Relink Location")
                 .font(.title2.weight(.semibold))
 
-            Text("Choose the old folder from paths already in your library, then pick the new folder on disk. Relative paths stay the same — ratings, collections, and tags stay put.")
-                .foregroundStyle(Color.appTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let appliedCount {
-                resultsPane(appliedCount)
-            } else {
-                planningPane
+            if step != .done {
+                stepIndicator
             }
+
+            Group {
+                switch step {
+                case .oldFolder:
+                    oldFolderStep
+                case .newFolder:
+                    newFolderStep
+                case .confirm:
+                    confirmStep
+                case .done:
+                    doneStep
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            footerButtons
         }
         .padding(20)
-        .frame(minWidth: 680, minHeight: 520)
+        .frame(minWidth: 700, minHeight: 540)
         .onAppear {
             if let preferred = presentation.preferredOldRoot, !preferred.isEmpty {
                 oldRoot = preferred
@@ -54,19 +94,63 @@ struct LocationRelinkSheet: View {
             }
             if let suggested = presentation.suggestedNewRoot {
                 newRoot = suggested
+                recomputePreview()
             }
-            recompute()
         }
     }
 
-    private var planningPane: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Old location")
-                .font(.headline)
+    // MARK: - Step indicator
 
-            Text("From your library catalog — not from browsing the disk.")
-                .font(.caption)
+    private var stepIndicator: some View {
+        HStack(spacing: 0) {
+            ForEach([Step.oldFolder, .newFolder, .confirm], id: \.rawValue) { s in
+                if s.rawValue > 1 {
+                    Rectangle()
+                        .fill(step.rawValue >= s.rawValue ? Color.appAccent : Color.appTextTertiary.opacity(0.35))
+                        .frame(height: 2)
+                        .frame(maxWidth: 28)
+                        .padding(.horizontal, 6)
+                }
+                stepChip(s)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func stepChip(_ s: Step) -> some View {
+        let active = step == s
+        let completed = step.rawValue > s.rawValue
+        return HStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(active || completed ? Color.appAccent : Color.appTextTertiary.opacity(0.25))
+                    .frame(width: 22, height: 22)
+                if completed {
+                    Image(systemName: "checkmark")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                } else {
+                    Text("\(s.rawValue)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(active || completed ? .white : Color.appTextSecondary)
+                }
+            }
+            Text(s.title)
+                .font(.subheadline.weight(active ? .semibold : .regular))
+                .foregroundStyle(active ? Color.appTextPrimary : Color.appTextSecondary)
+        }
+    }
+
+    // MARK: - Step 1: Old folder
+
+    private var oldFolderStep: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Choose the old folder")
+                .font(.headline)
+            Text("Pick the location your library still points at. These come from your catalog and data sources — not from browsing a folder that may no longer exist.")
+                .font(.callout)
                 .foregroundStyle(Color.appTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             if presentation.candidates.count > 8 {
                 TextField("Search folders…", text: $oldRootSearch)
@@ -74,60 +158,18 @@ struct LocationRelinkSheet: View {
             }
 
             oldRootList
-                .frame(minHeight: 160, maxHeight: 220)
-
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("New location")
-                    .frame(width: 100, alignment: .leading)
-                    .foregroundStyle(Color.appTextSecondary)
-                Text(newRoot.isEmpty ? "Choose a folder…" : newRoot)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Choose…") { pickNewRoot() }
-                    .disabled(isApplying || oldRoot.isEmpty)
-            }
-
-            if let preview {
-                summaryRow(preview)
-
-                Toggle("Include flagged matches (size mismatch or path collision)", isOn: $includeNeedsAttention)
-                    .disabled(preview.needsAttentionCount == 0)
-
-                candidateList(preview)
-            } else if !oldRoot.isEmpty, !newRoot.isEmpty {
-                Text("No clips under the old location.")
-                    .foregroundStyle(Color.appTextSecondary)
-            }
-
-            Spacer(minLength: 0)
-
-            HStack {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                    .disabled(isApplying)
-                Spacer()
-                Button("Apply Relink") {
-                    Task { await apply() }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(applyDisabled)
-            }
+                .frame(minHeight: 240, maxHeight: .infinity)
         }
     }
 
     private var oldRootList: some View {
         List(selection: Binding(
             get: { oldRoot.isEmpty ? nil : oldRoot },
-            set: { newValue in
-                oldRoot = newValue ?? ""
-                recompute()
-            }
+            set: { oldRoot = $0 ?? "" }
         )) {
             if filteredOldRoots.isEmpty {
                 Text(oldRootSearch.isEmpty ? "No known library folders." : "No folders match “\(oldRootSearch)”.")
                     .foregroundStyle(Color.appTextSecondary)
-                    .tag("")
             } else {
                 ForEach(filteredOldRoots) { candidate in
                     VStack(alignment: .leading, spacing: 2) {
@@ -147,25 +189,131 @@ struct LocationRelinkSheet: View {
         .disabled(isApplying)
     }
 
-    private func resultsPane(_ count: Int) -> some View {
+    // MARK: - Step 2: New folder
+
+    private var newFolderStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Relinked \(count) clip\(count == 1 ? "" : "s").")
+            Text("Choose the new folder")
                 .font(.headline)
-            Text("Use Edit → Undo Relink Location if you need to reverse this.")
+            Text("Select the folder on disk that replaces the old location. Relative paths under it should match.")
+                .font(.callout)
                 .foregroundStyle(Color.appTextSecondary)
-            Spacer(minLength: 0)
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
+                .fixedSize(horizontal: false, vertical: true)
+
+            labeledPathCard(
+                label: "Remapping from",
+                path: oldRoot,
+                detail: selectedOldCandidate.map { "\($0.videoCount) clip\($0.videoCount == 1 ? "" : "s") in catalog" }
+            )
+
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("New folder")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.appTextSecondary)
+                    Text(newRoot.isEmpty ? "No folder selected yet" : newRoot)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .foregroundStyle(newRoot.isEmpty ? Color.appTextTertiary : Color.appTextPrimary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button(newRoot.isEmpty ? "Choose Folder…" : "Change…") {
+                    pickNewRoot()
+                }
+                .disabled(isApplying)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.appTextSecondary.opacity(0.08))
+            )
+
+            if let preview {
+                summaryRow(preview)
+                candidateList(preview)
+                    .frame(minHeight: 140, maxHeight: .infinity)
+
+                if preview.needsAttentionCount > 0 {
+                    Toggle("Include flagged matches (size mismatch or path collision)", isOn: $includeNeedsAttention)
+                }
+            } else if !newRoot.isEmpty {
+                Text("No clips under the old folder to rematch.")
+                    .foregroundStyle(Color.appTextSecondary)
             }
         }
     }
 
-    private var applyDisabled: Bool {
-        guard let preview, !isApplying else { return true }
-        let n = preview.reconnectCount + (includeNeedsAttention ? preview.needsAttentionCount : 0)
-        return n == 0 || newRoot.isEmpty || oldRoot.isEmpty
+    // MARK: - Step 3: Confirm / Re-link
+
+    private var confirmStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Confirm re-link")
+                .font(.headline)
+            Text("This updates library paths only — files stay where they are. Ratings, collections, and tags are kept. You can undo afterward.")
+                .font(.callout)
+                .foregroundStyle(Color.appTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            labeledPathCard(label: "Old folder", path: oldRoot, detail: nil)
+            Image(systemName: "arrow.down")
+                .foregroundStyle(Color.appTextSecondary)
+                .frame(maxWidth: .infinity)
+            labeledPathCard(label: "New folder", path: newRoot, detail: nil)
+
+            if let preview {
+                summaryRow(preview)
+                if includeNeedsAttention && preview.needsAttentionCount > 0 {
+                    Text("Flagged matches will be included.")
+                        .font(.caption)
+                        .foregroundStyle(Color.appTextSecondary)
+                }
+            }
+
+            Text("\(reconnectableCount) clip\(reconnectableCount == 1 ? "" : "s") will be re-linked.")
+                .font(.subheadline.weight(.medium))
+        }
+    }
+
+    private var doneStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(
+                "Re-linked \(appliedCount) clip\(appliedCount == 1 ? "" : "s").",
+                systemImage: "checkmark.circle.fill"
+            )
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(Color.appTextPrimary)
+
+            Text("Use Edit → Undo Relink Location if you need to reverse this.")
+                .foregroundStyle(Color.appTextSecondary)
+
+            labeledPathCard(label: "From", path: oldRoot, detail: nil)
+            labeledPathCard(label: "To", path: newRoot, detail: nil)
+        }
+    }
+
+    // MARK: - Shared pieces
+
+    private func labeledPathCard(label: String, path: String, detail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.appTextSecondary)
+            Text(path)
+                .lineLimit(3)
+                .truncationMode(.middle)
+            if let detail {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(Color.appTextTertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.appTextSecondary.opacity(0.08))
+        )
     }
 
     private func summaryRow(_ preview: LocationRelink.Preview) -> some View {
@@ -206,7 +354,6 @@ struct LocationRelinkSheet: View {
             }
         }
         .listStyle(.inset(alternatesRowBackgrounds: true))
-        .frame(minHeight: 140)
     }
 
     private func icon(for kind: LocationRelink.MatchKind) -> String {
@@ -225,14 +372,66 @@ struct LocationRelinkSheet: View {
         }
     }
 
-    private func pickNewRoot() {
-        if let path = viewModel.pickNewLocationForRelink() {
-            newRoot = path
-            recompute()
+    // MARK: - Footer
+
+    private var footerButtons: some View {
+        HStack {
+            switch step {
+            case .oldFolder:
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Continue") {
+                    newRoot = ""
+                    preview = nil
+                    includeNeedsAttention = false
+                    step = .newFolder
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(oldRoot.isEmpty)
+
+            case .newFolder:
+                Button("Back") {
+                    step = .oldFolder
+                }
+                .disabled(isApplying)
+                Spacer()
+                Button("Continue") {
+                    step = .confirm
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(newRoot.isEmpty || reconnectableCount == 0 || isApplying)
+
+            case .confirm:
+                Button("Back") {
+                    step = .newFolder
+                }
+                .disabled(isApplying)
+                Spacer()
+                Button("Re-link") {
+                    Task { await runRelink() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(reconnectableCount == 0 || isApplying)
+
+            case .done:
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
         }
     }
 
-    private func recompute() {
+    // MARK: - Actions
+
+    private func pickNewRoot() {
+        if let path = viewModel.pickNewLocationForRelink() {
+            newRoot = path
+            recomputePreview()
+        }
+    }
+
+    private func recomputePreview() {
         guard !oldRoot.isEmpty, !newRoot.isEmpty else {
             preview = nil
             return
@@ -240,7 +439,7 @@ struct LocationRelinkSheet: View {
         preview = viewModel.buildLocationRelinkPreview(oldRoot: oldRoot, newRoot: newRoot)
     }
 
-    private func apply() async {
+    private func runRelink() async {
         guard let preview else { return }
         let count = await viewModel.applyLocationRelink(
             preview: preview,
@@ -248,6 +447,7 @@ struct LocationRelinkSheet: View {
         )
         if count > 0 {
             appliedCount = count
+            step = .done
         }
     }
 }
