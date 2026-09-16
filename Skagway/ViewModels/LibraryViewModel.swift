@@ -1205,6 +1205,13 @@ final class LibraryViewModel {
             },
             appliedCount: mappings.count
         )
+        // Refresh grid/list immediately — don't wait for the missing scan. Cache files already
+        // moved off the old hashes; filtered rows must use new paths + busted thumbnailPath now.
+        if !changedPairs.isEmpty {
+            filmstripRefreshId &+= 1
+            filteredVideosVersion &+= 1
+        }
+        recomputeFilteredVideos()
         locationRelinkProgress = LocationRelinkApplyProgress(
             phase: .updatingLibrary, current: 1, total: 1
         )
@@ -1327,12 +1334,15 @@ final class LibraryViewModel {
         if !changedUndo.isEmpty {
             PlaybackPositionStore.remapPaths(changedUndo)
             notifyResumePositionsChanged()
+            filmstripRefreshId &+= 1
+            filteredVideosVersion &+= 1
         }
         recentlyAppliedPaths = Set(recentlyAppliedPaths.map { pathMap[$0] ?? $0 })
         lastAddedPaths = Set(lastAddedPaths.map { pathMap[$0] ?? $0 })
 
         let count = payload.appliedCount
         locationRelinkUndo = nil
+        recomputeFilteredVideos()
         await refreshMissingCount()
         let text = "Undid repair (\(count) clip\(count == 1 ? "" : "s"))"
         scanProgress = text

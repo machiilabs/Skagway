@@ -1108,15 +1108,14 @@ final class ThumbnailService: @unchecked Sendable {
         try? fm.moveItem(at: source, to: dest)
     }
 
-    /// Remaps a stored `thumbnailPath` onto the cache URL for `newFilePath`, keeping any `#version` suffix.
+    /// Remaps a stored `thumbnailPath` onto the cache URL for `newFilePath`.
+    /// Always appends a fresh `#version` so grid/list `.task(id:)` / `cacheVersion` reload
+    /// after Repair Links (disk migrate alone does not remount cards while filtered rows lag).
     /// Returns `nil` when there was no stored path (do not invent one).
     func remappedThumbnailPath(_ existing: String?, newFilePath: String) -> String? {
         guard let existing, !existing.isEmpty else { return nil }
         let newBare = thumbnailURL(for: newFilePath).path
-        if let hashIdx = existing.firstIndex(of: "#") {
-            return newBare + String(existing[hashIdx...])
-        }
-        return newBare
+        return "\(newBare)#\(Date().timeIntervalSince1970)"
     }
 
     /// Batch thumb/filmstrip/detail cache remaps for Location Relink.
@@ -1163,25 +1162,30 @@ final class ThumbnailService: @unchecked Sendable {
                 fm: fm
             )
 
+            // Drop stale memory for both keys, then warm from migrated disk so UI
+            // loadThumbnail / detailPreview don't keep a pre-remap auto-frame.
             let oldKey = pair.from as NSString
             let newKey = pair.to as NSString
-            if let image = memoryCache.object(forKey: oldKey) {
+            memoryCache.removeObject(forKey: oldKey)
+            memoryCache.removeObject(forKey: newKey)
+            if let image = NSImage(contentsOf: thumbnailURL(for: pair.to)) {
                 memoryCache.setObject(image, forKey: newKey)
-                memoryCache.removeObject(forKey: oldKey)
             }
             let oldFsKey = filmstripMemoryKey(for: pair.from)
             let newFsKey = filmstripMemoryKey(for: pair.to)
-            if let image = memoryCache.object(forKey: oldFsKey) {
+            memoryCache.removeObject(forKey: oldFsKey)
+            memoryCache.removeObject(forKey: newFsKey)
+            if let image = NSImage(contentsOf: filmstripURL(for: pair.to)) {
                 memoryCache.setObject(image, forKey: newFsKey)
-                memoryCache.removeObject(forKey: oldFsKey)
             }
             memoryCache.removeObject(forKey: (pair.from + Self.detailPreviewCachePrefix) as NSString)
             for edge in Self.detailPreviewLongEdgeChoices {
                 let oldDetailKey = detailPreviewMemoryKey(filePath: pair.from, longEdge: edge)
                 let newDetailKey = detailPreviewMemoryKey(filePath: pair.to, longEdge: edge)
-                if let image = memoryCache.object(forKey: oldDetailKey) {
+                memoryCache.removeObject(forKey: oldDetailKey)
+                memoryCache.removeObject(forKey: newDetailKey)
+                if let image = NSImage(contentsOf: detailPreviewURL(for: pair.to, longEdge: edge)) {
                     memoryCache.setObject(image, forKey: newDetailKey)
-                    memoryCache.removeObject(forKey: oldDetailKey)
                 }
             }
 

@@ -58,13 +58,16 @@ final class ThumbnailCacheMigrateTests: XCTestCase {
         XCTAssertEqual(migrated, custom)
     }
 
-    func testRemappedThumbnailPathPreservesVersionSuffix() {
+    func testRemappedThumbnailPathBustsUIVersion() {
         let oldPath = "/old/Lib/a.mp4"
         let newPath = "/new/Lib/a.mp4"
         let oldThumb = service.thumbnailURL(for: oldPath).path
         let versioned = "\(oldThumb)#1234.5"
         let remapped = service.remappedThumbnailPath(versioned, newFilePath: newPath)
-        XCTAssertEqual(remapped, "\(service.thumbnailURL(for: newPath).path)#1234.5")
+        let newBare = service.thumbnailURL(for: newPath).path
+        XCTAssertNotNil(remapped)
+        XCTAssertTrue(remapped!.hasPrefix(newBare + "#"))
+        XCTAssertFalse(remapped!.hasSuffix("#1234.5"), "must mint a fresh #version for card .task(id:) reload")
         XCTAssertNil(service.remappedThumbnailPath(nil, newFilePath: newPath))
     }
 }
