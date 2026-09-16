@@ -34,6 +34,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 - **Location Relink (MVP)** — Whole-tree Location A → Location B remap for missing media. File → Relink Location…, quiet “Library folder missing” cue on Missing, preview (reconnect / need attention / still missing), one Apply, Undo Relink Location. Keeps ratings, collections, tags; no re-import or ffmpeg. Soft size checks flag conflicts only.
 - **Relink old location picker** — Old folder is chosen from known library paths (data sources + folder prefixes of stored video paths), not a filesystem Open panel for a path that no longer exists. New location still uses a normal folder picker.
 - **Relink wizard** — Explicit steps: (1) choose old folder from catalog → Continue, (2) choose new folder with old path visible + match preview → Continue, (3) confirm and **Re-link**. Undo unchanged.
+- **Relink progress** — Step 3 shows a determinate horizontal progress bar (“Re-linking N of M…”) while path remaps run. Same old/new folder remains allowed.
 
 ## 1.2.0 (build 1082) - 2026-09-15
 

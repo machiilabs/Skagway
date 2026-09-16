@@ -824,6 +824,22 @@ final class LibraryViewModel {
     /// Last successful apply — powers Edit → Undo Relink Location.
     private(set) var locationRelinkUndo: LocationRelinkUndoPayload? = nil
     var isApplyingLocationRelink: Bool = false
+    /// Determinate progress while Re-link / undo is writing path remaps (`nil` when idle).
+    private(set) var locationRelinkProgress: LocationRelinkApplyProgress? = nil
+
+    struct LocationRelinkApplyProgress: Equatable {
+        var current: Int
+        var total: Int
+
+        var fraction: Double {
+            guard total > 0 else { return 0 }
+            return min(1, Double(current) / Double(total))
+        }
+
+        var statusText: String {
+            "Re-linking \(current) of \(total)…"
+        }
+    }
 
     struct LocationRelinkPresentation: Identifiable, Equatable {
         let id = UUID()
@@ -934,7 +950,8 @@ final class LibraryViewModel {
         )
     }
 
-    /// Apply reconnect (and optionally flagged) mappings in one library transaction.
+    /// Apply reconnect (and optionally flagged) mappings. Progress is reported per clip batch.
+    /// Identical old/new roots are allowed (intentional same-folder testing).
     @discardableResult
     func applyLocationRelink(
         preview: LocationRelink.Preview,
@@ -946,7 +963,12 @@ final class LibraryViewModel {
         )
         guard !mappings.isEmpty else { return 0 }
         isApplyingLocationRelink = true
-        defer { isApplyingLocationRelink = false }
+        let total = mappings.count
+        locationRelinkProgress = LocationRelinkApplyProgress(current: 0, total: total)
+        defer {
+            isApplyingLocationRelink = false
+            locationRelinkProgress = nil
+        }
 
         let dbMappings: [(videoId: Int64, newFilePath: String)] = mappings.compactMap { m in
             guard let id = m.videoDatabaseId else { return nil }
@@ -958,7 +980,16 @@ final class LibraryViewModel {
         }
 
         do {
-            try await videoRepo.relinkFilePaths(mappings: dbMappings)
+            // Chunked writes so the Re-link step can show determinate clip progress.
+            let chunkSize = 40
+            var done = 0
+            while done < dbMappings.count {
+                let end = min(done + chunkSize, dbMappings.count)
+                try await videoRepo.relinkFilePaths(mappings: Array(dbMappings[done..<end]))
+                done = end
+                locationRelinkProgress = LocationRelinkApplyProgress(current: done, total: total)
+                await Task.yield()
+            }
             _ = try? await dataSourceRepo.remapPathsUnder(
                 oldRoot: preview.oldRoot,
                 newRoot: preview.newRoot
@@ -1003,6 +1034,7 @@ final class LibraryViewModel {
             appliedCount: mappings.count
         )
 
+        locationRelinkProgress = LocationRelinkApplyProgress(current: total, total: total)
         await refreshMissingCount()
         let text = "Relinked \(mappings.count) clip\(mappings.count == 1 ? "" : "s")"
         scanProgress = text

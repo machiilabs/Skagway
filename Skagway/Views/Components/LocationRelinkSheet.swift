@@ -248,7 +248,7 @@ struct LocationRelinkSheet: View {
 
     private var confirmStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Confirm re-link")
+            Text(isApplying ? "Re-linking…" : "Confirm re-link")
                 .font(.headline)
             Text("This updates library paths only — files stay where they are. Ratings, collections, and tags are kept. You can undo afterward.")
                 .font(.callout)
@@ -270,9 +270,33 @@ struct LocationRelinkSheet: View {
                 }
             }
 
-            Text("\(reconnectableCount) clip\(reconnectableCount == 1 ? "" : "s") will be re-linked.")
-                .font(.subheadline.weight(.medium))
+            if isApplying {
+                relinkProgressSection
+            } else {
+                Text("\(reconnectableCount) clip\(reconnectableCount == 1 ? "" : "s") will be re-linked.")
+                    .font(.subheadline.weight(.medium))
+            }
         }
+    }
+
+    private var relinkProgressSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let progress = viewModel.locationRelinkProgress, progress.total > 0 {
+                ProgressView(value: progress.fraction)
+                    .progressViewStyle(.linear)
+                Text(progress.statusText)
+                    .font(.caption)
+                    .foregroundStyle(Color.appTextSecondary)
+                    .monospacedDigit()
+            } else {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                Text("Re-linking…")
+                    .font(.caption)
+                    .foregroundStyle(Color.appTextSecondary)
+            }
+        }
+        .padding(.top, 4)
     }
 
     private var doneStep: some View {
