@@ -886,6 +886,23 @@ final class LibraryViewModel {
         )
     }
 
+    /// True after focusing a missing clip — shows the Library folder missing banner outside the Missing filter.
+    /// Idempotent: stays on across repeated missing clicks (no flicker / re-stack).
+    private(set) var showRepairLinksBannerFromMissingClick: Bool = false
+    /// Preferred old Location for Repair Links when opened from the banner (click or Missing filter).
+    private(set) var repairLinksBannerPreferredRoot: String? = nil
+
+    /// Banner visibility: Missing filter with misses, or a missing clip was focused.
+    var shouldShowLibraryFolderMissingBanner: Bool {
+        showRepairLinksBannerFromMissingClick
+            || (sidebarFilter == .missing && missingCountScanned && !missingVideoIds.isEmpty)
+    }
+
+    /// Preferred root for the banner’s Repair Links… button.
+    var libraryFolderMissingBannerPreferredRoot: String? {
+        repairLinksBannerPreferredRoot ?? inferredMissingLibraryRoot
+    }
+
     /// Async variant that also considers Data Source roots.
     func resolveSharedMissingRoot() async -> String? {
         if !missingCountScanned && missingVideoIds.isEmpty {
@@ -1168,6 +1185,8 @@ final class LibraryViewModel {
 
         let text = "Repaired \(mappings.count) clip\(mappings.count == 1 ? "" : "s")"
         scanProgress = text
+        showRepairLinksBannerFromMissingClick = false
+        repairLinksBannerPreferredRoot = nil
         Task {
             try? await Task.sleep(for: .seconds(5))
             if self.scanProgress == text { self.scanProgress = "" }
@@ -4226,10 +4245,62 @@ final class LibraryViewModel {
         focusedVideoId = id
         lastSelectedVideoId = id
         if scroll { scrollToVideoId = id }
+        noteMissingClipFocusIfNeeded(path: id)
         if retargetIfPlaying, isPlayingInline, previous != id,
            let video = filteredVideo(forPath: id) {
             retargetPlayback(to: video)
         }
+    }
+
+    /// Show the Library folder missing banner when the focused clip’s file is gone.
+    /// Does not auto-open Repair Links (offline ≠ force repair).
+    private func noteMissingClipFocusIfNeeded(path: String) {
+        let knownMissing = missingVideoIds.contains(path)
+        let missingOnDisk = !FileManager.default.fileExists(atPath: path)
+        guard knownMissing || missingOnDisk else {
+            // Present file — clear click-triggered banner; Missing-filter case still uses its own rule.
+            if showRepairLinksBannerFromMissingClick {
+                showRepairLinksBannerFromMissingClick = false
+            }
+            return
+        }
+
+        if missingOnDisk, !missingVideoIds.contains(path) {
+            missingVideoIds.insert(path)
+            missingCountScanned = true
+            UserDefaults.standard.set(true, forKey: Self.missingCountScannedKey)
+            UserDefaults.standard.set(Array(missingVideoIds), forKey: Self.missingVideoIdsKey)
+            libraryCounts = LibraryCounts(
+                all: libraryCounts.all,
+                recentlyAdded: libraryCounts.recentlyAdded,
+                recentlyPlayed: libraryCounts.recentlyPlayed,
+                topRated: libraryCounts.topRated,
+                duplicates: libraryCounts.duplicates,
+                corrupt: libraryCounts.corrupt,
+                missing: missingVideoIds.count,
+                recentlyConverted: libraryCounts.recentlyConverted,
+                recentlyApplied: libraryCounts.recentlyApplied,
+                lastAdded: libraryCounts.lastAdded,
+                byRating: libraryCounts.byRating
+            )
+        }
+
+        // Already visible → keep it (no flicker); still refresh preferred root quietly.
+        showRepairLinksBannerFromMissingClick = true
+        updateRepairLinksBannerPreferredRoot(forMissingPath: path)
+    }
+
+    private func updateRepairLinksBannerPreferredRoot(forMissingPath path: String) {
+        var paths = Array(missingVideoIds)
+        if !paths.contains(path) { paths.append(path) }
+        if let inferred = LocationRelink.inferSharedMissingRoot(missingPaths: paths, dataSourceRoots: []) {
+            repairLinksBannerPreferredRoot = inferred
+            return
+        }
+        let parent = LocationRelink.normalizeRoot(
+            URL(fileURLWithPath: path).deletingLastPathComponent().path
+        )
+        repairLinksBannerPreferredRoot = LocationRelink.isSelectableOldRoot(parent) ? parent : nil
     }
 
     func toggleInCollectedSet(_ id: String) {

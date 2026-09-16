@@ -516,7 +516,7 @@ private struct LibraryContentView: View {
                     .transition(.opacity)
             }
 
-            if vm.sidebarFilter == .missing, vm.libraryCounts.missing > 0 {
+            if vm.shouldShowLibraryFolderMissingBanner {
                 missingLibraryRepairCue
             }
 
@@ -583,7 +583,8 @@ private struct LibraryContentView: View {
             .help("Drag to resize the filters drawer")
     }
 
-    /// Quiet repair cue when browsing Missing — never auto-forces Repair Links (offline ≠ broken).
+    /// Quiet repair cue — Missing filter, or after focusing a clip whose file is gone.
+    /// Never auto-forces Repair Links (offline ≠ broken).
     private var missingLibraryRepairCue: some View {
         HStack(spacing: 10) {
             Image(systemName: "folder.badge.questionmark")
@@ -597,7 +598,7 @@ private struct LibraryContentView: View {
             }
             Spacer(minLength: 8)
             Button("Repair Links…") {
-                vm.beginLocationRelink(preferredOldRoot: vm.inferredMissingLibraryRoot)
+                vm.beginLocationRelink(preferredOldRoot: vm.libraryFolderMissingBannerPreferredRoot)
             }
             .disabled(vm.isApplyingLocationRelink)
         }

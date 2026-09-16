@@ -34,6 +34,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 - **Repair Links (MVP)** — Whole-tree Location A → Location B remap for missing media (formerly Relink). File → **Repair Links…**, quiet “Library folder missing” cue on Missing, three-step wizard, **Repair** action, Undo Repair Links. Keeps ratings, collections, tags; no re-import or ffmpeg. Soft size checks flag conflicts only.
 - **Repair Links old-folder picker** — Old folder chosen from known library paths (data sources + folder prefixes of stored video paths), not a filesystem Open panel for a vanished path. New location still uses a normal folder picker.
 - **Repair Links progress** — Step 3 shows phase labels with determinate counts through the whole job (paths → folders → thumbnails → library → missing check). Thumb migration uses one cache-directory pass; same-path pairs skip renames. Bar reaches 100% only when Done-ready.
+- **Library folder missing banner on click** — Same Repair Links banner also appears when focusing a grid/list clip whose file is not on disk (no duplicate flicker if already visible).
 
 ## 1.2.0 (build 1082) - 2026-09-15
 

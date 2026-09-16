@@ -368,7 +368,7 @@ struct CuratedWallFiltersDrawer: View {
 
             if count > 0 {
                 Button {
-                    viewModel.beginLocationRelink(preferredOldRoot: viewModel.inferredMissingLibraryRoot)
+                    viewModel.beginLocationRelink(preferredOldRoot: viewModel.libraryFolderMissingBannerPreferredRoot)
                 } label: {
                     Image(systemName: "link")
                         .font(.caption2)
