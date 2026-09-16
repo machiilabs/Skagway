@@ -863,9 +863,11 @@ final class LibraryViewModel {
 
     struct LocationRelinkPresentation: Identifiable, Equatable {
         let id = UUID()
-        /// Pre-selected old root when inferred from Missing; user can change in the sheet.
+        /// Preferred / pre-selected old root (may be set before candidates finish loading).
         var preferredOldRoot: String?
         var candidates: [LocationRelink.OldRootCandidate]
+        /// True while the catalog folder list is still building off the main actor.
+        var isLoadingCandidates: Bool
         var suggestedNewRoot: String?
     }
 
@@ -937,26 +939,38 @@ final class LibraryViewModel {
         }.value
     }
 
-    /// True while catalog folder candidates are loading before the Repair Links sheet appears.
+    /// True while catalog folder candidates are loading inside the already-open Repair Links sheet.
     private(set) var isPreparingLocationRelink: Bool = false
 
-    /// Opens the Repair Links sheet. Old location is chosen from known library paths — never via NSOpenPanel.
-    /// Sets `isPreparingLocationRelink` immediately so callers can show a spinner while candidates build.
+    /// Opens the Repair Links sheet immediately, then fills the folder list in the background.
+    /// Never blocks the click on large libraries — the sheet shows “Building folder list…”.
     func beginLocationRelink(preferredOldRoot: String? = nil) {
-        guard !isPreparingLocationRelink, locationRelinkPresentation == nil else { return }
+        guard locationRelinkPresentation == nil else { return }
+        let requestedPreferred: String? = {
+            guard let preferredOldRoot, !preferredOldRoot.isEmpty else { return nil }
+            return LocationRelink.normalizeRoot(preferredOldRoot)
+        }()
+        locationRelinkPresentation = LocationRelinkPresentation(
+            preferredOldRoot: requestedPreferred,
+            candidates: [],
+            isLoadingCandidates: true,
+            suggestedNewRoot: nil
+        )
         isPreparingLocationRelink = true
         Task { @MainActor in
             defer { isPreparingLocationRelink = false }
             let candidates = await locationRelinkOldRootCandidates()
+            guard var presentation = locationRelinkPresentation else { return }
             guard !candidates.isEmpty else {
+                locationRelinkPresentation = nil
                 reportTransientError("No library folder paths available to repair")
                 return
             }
             let preferred: String?
-            if let preferredOldRoot, !preferredOldRoot.isEmpty,
-               candidates.contains(where: { $0.path.caseInsensitiveCompare(LocationRelink.normalizeRoot(preferredOldRoot)) == .orderedSame })
+            if let requestedPreferred,
+               candidates.contains(where: { $0.path.caseInsensitiveCompare(requestedPreferred) == .orderedSame })
             {
-                preferred = LocationRelink.normalizeRoot(preferredOldRoot)
+                preferred = requestedPreferred
             } else if let inferred = await resolveSharedMissingRoot(),
                       candidates.contains(where: { $0.path.caseInsensitiveCompare(inferred) == .orderedSame })
             {
@@ -964,11 +978,10 @@ final class LibraryViewModel {
             } else {
                 preferred = candidates.first?.path
             }
-            locationRelinkPresentation = LocationRelinkPresentation(
-                preferredOldRoot: preferred,
-                candidates: candidates,
-                suggestedNewRoot: nil
-            )
+            presentation.candidates = candidates
+            presentation.preferredOldRoot = preferred
+            presentation.isLoadingCandidates = false
+            locationRelinkPresentation = presentation
         }
     }
 

@@ -827,8 +827,10 @@ private struct LibraryContentView: View {
                 videoCount: presentation.videoCount
             )
         }
-        .sheet(item: $vm.locationRelinkPresentation) { presentation in
-            LocationRelinkSheet(viewModel: vm, presentation: presentation)
+        .sheet(item: $vm.locationRelinkPresentation) { _ in
+            // Read live from the view model — do not snapshot presentation here.
+            // The sheet opens immediately while candidates load in the background.
+            LocationRelinkSheet(viewModel: vm)
         }
         .sheet(item: $vm.metadataApplyUnknownColumnsPrompt) { prompt in
             ApplyMetadataUnknownColumnsSheet(viewModel: vm, prompt: prompt)

@@ -6,9 +6,11 @@ import AppKit
 /// 1. Old folder from catalog paths (never a vanished-folder filesystem picker)
 /// 2. New folder via normal chooser (old folder stays visible) + match preview
 /// 3. Confirm and **Repair**
+///
+/// Reads live from `viewModel.locationRelinkPresentation` so the sheet can open
+/// immediately while the folder catalog finishes loading in the background.
 struct LocationRelinkSheet: View {
     @Bindable var viewModel: LibraryViewModel
-    let presentation: LibraryViewModel.LocationRelinkPresentation
 
     @Environment(\.dismiss) private var dismiss
 
@@ -36,7 +38,18 @@ struct LocationRelinkSheet: View {
     @State private var includeNeedsAttention = false
     @State private var appliedCount: Int = 0
 
+    private var presentation: LibraryViewModel.LocationRelinkPresentation {
+        viewModel.locationRelinkPresentation
+            ?? LibraryViewModel.LocationRelinkPresentation(
+                preferredOldRoot: nil,
+                candidates: [],
+                isLoadingCandidates: true,
+                suggestedNewRoot: nil
+            )
+    }
+
     private var isApplying: Bool { viewModel.isApplyingLocationRelink }
+    private var isLoadingCandidates: Bool { presentation.isLoadingCandidates }
 
     private var filteredOldRoots: [LocationRelink.OldRootCandidate] {
         let q = oldRootSearch.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -87,15 +100,35 @@ struct LocationRelinkSheet: View {
         .padding(20)
         .frame(minWidth: 700, minHeight: 540)
         .onAppear {
-            if let preferred = presentation.preferredOldRoot, !preferred.isEmpty {
-                oldRoot = preferred
-            } else {
-                oldRoot = presentation.candidates.first?.path ?? ""
-            }
+            applyPreferredSelectionIfNeeded()
             if let suggested = presentation.suggestedNewRoot {
                 newRoot = suggested
                 recomputePreview()
             }
+        }
+        .onChange(of: presentation.isLoadingCandidates) { _, loading in
+            if !loading {
+                applyPreferredSelectionIfNeeded()
+            }
+        }
+        .onChange(of: presentation.candidates.count) { _, _ in
+            applyPreferredSelectionIfNeeded()
+        }
+        .onChange(of: presentation.preferredOldRoot) { _, _ in
+            applyPreferredSelectionIfNeeded()
+        }
+    }
+
+    private func applyPreferredSelectionIfNeeded() {
+        guard !isLoadingCandidates else { return }
+        if let preferred = presentation.preferredOldRoot, !preferred.isEmpty,
+           presentation.candidates.contains(where: { $0.path.caseInsensitiveCompare(preferred) == .orderedSame })
+        {
+            oldRoot = preferred
+        } else if oldRoot.isEmpty || !presentation.candidates.contains(where: {
+            $0.path.caseInsensitiveCompare(oldRoot) == .orderedSame
+        }) {
+            oldRoot = presentation.candidates.first?.path ?? ""
         }
     }
 
@@ -152,7 +185,7 @@ struct LocationRelinkSheet: View {
                 .foregroundStyle(Color.appTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if presentation.candidates.count > 8 {
+            if !isLoadingCandidates, presentation.candidates.count > 8 {
                 TextField("Search folders…", text: $oldRootSearch)
                     .textFieldStyle(.roundedBorder)
             }
@@ -168,7 +201,15 @@ struct LocationRelinkSheet: View {
                 get: { oldRoot.isEmpty ? nil : oldRoot },
                 set: { oldRoot = $0 ?? "" }
             )) {
-                if filteredOldRoots.isEmpty {
+                if isLoadingCandidates {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Building folder list…")
+                            .foregroundStyle(Color.appTextSecondary)
+                    }
+                    .padding(.vertical, 8)
+                } else if filteredOldRoots.isEmpty {
                     Text(oldRootSearch.isEmpty ? "No known library folders." : "No folders match “\(oldRootSearch)”.")
                         .foregroundStyle(Color.appTextSecondary)
                 } else {
@@ -197,7 +238,7 @@ struct LocationRelinkSheet: View {
                 }
             }
             .listStyle(.inset(alternatesRowBackgrounds: true))
-            .disabled(isApplying)
+            .disabled(isApplying || isLoadingCandidates)
             .onAppear {
                 scrollSelectedOldRootIntoView(using: proxy)
             }
@@ -207,11 +248,19 @@ struct LocationRelinkSheet: View {
             .onChange(of: oldRootSearch) { _, _ in
                 scrollSelectedOldRootIntoView(using: proxy)
             }
+            .onChange(of: isLoadingCandidates) { _, loading in
+                if !loading {
+                    scrollSelectedOldRootIntoView(using: proxy)
+                }
+            }
+            .onChange(of: presentation.candidates.count) { _, _ in
+                scrollSelectedOldRootIntoView(using: proxy)
+            }
         }
     }
 
     private func scrollSelectedOldRootIntoView(using proxy: ScrollViewProxy) {
-        guard !oldRoot.isEmpty else { return }
+        guard !oldRoot.isEmpty, !isLoadingCandidates else { return }
         // Defer so List finishes laying out before scrolling to the pre-selected row.
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -441,8 +490,12 @@ struct LocationRelinkSheet: View {
         HStack {
             switch step {
             case .oldFolder:
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+                Button("Cancel") {
+                    viewModel.locationRelinkPresentation = nil
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                .disabled(isApplying)
                 Spacer()
                 Button("Continue") {
                     newRoot = ""
@@ -451,7 +504,7 @@ struct LocationRelinkSheet: View {
                     step = .newFolder
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(oldRoot.isEmpty)
+                .disabled(isLoadingCandidates || oldRoot.isEmpty)
 
             case .newFolder:
                 Button("Back") {
@@ -479,8 +532,11 @@ struct LocationRelinkSheet: View {
 
             case .done:
                 Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
+                Button("Done") {
+                    viewModel.locationRelinkPresentation = nil
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
             }
         }
     }
