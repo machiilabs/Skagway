@@ -185,14 +185,36 @@ struct LocationRelinkSheet: View {
                 .foregroundStyle(Color.appTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if !isLoadingCandidates, presentation.candidates.count > 8 {
-                TextField("Search folders…", text: $oldRootSearch)
-                    .textFieldStyle(.roundedBorder)
+            if isLoadingCandidates {
+                buildingFolderListPlaceholder
+                    .frame(minHeight: 240, maxHeight: .infinity)
+            } else {
+                if presentation.candidates.count > 8 {
+                    TextField("Search folders…", text: $oldRootSearch)
+                        .textFieldStyle(.roundedBorder)
+                }
+                oldRootList
+                    .frame(minHeight: 240, maxHeight: .infinity)
             }
-
-            oldRootList
-                .frame(minHeight: 240, maxHeight: .infinity)
         }
+    }
+
+    private var buildingFolderListPlaceholder: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Building folder list…")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(Color.appTextPrimary)
+            ProgressView()
+                .progressViewStyle(.linear)
+            Text("Scanning library folders — Continue unlocks when this finishes.")
+                .font(.caption)
+                .foregroundStyle(Color.appTextSecondary)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Building folder list")
     }
 
     private var oldRootList: some View {
@@ -201,15 +223,7 @@ struct LocationRelinkSheet: View {
                 get: { oldRoot.isEmpty ? nil : oldRoot },
                 set: { oldRoot = $0 ?? "" }
             )) {
-                if isLoadingCandidates {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Building folder list…")
-                            .foregroundStyle(Color.appTextSecondary)
-                    }
-                    .padding(.vertical, 8)
-                } else if filteredOldRoots.isEmpty {
+                if filteredOldRoots.isEmpty {
                     Text(oldRootSearch.isEmpty ? "No known library folders." : "No folders match “\(oldRootSearch)”.")
                         .foregroundStyle(Color.appTextSecondary)
                 } else {
@@ -238,7 +252,7 @@ struct LocationRelinkSheet: View {
                 }
             }
             .listStyle(.inset(alternatesRowBackgrounds: true))
-            .disabled(isApplying || isLoadingCandidates)
+            .disabled(isApplying)
             .onAppear {
                 scrollSelectedOldRootIntoView(using: proxy)
             }
@@ -248,11 +262,6 @@ struct LocationRelinkSheet: View {
             .onChange(of: oldRootSearch) { _, _ in
                 scrollSelectedOldRootIntoView(using: proxy)
             }
-            .onChange(of: isLoadingCandidates) { _, loading in
-                if !loading {
-                    scrollSelectedOldRootIntoView(using: proxy)
-                }
-            }
             .onChange(of: presentation.candidates.count) { _, _ in
                 scrollSelectedOldRootIntoView(using: proxy)
             }
@@ -261,14 +270,15 @@ struct LocationRelinkSheet: View {
 
     private func scrollSelectedOldRootIntoView(using proxy: ScrollViewProxy) {
         guard !oldRoot.isEmpty, !isLoadingCandidates else { return }
-        // Defer so List finishes laying out before scrolling to the pre-selected row.
-        DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo(oldRoot, anchor: .center)
+        // List may not have laid out the pre-selected row yet — retry briefly.
+        let target = oldRoot
+        let delays: [TimeInterval] = [0, 0.05, 0.15, 0.35]
+        for delay in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                withAnimation(delay == 0 ? nil : .easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(target, anchor: .center)
+                }
             }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            proxy.scrollTo(oldRoot, anchor: .center)
         }
     }
 

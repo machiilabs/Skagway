@@ -150,10 +150,11 @@ struct OverlayInlinePlayerView: View {
                     if missingOnDisk {
                         Button {
                             let path = (playback.currentVideo ?? video).filePath
-                            viewModel.noteLibraryFileMissing(path: path)
+                            // Open the sheet first so large libraries never feel frozen on this click.
                             viewModel.beginLocationRelink(
                                 preferredOldRoot: viewModel.libraryFolderMissingBannerPreferredRoot
                             )
+                            viewModel.noteLibraryFileMissing(path: path)
                         } label: {
                             if viewModel.isPreparingLocationRelink {
                                 HStack(spacing: 6) {

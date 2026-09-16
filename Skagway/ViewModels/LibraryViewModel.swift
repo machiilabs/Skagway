@@ -929,8 +929,9 @@ final class LibraryViewModel {
     /// Heavy path-prefix work runs off the main actor so opening Repair Links stays responsive.
     func locationRelinkOldRootCandidates() async -> [LocationRelink.OldRootCandidate] {
         let sources = (try? await dataSourceRepo.fetchAll()) ?? []
-        let videoPaths = videos.map(\.filePath)
         let sourcePaths = sources.map(\.folderPath)
+        // Snapshot paths on the main actor, then leave immediately for the detached collect.
+        let videoPaths = videos.map(\.filePath)
         return await Task.detached(priority: .userInitiated) {
             LocationRelink.collectOldRootCandidates(
                 videoPaths: videoPaths,
@@ -950,6 +951,7 @@ final class LibraryViewModel {
             guard let preferredOldRoot, !preferredOldRoot.isEmpty else { return nil }
             return LocationRelink.normalizeRoot(preferredOldRoot)
         }()
+        // Present first with loading UI — do not wait for the catalog.
         locationRelinkPresentation = LocationRelinkPresentation(
             preferredOldRoot: requestedPreferred,
             candidates: [],
@@ -959,6 +961,9 @@ final class LibraryViewModel {
         isPreparingLocationRelink = true
         Task { @MainActor in
             defer { isPreparingLocationRelink = false }
+            // Let SwiftUI present + paint the sheet before any catalog MainActor work.
+            await Task.yield()
+            await Task.yield()
             let candidates = await locationRelinkOldRootCandidates()
             guard var presentation = locationRelinkPresentation else { return }
             guard !candidates.isEmpty else {
