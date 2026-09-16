@@ -31,7 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
-- **Find missing file…** — Missing-folder banner button opens an `NSOpenPanel` for the orphan’s video file (not the Repair Links wizard). Parent of the orphan → parent of the located file remaps all clips under that folder via relative paths (basename must match); reuses Repair Links apply (DB, thumbs/storyboards, progress, Undo). File → **Repair Links…** stays the whole-Location wizard.
+- **Find missing folder…** — Missing-folder banner opens a **folder** sheet (`beginSheetModal`) for the orphan’s parent location (not a file hunt, not the Repair Links wizard). Chosen folder remaps all clips under the missing parent via relative paths / basename siblings; reuses Repair Links apply (DB, thumbs/storyboards, progress, Undo). File → **Repair Links…** stays the whole-Location wizard.
 - **Fix: Find missing file dialog hang** — Present the file panel synchronously from the banner click (same pattern as Repair Links’ folder picker). Calling `NSOpenPanel.runModal()` from `Task { await … }` on the MainActor deadlocked AppKit so the dialog froze.
 - **Fix: Find missing file hang (1110 follow-up)** — Sheet-modal open panel on the key window (deferred past the SwiftUI click turn); skip pre-panel `fileExists` (offline/NAS stalls); extension UTTypes instead of broad `.movie`; build remap preview off the main actor after OK.
 - **Storyboard View vertical density** — Reclaims letterbox chrome and gutters so more rows fit: collage height follows the 960×360 aspect (was a fixed 280pt frame), tighter row/column spacing (26→12/16), compact card padding and title scrim. Frame pixels stay width-driven — no shrink for density.

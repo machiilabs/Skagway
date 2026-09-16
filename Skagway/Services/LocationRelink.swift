@@ -376,38 +376,28 @@ enum LocationRelink {
         return join(root: newRoot, relative: rel)
     }
 
-    // MARK: - Find missing file (single orphan → parent folder remap)
+    // MARK: - Find missing folder (orphan → parent folder remap)
 
-    enum FindMissingFileRootsError: Error, Equatable {
-        case basenameMismatch(expected: String, found: String)
+    enum FindMissingFolderRootsError: Error, Equatable {
         case emptyPath
     }
 
-    /// Derive Location A/B roots from an orphan library path + the file the user located on disk.
+    /// Derive Location A/B roots from an orphan library path + the folder the user located on disk.
     ///
-    /// Requires matching basenames. Remap scope is the orphan’s parent folder → selected file’s
-    /// parent (`oldRoot/rel` → `newRoot/rel`) — never map every clip onto the single selected path.
-    static func rootsFromLocatedFile(
+    /// Remap scope is the orphan’s parent folder → the chosen folder (`oldRoot/rel` → `newRoot/rel`).
+    /// Siblings rematch by basename under that folder; nested clips keep relative structure.
+    static func rootsFromLocatedFolder(
         orphanPath: String,
-        locatedPath: String
-    ) -> Result<(oldRoot: String, newRoot: String), FindMissingFileRootsError> {
+        locatedFolder: String
+    ) -> Result<(oldRoot: String, newRoot: String), FindMissingFolderRootsError> {
         let orphan = normalizeRoot(orphanPath)
-        let located = normalizeRoot(locatedPath)
-        guard !orphan.isEmpty, !located.isEmpty else { return .failure(.emptyPath) }
-
-        let expectedName = URL(fileURLWithPath: orphan).lastPathComponent
-        let foundName = URL(fileURLWithPath: located).lastPathComponent
-        guard expectedName.caseInsensitiveCompare(foundName) == .orderedSame else {
-            return .failure(.basenameMismatch(expected: expectedName, found: foundName))
-        }
+        let folder = normalizeRoot(locatedFolder)
+        guard !orphan.isEmpty, !folder.isEmpty else { return .failure(.emptyPath) }
 
         let oldRoot = normalizeRoot(
             URL(fileURLWithPath: orphan).deletingLastPathComponent().path
         )
-        let newRoot = normalizeRoot(
-            URL(fileURLWithPath: located).deletingLastPathComponent().path
-        )
-        guard !oldRoot.isEmpty, !newRoot.isEmpty else { return .failure(.emptyPath) }
-        return .success((oldRoot: oldRoot, newRoot: newRoot))
+        guard !oldRoot.isEmpty else { return .failure(.emptyPath) }
+        return .success((oldRoot: oldRoot, newRoot: folder))
     }
 }

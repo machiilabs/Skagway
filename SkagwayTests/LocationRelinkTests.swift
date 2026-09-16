@@ -200,10 +200,10 @@ final class LocationRelinkTests: XCTestCase {
         XCTAssertTrue(LocationRelink.isSelectableOldRoot("/Users/sam/Films"))
     }
 
-    func testRootsFromLocatedFileUsesParentsAndRequiresBasename() {
-        let ok = LocationRelink.rootsFromLocatedFile(
+    func testRootsFromLocatedFolderUsesOrphanParentAndChosenFolder() {
+        let ok = LocationRelink.rootsFromLocatedFolder(
             orphanPath: "/Volumes/Old/Shows/S1/ep1.mp4",
-            locatedPath: "/Volumes/New/Archive/Shows/S1/ep1.mp4"
+            locatedFolder: "/Volumes/New/Archive/Shows/S1"
         )
         switch ok {
         case .success(let roots):
@@ -213,28 +213,24 @@ final class LocationRelinkTests: XCTestCase {
             XCTFail("expected success, got \(error)")
         }
 
-        let mismatch = LocationRelink.rootsFromLocatedFile(
-            orphanPath: "/Volumes/Old/Shows/S1/ep1.mp4",
-            locatedPath: "/Volumes/New/Archive/Shows/S1/other.mp4"
-        )
-        if case .failure(.basenameMismatch(let expected, let found)) = mismatch {
-            XCTAssertEqual(expected, "ep1.mp4")
-            XCTAssertEqual(found, "other.mp4")
+        let empty = LocationRelink.rootsFromLocatedFolder(orphanPath: "", locatedFolder: "/new")
+        if case .failure(.emptyPath) = empty {
+            // ok
         } else {
-            XCTFail("expected basenameMismatch")
+            XCTFail("expected emptyPath")
         }
     }
 
-    func testFindMissingRemapDoesNotPointEveryClipAtSelectedFile() {
-        // Parent→parent relative remap: siblings keep their own basenames under newRoot.
+    func testFindMissingFolderRemapMatchesSiblingsByRelativeBasename() {
+        // Orphan parent → chosen folder: siblings keep their own basenames under newRoot.
         let videos: [(Int64?, String, Int64)] = [
             (1, "/old/Lib/a.mp4", 10),
             (2, "/old/Lib/b.mp4", 20),
             (3, "/old/Lib/nested/c.mp4", 30)
         ]
-        let roots = LocationRelink.rootsFromLocatedFile(
+        let roots = LocationRelink.rootsFromLocatedFolder(
             orphanPath: "/old/Lib/a.mp4",
-            locatedPath: "/new/Lib/a.mp4"
+            locatedFolder: "/new/Lib"
         )
         guard case .success(let pair) = roots else {
             XCTFail("roots"); return

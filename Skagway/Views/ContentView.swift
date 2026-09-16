@@ -589,7 +589,7 @@ private struct LibraryContentView: View {
     }
 
     /// Quiet repair cue — Missing filter, or after focusing a clip whose file is gone.
-    /// Banner offers Find missing file… (file picker → parent-folder remap). File → Repair Links…
+    /// Banner offers Find missing folder… (folder picker → parent-folder remap). File → Repair Links…
     /// remains the whole-Location wizard.
     private var missingLibraryRepairCue: some View {
         HStack(spacing: 10) {
@@ -607,7 +607,7 @@ private struct LibraryContentView: View {
                 // Defer + sheet modal lives in beginFindMissingFile — do not wrap in Task/async.
                 vm.beginFindMissingFile()
             } label: {
-                Text("Find missing file…")
+                Text("Find missing folder…")
             }
             .disabled(vm.isApplyingLocationRelink)
         }

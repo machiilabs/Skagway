@@ -1027,7 +1027,7 @@ final class LibraryViewModel {
         return LocationRelink.normalizeRoot(url.path)
     }
 
-    /// Resolve which missing clip "Find missing file…" should locate.
+    /// Resolve which missing clip anchors "Find missing folder…".
     /// Avoids `FileManager.fileExists` — probing offline/NAS library paths can block the main
     /// thread for tens of seconds before the open panel appears.
     func orphanPathForFindMissingFile() -> String? {
@@ -1046,51 +1046,40 @@ final class LibraryViewModel {
         return candidates.first
     }
 
-    /// Banner entry. Schedules the open panel on the next main-queue turn, then presents it as a
-    /// **sheet** on the key window (`beginSheetModal`) — not `runModal()` nested in the SwiftUI
-    /// button / MainActor update that raised the click.
+    /// Banner entry. Schedules a **folder** open panel on the next main-queue turn, then presents
+    /// it as a sheet on the key window (`beginSheetModal`) — not nested `runModal()` from async Task.
     ///
-    /// Why (Paul’s hang on build 1110):
-    /// - Sync `runModal()` from the banner button still ran inside SwiftUI’s click/update turn and
-    ///   could freeze the dialog (nested AppKit modal + MainActor work).
-    /// - Pre-panel `fileExists` on offline volumes blocked before the panel appeared.
-    /// - Movie `UTType` filtering can stall while browsing folders full of video.
-    /// - After OK, preview `fileExists` for every sibling on MainActor froze dismiss/apply.
+    /// User picks the new folder that contains the moved clips. Remap scope is the orphan’s parent
+    /// → chosen folder (`oldRoot/rel` → `newRoot/rel`); siblings rematch by basename.
     func beginFindMissingFile(for orphanPath: String? = nil) {
         guard !isApplyingLocationRelink else { return }
         guard locationRelinkPresentation == nil else { return }
 
         guard let orphan = orphanPath ?? orphanPathForFindMissingFile() else {
-            reportTransientError("Select a missing clip first, then Find missing file…")
+            reportTransientError("Select a missing clip first, then Find missing folder…")
             return
         }
 
-        let expectedName = URL(fileURLWithPath: orphan).lastPathComponent
+        let orphanFolderName = URL(fileURLWithPath: orphan).deletingLastPathComponent().lastPathComponent
         // Leave the SwiftUI button/update turn before AppKit presents UI.
         DispatchQueue.main.async { [weak self] in
-            self?.presentFindMissingFileOpenPanel(orphan: orphan, expectedName: expectedName)
+            self?.presentFindMissingFolderOpenPanel(orphan: orphan, orphanFolderName: orphanFolderName)
         }
     }
 
-    private func presentFindMissingFileOpenPanel(orphan: String, expectedName: String) {
+    private func presentFindMissingFolderOpenPanel(orphan: String, orphanFolderName: String) {
         let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.message = "Locate “\(expectedName)” on disk"
-        panel.prompt = "Use This File"
-        panel.nameFieldStringValue = expectedName
-        // Prefer filename-extension UTTypes over broad `.movie` (QL/metadata scans while browsing).
-        let extTypes = VideoExtensionManager.shared.enabledExtensions
-            .sorted()
-            .compactMap { UTType(filenameExtension: $0) }
-        if !extTypes.isEmpty {
-            panel.allowedContentTypes = extTypes
-        }
+        panel.message = orphanFolderName.isEmpty
+            ? "Select the folder that now contains the missing clips"
+            : "Select the folder that replaces “\(orphanFolderName)” (contains the missing clips)"
+        panel.prompt = "Use This Folder"
 
         let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             Task { @MainActor in
-                self?.finishFindMissingFile(orphan: orphan, response: response, panel: panel)
+                self?.finishFindMissingFolder(orphan: orphan, response: response, panel: panel)
             }
         }
 
@@ -1106,7 +1095,7 @@ final class LibraryViewModel {
         }
     }
 
-    private func finishFindMissingFile(
+    private func finishFindMissingFolder(
         orphan: String,
         response: NSApplication.ModalResponse,
         panel: NSOpenPanel
@@ -1114,11 +1103,9 @@ final class LibraryViewModel {
         guard response == .OK, let url = panel.url else { return }
 
         let located = LocationRelink.normalizeRoot(url.path)
-        switch LocationRelink.rootsFromLocatedFile(orphanPath: orphan, locatedPath: located) {
-        case .failure(.basenameMismatch(let expected, let found)):
-            reportTransientError("Selected file must be named “\(expected)” (got “\(found)”)")
+        switch LocationRelink.rootsFromLocatedFolder(orphanPath: orphan, locatedFolder: located) {
         case .failure(.emptyPath):
-            reportTransientError("Couldn't use that file path")
+            reportTransientError("Couldn't use that folder path")
         case .success(let roots):
             Task { @MainActor in
                 await self.applyFindMissingFileRemap(oldRoot: roots.oldRoot, newRoot: roots.newRoot)
@@ -1126,7 +1113,7 @@ final class LibraryViewModel {
         }
     }
 
-    /// Parent-folder remap after the user located a file. Preview FS checks run off the main actor.
+    /// Parent-folder remap after the user located the new folder. Preview FS checks run off MainActor.
     @discardableResult
     private func applyFindMissingFileRemap(oldRoot: String, newRoot: String) async -> Int {
         let old = LocationRelink.normalizeRoot(oldRoot)
@@ -1151,7 +1138,7 @@ final class LibraryViewModel {
             reportTransientError("No clips under that folder could be reconnected")
             return 0
         }
-        // Soft size / collision flags still remap — user explicitly located the file.
+        // Soft size / collision flags still remap — user explicitly located the folder.
         return await applyLocationRelink(preview: preview, includeNeedsAttention: true)
     }
 
