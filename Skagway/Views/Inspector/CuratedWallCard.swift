@@ -48,8 +48,10 @@ struct CuratedWallCard: View {
     /// its own structured body, not this nested unstructured `Task`.
     @State private var detailUpgradeTask: Task<Void, Never>?
 
-    /// Poster cards stay at 188; Storyboard View uses a taller strip so the 2×3 collage is readable.
-    private var thumbHeight: CGFloat { isStoryboard ? 280 : 188 }
+    /// Poster cards stay at 188. Storyboard sizes to the collage aspect (`ThumbnailService.storyboardCompositeSize`
+    /// 960×360) so width drives frame size — no letterbox dead space under a fixed tall frame.
+    private let posterThumbHeight: CGFloat = 188
+    private static let storyboardAspectRatio: CGFloat = 960.0 / 360.0
     private let corner: CGFloat = 8
     private let titleScrimFade: Animation = .easeInOut(duration: 0.5)
     private let focusDash = StrokeStyle(lineWidth: 2, dash: [6, 4])
@@ -59,10 +61,14 @@ struct CuratedWallCard: View {
         let isSelected = selectionState.isSelected
         let isFocused = selectionState.isFocused
         let titleVisible = !isInlineEditing && previewPlayer == nil
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: isStoryboard ? 2 : 6) {
             ZStack(alignment: .bottom) {
                 thumbMedia
-                    .frame(height: thumbHeight)
+                    .modifier(StoryboardThumbSizing(
+                        isStoryboard: isStoryboard,
+                        aspectRatio: Self.storyboardAspectRatio,
+                        posterHeight: posterThumbHeight
+                    ))
                     .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
                     .contentShape(Rectangle())
                     .overlay {
@@ -99,7 +105,7 @@ struct CuratedWallCard: View {
                     }
                     .overlay(alignment: .topTrailing) {
                         topBadgeCluster
-                            .padding(6)
+                            .padding(isStoryboard ? 4 : 6)
                     }
                     .overlay(alignment: .topLeading) {
                         if showAlbumReorderHandle {
@@ -143,7 +149,7 @@ struct CuratedWallCard: View {
             }
 
             // Under-thumb row stays compact (date + stars) so card height is stable with on-scrim titles.
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 if isInlineEditing {
                     TextField("", text: isEditingTitle ? $titleEditText : $renameText)
                         .textFieldStyle(.plain)
@@ -189,7 +195,7 @@ struct CuratedWallCard: View {
             }
             .padding(.horizontal, 2)
         }
-        .padding(8)
+        .padding(isStoryboard ? 4 : 8)
         .background(
             RoundedRectangle(cornerRadius: corner + 2, style: .continuous)
                 .fill(
@@ -321,15 +327,15 @@ struct CuratedWallCard: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 56)
+            .frame(height: isStoryboard ? 44 : 56)
             .overlay(alignment: .bottomLeading) {
                 Text(video.displayTitle)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: isStoryboard ? 10 : 11, weight: .semibold))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.55), radius: 1, y: 1)
-                    .lineLimit(2)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 7)
+                    .lineLimit(isStoryboard ? 1 : 2)
+                    .padding(.horizontal, isStoryboard ? 6 : 8)
+                    .padding(.bottom, isStoryboard ? 4 : 7)
             }
         }
         .allowsHitTesting(false)
@@ -381,8 +387,27 @@ struct CuratedWallCard: View {
                     .foregroundStyle(.white)
             }
         }
-        .frame(height: thumbHeight)
+        .modifier(StoryboardThumbSizing(
+            isStoryboard: isStoryboard,
+            aspectRatio: Self.storyboardAspectRatio,
+            posterHeight: posterThumbHeight
+        ))
         .allowsHitTesting(false)
+    }
+
+    /// Poster: fixed height. Storyboard: width-driven 960∶360 so collage frames fill the cell (no letterbox).
+    private struct StoryboardThumbSizing: ViewModifier {
+        let isStoryboard: Bool
+        let aspectRatio: CGFloat
+        let posterHeight: CGFloat
+
+        func body(content: Content) -> some View {
+            if isStoryboard {
+                content.aspectRatio(aspectRatio, contentMode: .fit)
+            } else {
+                content.frame(height: posterHeight)
+            }
+        }
     }
 
     // MARK: - Hover preview

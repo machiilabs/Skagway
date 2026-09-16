@@ -79,16 +79,20 @@ struct CuratedWallGrid: View {
     private(set) static var columns = 5
     /// Whole-card floor: thumb (188) + under-thumb row + card padding ≈ 220.
     private static let minCellWidth: CGFloat = 220
-    /// Storyboard cards need more width so the taller 2×3 strip stays readable.
+    /// Storyboard cards need more width so the 2×3 collage frames stay readable (height follows 960∶360).
     private static let storyboardMinCellWidth: CGFloat = 360
     private static let spacing: CGFloat = 22
-    private static let storyboardSpacing: CGFloat = 26
+    /// Storyboard: tighter gutters — row spacing especially, to reclaim vertical chrome without shrinking frames.
+    private static let storyboardColumnSpacing: CGFloat = 16
+    private static let storyboardRowSpacing: CGFloat = 12
     private static let outerPadding: CGFloat = 18
+    private static let storyboardOuterPadding: CGFloat = 12
 
     private var activeMaxColumns: Int { isStoryboard ? Self.storyboardMaxColumns : Self.maxColumns }
     private var activeMinCellWidth: CGFloat { isStoryboard ? Self.storyboardMinCellWidth : Self.minCellWidth }
-    private var spacing: CGFloat { isStoryboard ? Self.storyboardSpacing : Self.spacing }
-    private var outerPadding: CGFloat { Self.outerPadding }
+    private var columnSpacing: CGFloat { isStoryboard ? Self.storyboardColumnSpacing : Self.spacing }
+    private var rowSpacing: CGFloat { isStoryboard ? Self.storyboardRowSpacing : Self.spacing }
+    private var outerPadding: CGFloat { isStoryboard ? Self.storyboardOuterPadding : Self.outerPadding }
 
     /// Largest `1...maxColumns` such that flexible cells are at least `minCellWidth` wide.
     /// Invalid/zero widths keep `maxColumns` so a transient layout pass can't pin the grid at 1.
@@ -110,7 +114,7 @@ struct CuratedWallGrid: View {
             forContainerWidth: containerWidth,
             maxColumns: activeMaxColumns,
             minCellWidth: activeMinCellWidth,
-            spacing: spacing,
+            spacing: columnSpacing,
             outerPadding: outerPadding
         )
     }
@@ -122,8 +126,8 @@ struct CuratedWallGrid: View {
         let cols = columnCount
         ScrollView(.vertical) {
             LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: spacing), count: cols),
-                    spacing: spacing
+                    columns: Array(repeating: GridItem(.flexible(), spacing: columnSpacing), count: cols),
+                    spacing: rowSpacing
                 ) {
                     ForEach(viewModel.filteredVideos) { video in
                         let isRenamingRow = viewModel.renamingVideoId == video.id
