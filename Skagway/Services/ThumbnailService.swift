@@ -134,11 +134,28 @@ final class ThumbnailService: @unchecked Sendable {
     /// since per-video grid choices are not persisted anywhere else.
     static let filmstripCellSize = NSSize(width: 400, height: 225)
 
-    /// Wall storyboard collage: fixed 2×3 frames baked into one card-sized JPEG
-    /// (≈ poster disk cost, not six full-res stills). Aspect matches filmstrip cells (16:9 × 3/2).
+    /// Wall storyboard collage: fixed 2×3 frames baked into one larger JPEG for Storyboard View.
+    /// Aspect matches filmstrip cells (16:9 × 3/2). Larger than poster card thumbs so strips stay readable.
     static let storyboardRows = 2
     static let storyboardColumns = 3
-    static let storyboardCompositeSize = NSSize(width: 480, height: 180)
+    static let storyboardFrameCount = storyboardRows * storyboardColumns
+    static let storyboardCompositeSize = NSSize(width: 960, height: 360)
+
+    /// True when a cached collage matches the current Storyboard View composite contract.
+    static func isValidStoryboardImage(_ image: NSImage) -> Bool {
+        abs(image.size.width - storyboardCompositeSize.width) < 2
+            && abs(image.size.height - storyboardCompositeSize.height) < 2
+    }
+
+    /// Map a click inside a 2×3 storyboard collage to the even-timeline sample time for that cell.
+    static func storyboardClickSeconds(at location: CGPoint, size: CGSize, duration: Double) -> Double {
+        let w = max(1.0, size.width)
+        let h = max(1.0, size.height)
+        let column = min(storyboardColumns - 1, max(0, Int(location.x / w * CGFloat(storyboardColumns))))
+        let row = min(storyboardRows - 1, max(0, Int(location.y / h * CGFloat(storyboardRows))))
+        let index = row * storyboardColumns + column
+        return Double(index + 1) / Double(storyboardFrameCount + 1) * max(0, duration)
+    }
 
     /// Recover the rows×columns grid of a filmstrip composite from its point size.
     /// Works for both freshly built images and disk-cached JPEGs: the cache write path preserves
@@ -228,7 +245,7 @@ final class ThumbnailService: @unchecked Sendable {
         return cacheDirectory.appendingPathComponent("\(hash)_filmstrip_e\(filmstripEpoch).jpg")
     }
 
-    /// Card-sized 2×3 collage for Wall storyboard mode (`{hash}_storyboard.jpg`).
+    /// Larger 2×3 collage for Storyboard View (`{hash}_storyboard.jpg`).
     func storyboardURL(for filePath: String) -> URL {
         let hash = pathHashString(for: filePath)
         return cacheDirectory.appendingPathComponent("\(hash)_storyboard.jpg")
@@ -303,14 +320,16 @@ final class ThumbnailService: @unchecked Sendable {
     }
 
     /// Sync load of the Wall storyboard collage (memory → disk). Never waits on AV.
+    /// Rejects legacy small composites so Storyboard View regenerates at `storyboardCompositeSize`.
     func loadStoryboard(for filePath: String) -> NSImage? {
         let memKey = storyboardMemoryKey(for: filePath)
-        if let cached = memoryCache.object(forKey: memKey) {
+        if let cached = memoryCache.object(forKey: memKey), Self.isValidStoryboardImage(cached) {
             return cached
         }
         let url = storyboardURL(for: filePath)
         guard FileManager.default.fileExists(atPath: url.path),
-              let image = NSImage(contentsOf: url)
+              let image = NSImage(contentsOf: url),
+              Self.isValidStoryboardImage(image)
         else { return nil }
         memoryCache.setObject(image, forKey: memKey)
         return image
@@ -716,19 +735,20 @@ final class ThumbnailService: @unchecked Sendable {
         return compositeImage
     }
 
-    // MARK: - Storyboard (Wall 2×3 card-sized collage)
+    // MARK: - Storyboard (Wall 2×3 larger collage)
 
     /// Load or build the Wall storyboard: one JPEG at `storyboardCompositeSize` with 2×3 frames.
-    /// Prefers baking from an existing filmstrip when it has ≥2 rows and ≥3 columns; otherwise
-    /// samples six frames from the video (same gate/coalesce pattern as filmstrips).
+    /// Prefers baking evenly spaced cells from an existing filmstrip when it has ≥6 frames; otherwise
+    /// samples six frames evenly across the timeline (same gate/coalesce pattern as filmstrips).
     func generateStoryboard(for video: Video) async throws -> NSImage {
         let memKey = storyboardMemoryKey(for: video.filePath)
-        if let cached = memoryCache.object(forKey: memKey) {
+        if let cached = memoryCache.object(forKey: memKey), Self.isValidStoryboardImage(cached) {
             return cached
         }
         let cacheURL = storyboardURL(for: video.filePath)
         if FileManager.default.fileExists(atPath: cacheURL.path),
-           let image = NSImage(contentsOf: cacheURL)
+           let image = NSImage(contentsOf: cacheURL),
+           Self.isValidStoryboardImage(image)
         {
             memoryCache.setObject(image, forKey: memKey)
             return image
@@ -745,7 +765,7 @@ final class ThumbnailService: @unchecked Sendable {
     }
 
     private func storyboardInflightKey(filePath: String) -> String {
-        "\(filePath)\u{1e}sb\u{1e}2x3"
+        "\(filePath)\u{1e}sb\u{1e}2x3\u{1e}960x360"
     }
 
     private func coalescedStoryboard(for video: Video) async throws -> NSImage {
@@ -776,35 +796,47 @@ final class ThumbnailService: @unchecked Sendable {
         return try await task.value
     }
 
-    /// Downscale (and optionally crop) an inspector filmstrip into the card-sized 2×3 collage.
-    /// Requires at least 2 rows and 3 columns so we can take the top-left 2×3 block.
+    /// Composite six evenly spaced filmstrip cells into the Storyboard View collage.
+    /// Requires at least 6 cells so the bake can track the same even-timeline indices as AV sampling.
     func bakeStoryboard(fromFilmstrip filmstrip: NSImage) -> NSImage? {
-        guard let grid = Self.filmstripGrid(in: filmstrip),
-              grid.rows >= Self.storyboardRows,
-              grid.columns >= Self.storyboardColumns
-        else { return nil }
+        guard let grid = Self.filmstripGrid(in: filmstrip) else { return nil }
+        let totalFrames = grid.rows * grid.columns
+        guard totalFrames >= Self.storyboardFrameCount else { return nil }
 
-        let srcW = Self.filmstripCellSize.width * CGFloat(Self.storyboardColumns)
-        let srcH = Self.filmstripCellSize.height * CGFloat(Self.storyboardRows)
-        // NSImage is flipped relative to CG when drawing; take top-left cells in image coords
-        // (row 0 is at the top of the composite = high y in AppKit lockFocus space).
-        let sourceRect = NSRect(
-            x: 0,
-            y: filmstrip.size.height - srcH,
-            width: srcW,
-            height: srcH
-        )
+        let cell = Self.filmstripCellSize
         let destSize = Self.storyboardCompositeSize
+        let destCellW = destSize.width / CGFloat(Self.storyboardColumns)
+        let destCellH = destSize.height / CGFloat(Self.storyboardRows)
+
         let out = NSImage(size: destSize)
         out.lockFocus()
         NSColor.black.setFill()
         NSRect(origin: .zero, size: destSize).fill()
-        filmstrip.draw(
-            in: NSRect(origin: .zero, size: destSize),
-            from: sourceRect,
-            operation: .copy,
-            fraction: 1.0
-        )
+
+        for storyboardIndex in 0..<Self.storyboardFrameCount {
+            // Same even-timeline fractions as `buildStoryboard` / inspector filmstrip clicks.
+            let sourceIndex = min(
+                totalFrames - 1,
+                max(0, Int((Double(storyboardIndex + 1) / Double(Self.storyboardFrameCount + 1)) * Double(totalFrames)))
+            )
+            let srcCol = sourceIndex % grid.columns
+            let srcRow = sourceIndex / grid.columns
+            let sourceRect = NSRect(
+                x: CGFloat(srcCol) * cell.width,
+                y: filmstrip.size.height - CGFloat(srcRow + 1) * cell.height,
+                width: cell.width,
+                height: cell.height
+            )
+            let destCol = storyboardIndex % Self.storyboardColumns
+            let destRow = storyboardIndex / Self.storyboardColumns
+            let destRect = NSRect(
+                x: CGFloat(destCol) * destCellW,
+                y: destSize.height - CGFloat(destRow + 1) * destCellH,
+                width: destCellW,
+                height: destCellH
+            )
+            filmstrip.draw(in: destRect, from: sourceRect, operation: .copy, fraction: 1.0)
+        }
         out.unlockFocus()
         return out
     }
@@ -812,7 +844,7 @@ final class ThumbnailService: @unchecked Sendable {
     private func buildStoryboard(for video: Video) async throws -> NSImage {
         let rows = Self.storyboardRows
         let columns = Self.storyboardColumns
-        let totalFrames = rows * columns
+        let totalFrames = Self.storyboardFrameCount
         let url = video.url
 
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -841,8 +873,8 @@ final class ThumbnailService: @unchecked Sendable {
 
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
-            // Modest decode size — final collage is card-sized (~480×180).
-            generator.maximumSize = CGSize(width: 240, height: 240)
+            // Decode above cell size so the larger 960×360 collage stays sharp.
+            generator.maximumSize = CGSize(width: 480, height: 480)
             generator.requestedTimeToleranceBefore = CMTime(seconds: 2, preferredTimescale: 600)
             generator.requestedTimeToleranceAfter = CMTime(seconds: 2, preferredTimescale: 600)
 
@@ -1480,7 +1512,9 @@ final class ThumbnailService: @unchecked Sendable {
             if let image = NSImage(contentsOf: filmstripURL(for: pair.to)) {
                 memoryCache.setObject(image, forKey: filmstripMemoryKey(for: pair.to))
             }
-            if let image = NSImage(contentsOf: storyboardURL(for: pair.to)) {
+            if let image = NSImage(contentsOf: storyboardURL(for: pair.to)),
+               Self.isValidStoryboardImage(image)
+            {
                 memoryCache.setObject(image, forKey: storyboardMemoryKey(for: pair.to))
             }
             for edge in Self.detailPreviewLongEdgeChoices {

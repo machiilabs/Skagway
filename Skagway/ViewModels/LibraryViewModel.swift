@@ -225,12 +225,6 @@ final class LibraryViewModel {
             updateCurrentLayoutFromLive()
         }
     }
-    /// Wall grid media: poster still (default) or 2×3 storyboard collage. List ignores this.
-    var gridDisplayMode: GridDisplayMode = .poster {
-        didSet {
-            UserDefaults.standard.set(gridDisplayMode.rawValue, forKey: Self.gridDisplayModeKey)
-        }
-    }
     var gridSize: GridSize = .medium {
         didSet {
             guard !_applyingLayout else { return }
@@ -2274,6 +2268,7 @@ final class LibraryViewModel {
     // MARK: - Preferences Persistence
 
     private static let viewModeKey = "Skagway.viewMode"
+    /// Legacy nested Poster/Storyboard toggle; migrated into `ViewMode.storyboard` on load.
     private static let gridDisplayModeKey = PrefsKeys.gridDisplayMode
     private static let gridSizeKey = "Skagway.gridSize"
     private static let sortColumnKey = "Skagway.sortColumn"
@@ -2903,19 +2898,19 @@ final class LibraryViewModel {
         if let w = sidebarWidth { updated.sidebarWidth = Double(w) }
         if let w = contentWidth {
             switch viewMode {
-            case .grid: updated.contentWidthGrid = Double(w)
+            case .grid, .storyboard: updated.contentWidthGrid = Double(w)
             case .list: updated.contentWidthList = Double(w)
             }
         }
         if let w = detailWidth {
             switch viewMode {
-            case .grid: updated.detailWidthGrid = Double(w)
+            case .grid, .storyboard: updated.detailWidthGrid = Double(w)
             case .list: updated.detailWidthList = Double(w)
             }
         }
         if let h = browserTopPaneHeight {
             switch viewMode {
-            case .grid: updated.browserTopPaneHeightGrid = Double(h)
+            case .grid, .storyboard: updated.browserTopPaneHeightGrid = Double(h)
             case .list: updated.browserTopPaneHeightList = Double(h)
             }
         }
@@ -2993,10 +2988,6 @@ final class LibraryViewModel {
         playAllLoops = defaults.object(forKey: Self.playAllLoopsKey) as? Bool
             ?? defaults.bool(forKey: "Skagway.albumPlaylistLoops")
         gridHoverPreviewEnabled = defaults.object(forKey: Self.gridHoverPreviewEnabledKey) as? Bool ?? true
-        if let raw = defaults.string(forKey: Self.gridDisplayModeKey),
-           let mode = GridDisplayMode(rawValue: raw) {
-            gridDisplayMode = mode
-        }
         if let w = defaults.object(forKey: Self.playerFloatingWidthKey) as? Double, w > 0,
            let h = defaults.object(forKey: Self.playerFloatingHeightKey) as? Double, h > 0 {
             playerFloatingSize = CGSize(width: w, height: h)
@@ -3141,6 +3132,13 @@ final class LibraryViewModel {
             browsingLayout = migrated.sanitized()
         }
         applyLayout(browsingLayout)
+        // One-shot migrate: nested Wall Storyboard toggle → first-class ViewMode.storyboard
+        // (must run after applyLayout so layout's viewMode does not overwrite it).
+        if defaults.string(forKey: Self.gridDisplayModeKey) == "storyboard" {
+            viewMode = .storyboard
+            updateCurrentLayoutFromLive()
+        }
+        defaults.removeObject(forKey: Self.gridDisplayModeKey)
     }
 
     func startObserving() {

@@ -12,8 +12,8 @@ struct CuratedWallCard: View {
     @Binding var renameText: String
     @Binding var titleEditText: String
     let thumbnailService: ThumbnailService
-    /// Wall media: poster still vs 2×3 storyboard collage (same card chrome/size either way).
-    var displayMode: GridDisplayMode = .poster
+    /// Wall media: poster still vs 2×3 storyboard collage.
+    var displayMode: WallCardMediaMode = .poster
     /// True while this video has an active (queued or in-flight) cross-volume move — shows a
     /// spinner badge over the thumbnail so the "frozen" state is visible without right-clicking.
     var isMoving: Bool = false
@@ -32,8 +32,11 @@ struct CuratedWallCard: View {
     var onCommitTitle: () -> Void
     var onCancelTitle: () -> Void
     var onRenameEditingChanged: (Bool) -> Void
+    /// Storyboard View: click a collage cell → seek/play at that even-timeline sample.
+    var onStoryboardCellPlay: ((CGPoint, CGSize) -> Void)? = nil
 
     private var isInlineEditing: Bool { isRenaming || isEditingTitle }
+    private var isStoryboard: Bool { displayMode == .storyboard }
 
     @State private var thumbnail: NSImage?
     @State private var isHovering = false
@@ -45,7 +48,8 @@ struct CuratedWallCard: View {
     /// its own structured body, not this nested unstructured `Task`.
     @State private var detailUpgradeTask: Task<Void, Never>?
 
-    private let thumbHeight: CGFloat = 188
+    /// Poster cards stay at 188; Storyboard View uses a taller strip so the 2×3 collage is readable.
+    private var thumbHeight: CGFloat { isStoryboard ? 280 : 188 }
     private let corner: CGFloat = 8
     private let titleScrimFade: Animation = .easeInOut(duration: 0.5)
     private let focusDash = StrokeStyle(lineWidth: 2, dash: [6, 4])
@@ -60,6 +64,21 @@ struct CuratedWallCard: View {
                 thumbMedia
                     .frame(height: thumbHeight)
                     .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                    .contentShape(Rectangle())
+                    .overlay {
+                        if isStoryboard, let onStoryboardCellPlay, !isMoving, !isInlineEditing {
+                            GeometryReader { geo in
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .highPriorityGesture(
+                                        SpatialTapGesture()
+                                            .onEnded { value in
+                                                onStoryboardCellPlay(value.location, geo.size)
+                                            }
+                                    )
+                            }
+                        }
+                    }
                     .overlay {
                         // Soft vignette — cheap radial falloff (no blur filters on the hot path).
                         RadialGradient(
@@ -184,7 +203,7 @@ struct CuratedWallCard: View {
         .onHover { hovering in
             isHovering = hovering
             if hovering {
-                startHoverPreviewIfAllowed()
+                if !isStoryboard { startHoverPreviewIfAllowed() }
             } else {
                 stopHoverPreview()
             }
@@ -369,7 +388,7 @@ struct CuratedWallCard: View {
     // MARK: - Hover preview
 
     private func startHoverPreviewIfAllowed() {
-        guard hoverPreviewEnabled, !isMoving, !isInlineEditing else { return }
+        guard !isStoryboard, hoverPreviewEnabled, !isMoving, !isInlineEditing else { return }
         previewTask?.cancel()
         previewTask = nil
         if let previewPlayer {

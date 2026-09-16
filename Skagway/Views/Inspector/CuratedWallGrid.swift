@@ -50,8 +50,8 @@ private enum OpenWithAppCache {
 
 /// The elegant "Wall" browsing surface for the Curated Wall experience.
 /// Matches the refined mockups:
-/// - Up to 5 columns at typical window widths with generous fixed spacing
-/// - Fewer columns when the pane narrows so cards stay at least as wide as they are tall
+/// - Poster Grid: up to 5 columns, ~188pt thumbs
+/// - Storyboard View: fewer/taller cards with a large 2×3 collage per clip
 /// - Clean gallery cards (no dense metadata overload)
 /// - No in-wall header or controls — search/count/toggle/filters live in the thin bar above
 struct CuratedWallGrid: View {
@@ -70,21 +70,35 @@ struct CuratedWallGrid: View {
     /// Card id currently targeted by an in-album reorder drag.
     @State private var albumReorderTargetId: String?
 
+    private var isStoryboard: Bool { viewModel.viewMode == .storyboard }
+
     // Max from the full-window mock; live `columns` is the source of truth for ↑/↓ row steps
     // in ContentView and for scroll-to-row math below.
     static let maxColumns = 5
+    static let storyboardMaxColumns = 3
     private(set) static var columns = 5
     /// Whole-card floor: thumb (188) + under-thumb row + card padding ≈ 220.
     private static let minCellWidth: CGFloat = 220
+    /// Storyboard cards need more width so the taller 2×3 strip stays readable.
+    private static let storyboardMinCellWidth: CGFloat = 360
     private static let spacing: CGFloat = 22
+    private static let storyboardSpacing: CGFloat = 26
     private static let outerPadding: CGFloat = 18
 
-    private var spacing: CGFloat { Self.spacing }
+    private var activeMaxColumns: Int { isStoryboard ? Self.storyboardMaxColumns : Self.maxColumns }
+    private var activeMinCellWidth: CGFloat { isStoryboard ? Self.storyboardMinCellWidth : Self.minCellWidth }
+    private var spacing: CGFloat { isStoryboard ? Self.storyboardSpacing : Self.spacing }
     private var outerPadding: CGFloat { Self.outerPadding }
 
     /// Largest `1...maxColumns` such that flexible cells are at least `minCellWidth` wide.
     /// Invalid/zero widths keep `maxColumns` so a transient layout pass can't pin the grid at 1.
-    static func columnCount(forContainerWidth width: CGFloat) -> Int {
+    static func columnCount(
+        forContainerWidth width: CGFloat,
+        maxColumns: Int = maxColumns,
+        minCellWidth: CGFloat = minCellWidth,
+        spacing: CGFloat = spacing,
+        outerPadding: CGFloat = outerPadding
+    ) -> Int {
         guard width > 1 else { return maxColumns }
         let inner = max(0, width - outerPadding * 2)
         let n = Int((inner + spacing) / (minCellWidth + spacing))
@@ -92,7 +106,13 @@ struct CuratedWallGrid: View {
     }
 
     private var columnCount: Int {
-        Self.columnCount(forContainerWidth: containerWidth)
+        Self.columnCount(
+            forContainerWidth: containerWidth,
+            maxColumns: activeMaxColumns,
+            minCellWidth: activeMinCellWidth,
+            spacing: spacing,
+            outerPadding: outerPadding
+        )
     }
 
     var body: some View {
@@ -117,10 +137,12 @@ struct CuratedWallGrid: View {
                             renameText: isRenamingRow ? $viewModel.renameText : .constant(""),
                             titleEditText: isEditingTitleRow ? $viewModel.titleEditText : .constant(""),
                             thumbnailService: thumbnailService,
-                            displayMode: viewModel.gridDisplayMode,
+                            displayMode: isStoryboard ? WallCardMediaMode.storyboard : .poster,
                             isMoving: isMoving,
                             resumeFraction: resumeFraction(for: video),
-                            hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
+                            hoverPreviewEnabled: !isStoryboard
+                                && viewModel.gridHoverPreviewEnabled
+                                && !viewModel.isPlayingInline,
                             thumbnailReloadId: viewModel.filmstripRefreshId,
                             showAlbumReorderHandle: viewModel.isViewingAlbum,
                             renameFocus: $renameFocus,
@@ -128,17 +150,26 @@ struct CuratedWallGrid: View {
                             onCancelRename: cancelRename,
                             onCommitTitle: { commitTitleEdit(video) },
                             onCancelTitle: cancelTitleEdit,
-                            onRenameEditingChanged: { viewModel.isEditingText = $0 }
+                            onRenameEditingChanged: { viewModel.isEditingText = $0 },
+                            onStoryboardCellPlay: isStoryboard
+                                ? { location, size in
+                                    playStoryboardCell(video, at: location, size: size)
+                                }
+                                : nil
                         )
-                        .id("\(video.id)|\(viewModel.filmstripRefreshId)")
+                        .id("\(video.id)|\(viewModel.filmstripRefreshId)|\(viewModel.viewMode.rawValue)")
                         .contentShape(Rectangle())
                         .modifier(AlbumSelectionGestures(
-                            enabled: !viewModel.isViewingAlbum,
+                            enabled: !viewModel.isViewingAlbum && !isStoryboard,
                             onSelect: { handleSelection(video) },
                             onPlay: {
                                 viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
                                 viewModel.isPlayingInline = true
                             }
+                        ))
+                        .modifier(StoryboardSelectionGestures(
+                            enabled: isStoryboard && !viewModel.isViewingAlbum,
+                            onSelect: { handleSelection(video) }
                         ))
                         .overlay(alignment: .topLeading) {
                             collectedSetCheckmark(for: video)
@@ -465,6 +496,36 @@ struct CuratedWallGrid: View {
         }
     }
 
+
+    /// Storyboard View: chrome/under-thumb clicks still select; collage cells seek+play via the card.
+    private struct StoryboardSelectionGestures: ViewModifier {
+        var enabled: Bool
+        let onSelect: () -> Void
+
+        func body(content: Content) -> some View {
+            if enabled {
+                content.onTapGesture(perform: onSelect)
+            } else {
+                content
+            }
+        }
+    }
+
+    private func playStoryboardCell(_ video: Video, at location: CGPoint, size: CGSize) {
+        viewModel.requestDefocusTextInputs()
+        lastClickedId = video.id
+        selectionStore.sync(to: [video.id])
+        selectionStore.syncFocus(to: video.id)
+        viewModel.selectOnly(video.id)
+        let duration = video.duration ?? 0
+        viewModel.pendingFilmstripSeekSeconds = ThumbnailService.storyboardClickSeconds(
+            at: location,
+            size: size,
+            duration: duration
+        )
+        viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
+        viewModel.isPlayingInline = true
+    }
     private func handleSelection(_ video: Video, flags: NSEvent.ModifierFlags = NSEvent.modifierFlags) {
         viewModel.requestDefocusTextInputs()
         let optionOnly = flags.contains(.option)

@@ -44,6 +44,14 @@ struct SkagwayApp: App {
                 .keyboardShortcut("2", modifiers: .command)
                 .disabled(!appState.hasLibrary)
 
+                Button("Storyboard View") {
+                    appState.libraryViewModel?.scrollToSelectedOnViewSwitch = true
+                    appState.libraryViewModel?.viewMode = .storyboard
+                    appState.libraryViewModel?.savePreferences()
+                }
+                .keyboardShortcut("3", modifiers: .command)
+                .disabled(!appState.hasLibrary)
+
                 Divider()
 
                 Button("Scroll to Selection") {

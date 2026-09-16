@@ -27,21 +27,21 @@ struct LayoutParams: Equatable {
 
     func contentColumnWidth(for mode: ViewMode) -> Double {
         switch mode {
-        case .grid: return contentWidthGrid
+        case .grid, .storyboard: return contentWidthGrid
         case .list: return contentWidthList
         }
     }
 
     func detailColumnWidth(for mode: ViewMode) -> Double {
         switch mode {
-        case .grid: return detailWidthGrid
+        case .grid, .storyboard: return detailWidthGrid
         case .list: return detailWidthList
         }
     }
 
     func browserTopPaneHeight(for mode: ViewMode) -> Double {
         switch mode {
-        case .grid: return browserTopPaneHeightGrid
+        case .grid, .storyboard: return browserTopPaneHeightGrid
         case .list: return browserTopPaneHeightList
         }
     }

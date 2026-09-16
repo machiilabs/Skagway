@@ -55,21 +55,21 @@ enum VideoSort: String, CaseIterable, Identifiable {
 }
 
 enum ViewMode: String, CaseIterable {
-    case grid, list
-}
+    case grid, list, storyboard
 
-/// Grid-only wall media: single poster still vs 2×3 storyboard collage.
-/// Orthogonal to `ViewMode` so list stays poster/list thumbnails only.
-enum GridDisplayMode: String, CaseIterable {
-    case poster
-    case storyboard
-
-    var label: String {
+    /// Poster grid and storyboard wall share LazyVGrid browsing (not the list table).
+    var isWall: Bool {
         switch self {
-        case .poster: return "Poster"
-        case .storyboard: return "Storyboard"
+        case .grid, .storyboard: return true
+        case .list: return false
         }
     }
+}
+
+/// Media shown inside a Curated Wall card (poster still vs 2×3 storyboard collage).
+enum WallCardMediaMode: String {
+    case poster
+    case storyboard
 }
 
 enum GridSize: String, CaseIterable {

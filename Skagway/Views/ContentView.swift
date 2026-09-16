@@ -368,44 +368,22 @@ private struct LibraryContentView: View {
                         vm.savePreferences()
                     }
                 ),
-                items: [ViewMode.grid, .list],
+                items: [ViewMode.grid, .list, .storyboard],
                 tooltip: { mode in
                     switch mode {
                     case .grid: "Grid view (⌘1)"
                     case .list: "List view (⌘2)"
+                    case .storyboard: "Storyboard view (⌘3)"
                     }
                 }
             ) { mode in
                 switch mode {
                 case .list: Label("List", systemImage: "list.bullet")
                 case .grid: Label("Grid", systemImage: "square.grid.2x2")
+                case .storyboard: Label("Storyboard", systemImage: "square.grid.3x2")
                 }
             }
             .controlSize(.small)
-
-            if vm.viewMode == .grid {
-                AppSegmentedControl(
-                    selection: Binding(
-                        get: { vm.gridDisplayMode },
-                        set: { newValue in
-                            vm.gridDisplayMode = newValue
-                        }
-                    ),
-                    items: GridDisplayMode.allCases,
-                    tooltip: { mode in
-                        switch mode {
-                        case .poster: "Poster cards"
-                        case .storyboard: "Storyboard cards (2×3 frames)"
-                        }
-                    }
-                ) { mode in
-                    switch mode {
-                    case .poster: Label("Poster", systemImage: "photo")
-                    case .storyboard: Label("Storyboard", systemImage: "square.grid.3x2")
-                    }
-                }
-                .controlSize(.small)
-            }
 
             sortCluster
 
@@ -557,7 +535,7 @@ private struct LibraryContentView: View {
                     isDropTargeted: isBrowserDropTargeted,
                     onAddFiles: { vm.showAddMediaPicker() }
                 )
-            } else if vm.viewMode == .grid {
+            } else if vm.viewMode.isWall {
                 CuratedWallGrid(
                     viewModel: vm,
                     thumbnailService: thumbService,
@@ -939,16 +917,16 @@ private struct LibraryContentView: View {
         switch keyCode {
         case 123: return -1
         case 124: return 1
-        case 126: return viewMode == .grid ? -CuratedWallGrid.columns : -1
-        case 125: return viewMode == .grid ? CuratedWallGrid.columns : 1
+        case 126: return viewMode.isWall ? -CuratedWallGrid.columns : -1
+        case 125: return viewMode.isWall ? CuratedWallGrid.columns : 1
         default: return nil
         }
     }
 
-    /// Grid navigation is always handled here; List defers to `Table` unless search still owns focus.
+    /// Wall navigation is always handled here; List defers to `Table` unless search still owns focus.
     private static func shouldHandleArrowNavigation(_ lvm: LibraryViewModel) -> Bool {
         switch lvm.viewMode {
-        case .grid: return true
+        case .grid, .storyboard: return true
         case .list: return lvm.isLibrarySearchFocused
         }
     }
@@ -964,7 +942,7 @@ private struct LibraryContentView: View {
             {
                 return event
             }
-            if (lvm.viewMode == .list || lvm.viewMode == .grid),
+            if (lvm.viewMode == .list || lvm.viewMode.isWall),
                let videoId = lvm.focusedVideoId ?? (lvm.selectedVideoIds.count == 1 ? lvm.selectedVideoIds.first : nil),
                !lvm.activeMoveVideoIds.contains(videoId),
                let video = lvm.filteredVideo(forPath: videoId)

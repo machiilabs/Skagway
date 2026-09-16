@@ -44,26 +44,35 @@ final class StoryboardCacheTests: XCTestCase {
         XCTAssertEqual(grid?.columns, 3)
     }
 
-    func testBakeStoryboardFromTwoByFiveFilmstrip() {
+    func testBakeStoryboardEvenlySamplesSixFramesFromWiderFilmstrip() {
         let cell = ThumbnailService.filmstripCellSize
         let size = NSSize(width: cell.width * 5, height: cell.height * 2)
         let filmstrip = NSImage(size: size)
         filmstrip.lockFocus()
-        // Paint first three columns green, last two red — bake should keep green block.
-        NSColor.green.setFill()
-        NSRect(x: 0, y: 0, width: cell.width * 3, height: size.height).fill()
-        NSColor.red.setFill()
-        NSRect(x: cell.width * 3, y: 0, width: cell.width * 2, height: size.height).fill()
+        // Distinct colors per cell so we can confirm bake produced a full-size collage.
+        for row in 0..<2 {
+            for col in 0..<5 {
+                let hue = CGFloat(row * 5 + col) / 10.0
+                NSColor(calibratedHue: hue, saturation: 0.8, brightness: 0.9, alpha: 1).setFill()
+                NSRect(
+                    x: CGFloat(col) * cell.width,
+                    y: size.height - CGFloat(row + 1) * cell.height,
+                    width: cell.width,
+                    height: cell.height
+                ).fill()
+            }
+        }
         filmstrip.unlockFocus()
 
         guard let baked = service.bakeStoryboard(fromFilmstrip: filmstrip) else {
-            return XCTFail("Expected bake from 2×5 filmstrip")
+            return XCTFail("Expected even-timeline bake from 2×5 filmstrip")
         }
         XCTAssertEqual(baked.size.width, ThumbnailService.storyboardCompositeSize.width, accuracy: 0.5)
         XCTAssertEqual(baked.size.height, ThumbnailService.storyboardCompositeSize.height, accuracy: 0.5)
+        XCTAssertTrue(ThumbnailService.isValidStoryboardImage(baked))
     }
 
-    func testBakeStoryboardRejectsTooNarrowFilmstrip() {
+    func testBakeStoryboardRejectsTooFewFrames() {
         let cell = ThumbnailService.filmstripCellSize
         let size = NSSize(width: cell.width * 2, height: cell.height * 2)
         let filmstrip = NSImage(size: size)
@@ -73,6 +82,35 @@ final class StoryboardCacheTests: XCTestCase {
         filmstrip.unlockFocus()
 
         XCTAssertNil(service.bakeStoryboard(fromFilmstrip: filmstrip))
+    }
+
+    func testLoadStoryboardRejectsLegacySmallComposite() throws {
+        let path = "/Volumes/Media/Shows/clip.mp4"
+        let url = service.storyboardURL(for: path)
+        let legacy = NSImage(size: NSSize(width: 480, height: 180))
+        legacy.lockFocus()
+        NSColor.gray.setFill()
+        NSRect(origin: .zero, size: legacy.size).fill()
+        legacy.unlockFocus()
+        guard let tiff = legacy.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.8])
+        else {
+            return XCTFail("Failed to encode legacy storyboard")
+        }
+        try jpeg.write(to: url)
+
+        XCTAssertNil(service.loadStoryboard(for: path))
+    }
+
+    func testStoryboardClickSecondsMapsTopLeftCell() {
+        let seconds = ThumbnailService.storyboardClickSeconds(
+            at: CGPoint(x: 10, y: 10),
+            size: CGSize(width: 300, height: 200),
+            duration: 70
+        )
+        // index 0 → 1/7 * 70 = 10
+        XCTAssertEqual(seconds, 10, accuracy: 0.01)
     }
 
     func testMigrateMovesStoryboardFile() throws {
