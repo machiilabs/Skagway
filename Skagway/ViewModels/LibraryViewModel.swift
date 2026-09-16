@@ -1158,18 +1158,31 @@ final class LibraryViewModel {
         }
         await Task.yield()
 
-        // Phase 4a — in-memory bookkeeping
+        // Phase 4a — in-memory bookkeeping (+ thumbnailPath remap onto new cache keys)
         locationRelinkProgress = LocationRelinkApplyProgress(
             phase: .updatingLibrary, current: 0, total: 1
         )
         let pathMap = Dictionary(uniqueKeysWithValues: pathPairs.map { ($0.from, $0.to) })
+        var thumbPathUpdates: [(videoId: Int64, path: String)] = []
         var updated = videos
         for i in updated.indices {
-            if let neu = pathMap[updated[i].filePath], neu != updated[i].filePath {
-                updated[i].filePath = neu
+            guard let neu = pathMap[updated[i].filePath], neu != updated[i].filePath else { continue }
+            let remappedThumb = thumbnailService.remappedThumbnailPath(
+                updated[i].thumbnailPath,
+                newFilePath: neu
+            )
+            updated[i].filePath = neu
+            if let remappedThumb {
+                updated[i].thumbnailPath = remappedThumb
+                if let dbId = updated[i].databaseId {
+                    thumbPathUpdates.append((dbId, remappedThumb))
+                }
             }
         }
         videos = updated
+        if !thumbPathUpdates.isEmpty {
+            try? await videoRepo.updateThumbnailPaths(updates: thumbPathUpdates)
+        }
 
         for (old, neu) in pathMap where old != neu {
             remapVideoPathInSelection(from: old, to: neu)
@@ -1288,13 +1301,26 @@ final class LibraryViewModel {
                 thumbnailService.migrateCacheKeys(changedUndo, onProgress: nil)
             }.value
         }
+        var thumbPathUpdates: [(videoId: Int64, path: String)] = []
         var updated = videos
         for i in updated.indices {
-            if let old = pathMap[updated[i].filePath], old != updated[i].filePath {
-                updated[i].filePath = old
+            guard let old = pathMap[updated[i].filePath], old != updated[i].filePath else { continue }
+            let remappedThumb = thumbnailService.remappedThumbnailPath(
+                updated[i].thumbnailPath,
+                newFilePath: old
+            )
+            updated[i].filePath = old
+            if let remappedThumb {
+                updated[i].thumbnailPath = remappedThumb
+                if let dbId = updated[i].databaseId {
+                    thumbPathUpdates.append((dbId, remappedThumb))
+                }
             }
         }
         videos = updated
+        if !thumbPathUpdates.isEmpty {
+            try? await videoRepo.updateThumbnailPaths(updates: thumbPathUpdates)
+        }
         for (neu, old) in pathMap where neu != old {
             remapVideoPathInSelection(from: neu, to: old)
         }

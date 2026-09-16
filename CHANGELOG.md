@@ -37,6 +37,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 - **Library folder missing banner on click** — Same Repair Links banner also appears when focusing a grid/list clip whose file is not on disk (no duplicate flicker if already visible).
 - **Fix: missing banner on plain click / Playback Failed** — Grid/list focus no longer bypasses the missing check (`focusedVideoId` didSet). Playback Failed for a missing file raises the banner and adds **Repair Links…** on the error overlay.
 - **Repair Links open UX (large libraries)** — Sheet opens on the click (no outside “Opening…” wait). Step 1 shows “Building folder list…” with a determinate horizontal progress bar while the catalog builds off the main actor; Continue stays disabled until ready. Playback Failed dismisses the floating player so the sheet is frontmost. Pre-selected old folder scrolls into view; folder list sorted A–Z by path components (so `/Volumes/Media/…` sorts before `/Volumes/Media 2`).
+- **Repair Links custom posters** — Cache remaps prefer the old poster over any auto-generated file at the new path-hash; remaps thumb/detail/filmstrip memory+disk keys; updates `thumbnailPath` (DB + in-memory, keeps `#version` suffix). Cancels in-flight generation so a late auto-frame can’t wipe the migrated poster.
 
 ## 1.2.0 (build 1082) - 2026-09-15
 

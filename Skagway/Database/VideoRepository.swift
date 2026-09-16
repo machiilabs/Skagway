@@ -117,6 +117,19 @@ struct VideoRepository {
         }
     }
 
+    /// Bulk thumbnail-path remaps (e.g. after Repair Links cache-key migration).
+    func updateThumbnailPaths(updates: [(videoId: Int64, path: String)]) async throws {
+        guard !updates.isEmpty else { return }
+        try await dbPool.write { db in
+            for (id, path) in updates {
+                try db.execute(
+                    sql: "UPDATE video SET thumbnailPath = ? WHERE id = ?",
+                    arguments: [path, id]
+                )
+            }
+        }
+    }
+
     func updateSubtitlePresence(videoId: Int64, presence: SubtitlePresence) async throws {
         try await dbPool.write { db in
             try db.execute(

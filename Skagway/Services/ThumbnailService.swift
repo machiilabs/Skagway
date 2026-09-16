@@ -1097,8 +1097,32 @@ final class ThumbnailService: @unchecked Sendable {
         migrateCacheKeys([(from: oldFilePath, to: newFilePath)], onProgress: nil)
     }
 
+    /// Prefer the source cache file when remapping. If the destination already has an
+    /// auto-generated thumb, replace it so custom posters (Set Poster from Image) survive Repair Links.
+    private func moveOrReplaceCacheFile(from source: URL, to dest: URL, fm: FileManager) {
+        guard fm.fileExists(atPath: source.path) else { return }
+        if source.path == dest.path { return }
+        if fm.fileExists(atPath: dest.path) {
+            try? fm.removeItem(at: dest)
+        }
+        try? fm.moveItem(at: source, to: dest)
+    }
+
+    /// Remaps a stored `thumbnailPath` onto the cache URL for `newFilePath`, keeping any `#version` suffix.
+    /// Returns `nil` when there was no stored path (do not invent one).
+    func remappedThumbnailPath(_ existing: String?, newFilePath: String) -> String? {
+        guard let existing, !existing.isEmpty else { return nil }
+        let newBare = thumbnailURL(for: newFilePath).path
+        if let hashIdx = existing.firstIndex(of: "#") {
+            return newBare + String(existing[hashIdx...])
+        }
+        return newBare
+    }
+
     /// Batch thumb/filmstrip/detail cache remaps for Location Relink.
     /// Lists the cache directory once (not once per clip). Skips pairs where `from == to`.
+    /// When the old poster exists, it **replaces** any file already at the new path-hash
+    /// (custom posters must not lose to a pre-generated frame at the destination).
     /// `onProgress` reports remapped clip count (changed paths only).
     func migrateCacheKeys(
         _ mappings: [(from: String, to: String)],
@@ -1128,17 +1152,16 @@ final class ThumbnailService: @unchecked Sendable {
             let newH = pathHashString(for: pair.to)
             hashRemap[oldH] = newH
 
-            let oldDiskURL = thumbnailURL(for: pair.from)
-            let newDiskURL = thumbnailURL(for: pair.to)
-            if fm.fileExists(atPath: oldDiskURL.path), !fm.fileExists(atPath: newDiskURL.path) {
-                try? fm.moveItem(at: oldDiskURL, to: newDiskURL)
-            }
-
-            let oldFilmstripURL = filmstripURL(for: pair.from)
-            let newFilmstripURL = filmstripURL(for: pair.to)
-            if fm.fileExists(atPath: oldFilmstripURL.path), !fm.fileExists(atPath: newFilmstripURL.path) {
-                try? fm.moveItem(at: oldFilmstripURL, to: newFilmstripURL)
-            }
+            moveOrReplaceCacheFile(
+                from: thumbnailURL(for: pair.from),
+                to: thumbnailURL(for: pair.to),
+                fm: fm
+            )
+            moveOrReplaceCacheFile(
+                from: filmstripURL(for: pair.from),
+                to: filmstripURL(for: pair.to),
+                fm: fm
+            )
 
             let oldKey = pair.from as NSString
             let newKey = pair.to as NSString
@@ -1162,6 +1185,27 @@ final class ThumbnailService: @unchecked Sendable {
                 }
             }
 
+            // Drop any in-flight generation for both keys so a late auto-frame can't overwrite
+            // the migrated custom poster.
+            inflightLock.lock()
+            inflightThumbnails[pair.from]?.cancel()
+            inflightThumbnails[pair.to]?.cancel()
+            inflightThumbnails.removeValue(forKey: pair.from)
+            inflightThumbnails.removeValue(forKey: pair.to)
+            inflightFilmstrips[pair.from]?.cancel()
+            inflightFilmstrips[pair.to]?.cancel()
+            inflightFilmstrips.removeValue(forKey: pair.from)
+            inflightFilmstrips.removeValue(forKey: pair.to)
+            for edge in Self.detailPreviewLongEdgeChoices {
+                let oldDK = inflightDetailPreviewKey(filePath: pair.from, longEdge: edge)
+                let newDK = inflightDetailPreviewKey(filePath: pair.to, longEdge: edge)
+                inflightDetailPreviews[oldDK]?.cancel()
+                inflightDetailPreviews[newDK]?.cancel()
+                inflightDetailPreviews.removeValue(forKey: oldDK)
+                inflightDetailPreviews.removeValue(forKey: newDK)
+            }
+            inflightLock.unlock()
+
             onProgress?(index + 1, total)
         }
 
@@ -1174,24 +1218,18 @@ final class ThumbnailService: @unchecked Sendable {
 
             if name == "\(oldH).jpg" {
                 let dest = cacheDirectory.appendingPathComponent("\(newH).jpg")
-                if !fm.fileExists(atPath: dest.path) {
-                    try? fm.moveItem(at: url, to: dest)
-                }
+                moveOrReplaceCacheFile(from: url, to: dest, fm: fm)
                 continue
             }
             if name == "\(oldH)_detail.jpg" {
                 let dest = cacheDirectory.appendingPathComponent("\(newH)_detail_1080.jpg")
-                if !fm.fileExists(atPath: dest.path) {
-                    try? fm.moveItem(at: url, to: dest)
-                }
+                moveOrReplaceCacheFile(from: url, to: dest, fm: fm)
                 continue
             }
             if name.hasPrefix("\(oldH)_") {
                 let rest = String(name.dropFirst(oldH.count))
                 let dest = cacheDirectory.appendingPathComponent("\(newH)\(rest)")
-                if !fm.fileExists(atPath: dest.path) {
-                    try? fm.moveItem(at: url, to: dest)
-                }
+                moveOrReplaceCacheFile(from: url, to: dest, fm: fm)
             }
         }
     }
