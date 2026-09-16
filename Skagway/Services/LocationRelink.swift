@@ -50,7 +50,7 @@ enum LocationRelink {
     ///
     /// So `/Volumes/Media` and `/Volumes/Media/Shows` both sort before `/Volumes/Media 2`
     /// (full-string compare wrongly puts `Media 2` first because space < `/`).
-    static func comparePathComponentWise(_ lhs: String, _ rhs: String) -> ComparisonResult {
+    static func comparePathsByComponents(_ lhs: String, _ rhs: String) -> ComparisonResult {
         let a = pathSortComponents(lhs)
         let b = pathSortComponents(rhs)
         let n = min(a.count, b.count)
@@ -234,7 +234,7 @@ enum LocationRelink {
 
         onProgress?(1.0)
         return result.sorted {
-            comparePathComponentWise($0.path, $1.path) == .orderedAscending
+            comparePathsByComponents($0.path, $1.path) == .orderedAscending
         }
     }
 

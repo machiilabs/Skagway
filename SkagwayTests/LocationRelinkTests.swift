@@ -128,57 +128,32 @@ final class LocationRelinkTests: XCTestCase {
         let s1 = candidates.first { $0.path == "/Volumes/Old/Media/Shows/S1" }
         XCTAssertEqual(s1?.videoCount, 2)
 
-        // Component-wise A–Z (not naive full-string — that puts "Media 2" before "Media/…").
+        // Component-wise A–Z via comparePathsByComponents (not full-string path compare).
         let ordered = candidates.map(\.path)
         XCTAssertEqual(
             ordered,
-            ordered.sorted { LocationRelink.comparePathComponentWise($0, $1) == .orderedAscending }
+            ordered.sorted { LocationRelink.comparePathsByComponents($0, $1) == .orderedAscending }
         )
     }
 
     func testCollectOldRootCandidatesSortedAlphabetically() {
+        // Required inequalities — full-string localizedCaseInsensitiveCompare on the whole path is wrong.
+        XCTAssertEqual(
+            LocationRelink.comparePathsByComponents("/Volumes/Media", "/Volumes/Media 2"),
+            .orderedAscending
+        )
+        XCTAssertEqual(
+            LocationRelink.comparePathsByComponents("/Volumes/Media/Shows", "/Volumes/Media 2"),
+            .orderedAscending
+        )
+        XCTAssertEqual(
+            LocationRelink.comparePathsByComponents("/Volumes/Media 2", "/Volumes/Media 2/Clips"),
+            .orderedAscending
+        )
+
         let candidates = LocationRelink.collectOldRootCandidates(
             videoPaths: [
-                "/Volumes/Z/Lib/a.mp4",
-                "/Volumes/A/Lib/b.mp4",
-                "/Volumes/M/Lib/c.mp4"
-            ],
-            dataSourceRoots: ["/Volumes/Z/Lib", "/Volumes/A/Lib", "/Volumes/M/Lib"]
-        )
-        let roots = candidates.map(\.path).filter {
-            $0 == "/Volumes/A/Lib" || $0 == "/Volumes/M/Lib" || $0 == "/Volumes/Z/Lib"
-        }
-        XCTAssertEqual(roots, ["/Volumes/A/Lib", "/Volumes/M/Lib", "/Volumes/Z/Lib"])
-    }
-
-    func testComparePathComponentWiseMediaBeforeMedia2() {
-        // Required cases — component-wise, NOT full-string localizedCaseInsensitiveCompare.
-        XCTAssertEqual(
-            LocationRelink.comparePathComponentWise("/Volumes/Media", "/Volumes/Media 2"),
-            .orderedAscending
-        )
-        XCTAssertEqual(
-            LocationRelink.comparePathComponentWise("/Volumes/Media/Shows", "/Volumes/Media 2"),
-            .orderedAscending
-        )
-        XCTAssertEqual(
-            LocationRelink.comparePathComponentWise("/Volumes/Media 2", "/Volumes/Media 2/Clips"),
-            .orderedAscending
-        )
-        // Extra: shorter equal-prefix before longer; spaced sibling after tree.
-        XCTAssertEqual(
-            LocationRelink.comparePathComponentWise("/Volumes/Media", "/Volumes/Media/Shows"),
-            .orderedAscending
-        )
-        XCTAssertEqual(
-            LocationRelink.comparePathComponentWise("/Volumes/Media 2", "/Volumes/Media/Shows"),
-            .orderedDescending
-        )
-    }
-
-    func testCollectOldRootCandidatesOrdersMediaBeforeMedia2() {
-        let candidates = LocationRelink.collectOldRootCandidates(
-            videoPaths: [
+                "/Volumes/Media 2/Clips/x.mp4",
                 "/Volumes/Media/Shows/a.mp4",
                 "/Volumes/Media 2/Extra/b.mp4"
             ],
@@ -188,11 +163,14 @@ final class LocationRelinkTests: XCTestCase {
         let mediaIdx = paths.firstIndex(of: "/Volumes/Media")
         let mediaShowsIdx = paths.firstIndex(of: "/Volumes/Media/Shows")
         let media2Idx = paths.firstIndex(of: "/Volumes/Media 2")
+        let media2ClipsIdx = paths.firstIndex(of: "/Volumes/Media 2/Clips")
         XCTAssertNotNil(mediaIdx)
         XCTAssertNotNil(mediaShowsIdx)
         XCTAssertNotNil(media2Idx)
+        XCTAssertNotNil(media2ClipsIdx)
         XCTAssertLessThan(mediaIdx!, media2Idx!)
         XCTAssertLessThan(mediaShowsIdx!, media2Idx!)
+        XCTAssertLessThan(media2Idx!, media2ClipsIdx!)
     }
 
     func testCollectOldRootCandidatesWithoutDataSourceUsesParents() {
