@@ -12,6 +12,8 @@ struct CuratedWallCard: View {
     @Binding var renameText: String
     @Binding var titleEditText: String
     let thumbnailService: ThumbnailService
+    /// Wall media: poster still vs 2×3 storyboard collage (same card chrome/size either way).
+    var displayMode: GridDisplayMode = .poster
     /// True while this video has an active (queued or in-flight) cross-volume move — shows a
     /// spinner badge over the thumbnail so the "frozen" state is visible without right-clicking.
     var isMoving: Bool = false
@@ -20,6 +22,8 @@ struct CuratedWallCard: View {
     var resumeFraction: Double? = nil
     /// When false (e.g. main floating player is open), skip live hover scrub to avoid fighting AVFoundation.
     var hoverPreviewEnabled: Bool = true
+    /// Bumped when filmstrips regenerate so storyboard cards that bake from them can refresh.
+    var filmstripRefreshId: Int = 0
     /// Accent grip drawn on the thumbnail while an album is the active filter (visual only).
     var showAlbumReorderHandle: Bool = false
     var renameFocus: FocusState<Bool>.Binding
@@ -200,16 +204,42 @@ struct CuratedWallCard: View {
             stopHoverPreview()
             selectionState.isHovering = false
         }
-        .task(id: "\(video.filePath)|\(video.thumbnailPath ?? "")") {
-            if let lo = thumbnailService.loadThumbnail(for: video.filePath) {
-                thumbnail = lo
-            }
+        .task(id: "\(video.filePath)|\(video.thumbnailPath ?? "")|\(displayMode.rawValue)|\(filmstripRefreshId)") {
             detailUpgradeTask?.cancel()
-            detailUpgradeTask = Task {
-                if let hi = await thumbnailService.detailPreviewImage(for: video, longEdge: 720) {
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        self.thumbnail = hi
+            detailUpgradeTask = nil
+            switch displayMode {
+            case .poster:
+                if let lo = thumbnailService.loadThumbnail(for: video.filePath) {
+                    thumbnail = lo
+                } else {
+                    thumbnail = nil
+                }
+                detailUpgradeTask = Task {
+                    if let hi = await thumbnailService.detailPreviewImage(for: video, longEdge: 720) {
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            self.thumbnail = hi
+                        }
+                    }
+                }
+            case .storyboard:
+                if let cached = thumbnailService.loadStoryboard(for: video.filePath) {
+                    thumbnail = cached
+                } else if let poster = thumbnailService.loadThumbnail(for: video.filePath) {
+                    // Fast first paint while the 2×3 collage builds.
+                    thumbnail = poster
+                } else {
+                    thumbnail = nil
+                }
+                detailUpgradeTask = Task {
+                    do {
+                        let collage = try await thumbnailService.generateStoryboard(for: video)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            self.thumbnail = collage
+                        }
+                    } catch {
+                        // Leave poster/placeholder; avoid noisy errors while scrolling.
                     }
                 }
             }
@@ -249,9 +279,10 @@ struct CuratedWallCard: View {
                 if let thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        // Storyboard must show all six frames; poster fills the card.
+                        .aspectRatio(contentMode: displayMode == .storyboard ? .fit : .fill)
                 } else {
-                    Image(systemName: "film")
+                    Image(systemName: displayMode == .storyboard ? "square.grid.3x2" : "film")
                         .font(.title2)
                         .foregroundStyle(Color.appTextTertiary.opacity(0.5))
                 }

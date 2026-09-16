@@ -225,6 +225,12 @@ final class LibraryViewModel {
             updateCurrentLayoutFromLive()
         }
     }
+    /// Wall grid media: poster still (default) or 2×3 storyboard collage. List ignores this.
+    var gridDisplayMode: GridDisplayMode = .poster {
+        didSet {
+            UserDefaults.standard.set(gridDisplayMode.rawValue, forKey: Self.gridDisplayModeKey)
+        }
+    }
     var gridSize: GridSize = .medium {
         didSet {
             guard !_applyingLayout else { return }
@@ -2258,6 +2264,7 @@ final class LibraryViewModel {
     // MARK: - Preferences Persistence
 
     private static let viewModeKey = "Skagway.viewMode"
+    private static let gridDisplayModeKey = PrefsKeys.gridDisplayMode
     private static let gridSizeKey = "Skagway.gridSize"
     private static let sortColumnKey = "Skagway.sortColumn"
     private static let sortAscendingKey = "Skagway.sortAscending"
@@ -2976,6 +2983,10 @@ final class LibraryViewModel {
         playAllLoops = defaults.object(forKey: Self.playAllLoopsKey) as? Bool
             ?? defaults.bool(forKey: "Skagway.albumPlaylistLoops")
         gridHoverPreviewEnabled = defaults.object(forKey: Self.gridHoverPreviewEnabledKey) as? Bool ?? true
+        if let raw = defaults.string(forKey: Self.gridDisplayModeKey),
+           let mode = GridDisplayMode(rawValue: raw) {
+            gridDisplayMode = mode
+        }
         if let w = defaults.object(forKey: Self.playerFloatingWidthKey) as? Double, w > 0,
            let h = defaults.object(forKey: Self.playerFloatingHeightKey) as? Double, h > 0 {
             playerFloatingSize = CGSize(width: w, height: h)
