@@ -148,6 +148,10 @@ struct LocationRelinkSheet: View {
         .onChange(of: presentation.preferredOldRoot) { _, _ in
             applyPreferredSelectionIfNeeded()
         }
+        .onChange(of: viewModel.reconnectMissingClipCount) { _, _ in
+            // Full missing scan may finish after the sheet opens — refresh Destinations scope.
+            recomputePreview()
+        }
     }
 
     private func applyPreferredSelectionIfNeeded() {

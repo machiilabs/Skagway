@@ -977,7 +977,8 @@ final class LibraryViewModel {
     }
 
     /// Opens the unified Reconnect sheet immediately, then fills the folder list in the background.
-    /// Never blocks the click — callers must not show an outside “Opening…” state.
+    /// Also refreshes the full missing set (same scan as Missing smart library) so Destinations
+    /// and banner-derived scope cover every missing clip — not only a focused orphan.
     /// Banner and File → Reconnect… share this entry (one product story).
     func beginLocationRelink(
         preferredOldRoot: String? = nil,
@@ -985,13 +986,14 @@ final class LibraryViewModel {
         startAtNewFolder: Bool = false
     ) {
         guard locationRelinkPresentation == nil else { return }
+        guard !isApplyingLocationRelink else { return }
         let requestedPreferred: String? = {
             guard let preferredOldRoot, !preferredOldRoot.isEmpty else { return nil }
             return LocationRelink.normalizeRoot(preferredOldRoot)
         }()
         let mode = initialMode
             ?? LocationRelink.ReconnectMode.suggested(for: libraryFolderMissingBannerSituation)
-        // Present the sheet in this click turn — catalog work starts only after SwiftUI can paint.
+        // Present the sheet in this click turn — catalog + missing scan start after SwiftUI can paint.
         locationRelinkPresentation = LocationRelinkPresentation(
             preferredOldRoot: requestedPreferred,
             candidates: [],
@@ -1004,22 +1006,31 @@ final class LibraryViewModel {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             Task { @MainActor in
+                async let missingScan: Void = self.refreshMissingCount()
                 await self.loadLocationRelinkCandidates(requestedPreferred: requestedPreferred)
+                await missingScan
             }
         }
     }
 
-    /// Banner CTA — same Reconnect product; happy-path jumps toward Choose new folder when possible.
+    /// Banner CTA — same Reconnect product; awaits a full missing scan first so the sheet
+    /// opens already scoped to every missing clip (not only the focused orphan).
     func beginReconnectFromBanner() {
-        let preferred = libraryFolderMissingBannerPreferredRoot
-        let situation = libraryFolderMissingBannerSituation
-        let mode = LocationRelink.ReconnectMode.suggested(for: situation)
-        let skipOld = mode == .wholeFolder && preferred != nil
-        beginLocationRelink(
-            preferredOldRoot: preferred,
-            initialMode: mode,
-            startAtNewFolder: skipOld
-        )
+        guard locationRelinkPresentation == nil else { return }
+        guard !isApplyingLocationRelink else { return }
+        Task { @MainActor in
+            await refreshMissingCount()
+            guard locationRelinkPresentation == nil else { return }
+            let preferred = libraryFolderMissingBannerPreferredRoot
+            let situation = libraryFolderMissingBannerSituation
+            let mode = LocationRelink.ReconnectMode.suggested(for: situation)
+            let skipOld = mode == .wholeFolder && preferred != nil
+            beginLocationRelink(
+                preferredOldRoot: preferred,
+                initialMode: mode,
+                startAtNewFolder: skipOld
+            )
+        }
     }
 
     private func updateLocationRelinkCatalogProgress(_ fraction: Double) {
@@ -4520,8 +4531,10 @@ final class LibraryViewModel {
         noteMissingClipFocusIfNeeded(path: path)
     }
 
-    /// Show the Library folder missing banner when a clip’s file is gone.
-    /// Does not auto-open Repair Links (offline ≠ force repair). Idempotent (no flicker).
+    /// Show the Missing / Reconnect banner when a clip’s file is gone.
+    /// Does not auto-open Reconnect (offline ≠ force repair). Idempotent (no flicker).
+    /// Triggers the same full-library missing scan as the Missing smart library so banner
+    /// count and Reconnect scope cover every missing clip, not only the focused orphan.
     private func noteMissingClipFocusIfNeeded(path: String) {
         let knownMissing = missingVideoIds.contains(path)
         let missingOnDisk = !FileManager.default.fileExists(atPath: path)
@@ -4555,6 +4568,18 @@ final class LibraryViewModel {
 
         showRepairLinksBannerFromMissingClick = true
         updateRepairLinksBannerPreferredRoot(forMissingPath: path)
+
+        // Full scan (cheap) — banner + Reconnect then reflect the complete missing set.
+        let anchorPath = path
+        Task { @MainActor in
+            await self.refreshMissingCount()
+            guard self.missingVideoIds.contains(anchorPath) || !self.missingVideoIds.isEmpty else {
+                self.showRepairLinksBannerFromMissingClick = false
+                return
+            }
+            self.showRepairLinksBannerFromMissingClick = true
+            self.updateRepairLinksBannerPreferredRoot(forMissingPath: anchorPath)
+        }
     }
 
     private func updateRepairLinksBannerPreferredRoot(forMissingPath path: String) {
@@ -6006,7 +6031,25 @@ final class LibraryViewModel {
         startDrainingMovesIfNeeded()
     }
 
+    private var missingRefreshTask: Task<Void, Never>?
+
     func refreshMissingCount() async {
+        if let inflight = missingRefreshTask {
+            await inflight.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performRefreshMissingCount()
+        }
+        missingRefreshTask = task
+        await task.value
+        if missingRefreshTask == task {
+            missingRefreshTask = nil
+        }
+    }
+
+    private func performRefreshMissingCount() async {
         guard !isRefreshingMissing else { return }
         isRefreshingMissing = true
         defer { isRefreshingMissing = false }

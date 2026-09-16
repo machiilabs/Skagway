@@ -150,18 +150,10 @@ struct OverlayInlinePlayerView: View {
                     if missingOnDisk {
                         Button {
                             let path = (playback.currentVideo ?? video).filePath
-                            let preferred = viewModel.libraryFolderMissingBannerPreferredRoot
-                            let mode = LocationRelink.ReconnectMode.suggested(
-                                for: viewModel.libraryFolderMissingBannerSituation
-                            )
-                            // Sheet first — never an outside “Opening…” wait. Then clear the floating
-                            // Playback Failed surface so the sheet isn’t buried under the overlay.
-                            viewModel.beginLocationRelink(
-                                preferredOldRoot: preferred,
-                                initialMode: mode,
-                                startAtNewFolder: mode == .wholeFolder && preferred != nil
-                            )
+                            // Raise banner + full missing scan, then open the same Reconnect product
+                            // scoped to every missing clip (not only this orphan).
                             viewModel.noteLibraryFileMissing(path: path)
+                            viewModel.beginReconnectFromBanner()
                             playback.dismissError()
                             viewModel.isPlayingInline = false
                         } label: {

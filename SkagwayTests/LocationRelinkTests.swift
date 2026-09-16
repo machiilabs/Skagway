@@ -301,9 +301,13 @@ final class LocationRelinkTests: XCTestCase {
         }
         let copy = LocationRelink.bannerCopy(for: situation)
         XCTAssertEqual(copy.title, "Some clips are missing")
-        XCTAssertTrue(copy.body.contains("2 clips"))
+        XCTAssertTrue(copy.body.hasPrefix("2 clips are gone"))
         XCTAssertEqual(copy.cta, "Reconnect…")
         XCTAssertEqual(copy.icon, "doc.badge.ellipsis")
+
+        let single = LocationRelink.bannerCopy(for: .parentPresent(missingCount: 1))
+        XCTAssertTrue(single.body.hasPrefix("1 clip is gone"))
+        XCTAssertFalse(single.body.contains("1 clips"))
     }
 
     func testClassifyScatteredAcrossDistinctParents() {

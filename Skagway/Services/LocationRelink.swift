@@ -532,10 +532,15 @@ enum LocationRelink {
             )
         case .parentPresent(let missingCount):
             let n = max(missingCount, 1)
-            let clipWord = n == 1 ? "clip" : "clips"
+            let body: String
+            if n == 1 {
+                body = "1 clip is gone from this folder. Other clips here are fine — locate where the missing ones moved."
+            } else {
+                body = "\(n) clips are gone from this folder. Other clips here are fine — locate where the missing ones moved."
+            }
             return BannerCopy(
                 title: "Some clips are missing",
-                body: "\(n) \(clipWord) are gone from this folder. Other clips here are fine — locate where the missing ones moved.",
+                body: body,
                 cta: "Reconnect…",
                 icon: "doc.badge.ellipsis"
             )
