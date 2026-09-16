@@ -42,6 +42,7 @@ enum PrefsKeys {
     static let confirmDeletions = "Skagway.confirmDeletions"
     static let showThumbnailInDetail = "Skagway.showThumbnailInDetail"
     static let gridHoverPreviewEnabled = "Skagway.gridHoverPreviewEnabled"
+    static let storyboardDensity = "Skagway.storyboardDensity"
     static let browsingLayout = "Skagway.browsingLayout"
     static let filmstripRows = "Skagway.filmstripRows"
     static let filmstripColumns = "Skagway.filmstripColumns"
@@ -116,6 +117,7 @@ enum PrefsKeys {
         "surpriseMeAutoPlays",
         "playAllLoops",
         "gridHoverPreviewEnabled",
+        "storyboardDensity",
         "playerFloatingWidth",
         "playerFloatingHeight",
         "playerFloatingPositionX",

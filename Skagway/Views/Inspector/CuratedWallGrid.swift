@@ -71,28 +71,54 @@ struct CuratedWallGrid: View {
     @State private var albumReorderTargetId: String?
 
     private var isStoryboard: Bool { viewModel.viewMode == .storyboard }
+    private var storyboardDensity: StoryboardDensity { viewModel.storyboardDensity }
 
     // Max from the full-window mock; live `columns` is the source of truth for ↑/↓ row steps
     // in ContentView and for scroll-to-row math below.
     static let maxColumns = 5
-    static let storyboardMaxColumns = 3
     private(set) static var columns = 5
     /// Whole-card floor: thumb (188) + under-thumb row + card padding ≈ 220.
     private static let minCellWidth: CGFloat = 220
-    /// Storyboard cards need more width so the 2×3 collage frames stay readable (height follows 960∶360).
-    private static let storyboardMinCellWidth: CGFloat = 360
     private static let spacing: CGFloat = 22
-    /// Storyboard: tighter gutters — row spacing especially, to reclaim vertical chrome without shrinking frames.
-    private static let storyboardColumnSpacing: CGFloat = 16
-    private static let storyboardRowSpacing: CGFloat = 12
     private static let outerPadding: CGFloat = 18
-    private static let storyboardOuterPadding: CGFloat = 12
 
-    private var activeMaxColumns: Int { isStoryboard ? Self.storyboardMaxColumns : Self.maxColumns }
-    private var activeMinCellWidth: CGFloat { isStoryboard ? Self.storyboardMinCellWidth : Self.minCellWidth }
-    private var columnSpacing: CGFloat { isStoryboard ? Self.storyboardColumnSpacing : Self.spacing }
-    private var rowSpacing: CGFloat { isStoryboard ? Self.storyboardRowSpacing : Self.spacing }
-    private var outerPadding: CGFloat { isStoryboard ? Self.storyboardOuterPadding : Self.outerPadding }
+    /// Storyboard packing knobs — Compact matches the prior tight wall; Comfortable is airier.
+    private var storyboardMaxColumns: Int {
+        switch storyboardDensity {
+        case .compact: return 3
+        case .comfortable: return 2
+        }
+    }
+    private var storyboardMinCellWidth: CGFloat {
+        switch storyboardDensity {
+        case .compact: return 360
+        case .comfortable: return 440
+        }
+    }
+    private var storyboardColumnSpacing: CGFloat {
+        switch storyboardDensity {
+        case .compact: return 16
+        case .comfortable: return 28
+        }
+    }
+    private var storyboardRowSpacing: CGFloat {
+        switch storyboardDensity {
+        case .compact: return 12
+        case .comfortable: return 22
+        }
+    }
+    private var storyboardOuterPadding: CGFloat {
+        switch storyboardDensity {
+        case .compact: return 12
+        case .comfortable: return 18
+        }
+    }
+
+    private var activeMaxColumns: Int { isStoryboard ? storyboardMaxColumns : Self.maxColumns }
+    private var activeMinCellWidth: CGFloat { isStoryboard ? storyboardMinCellWidth : Self.minCellWidth }
+    private var columnSpacing: CGFloat { isStoryboard ? storyboardColumnSpacing : Self.spacing }
+    private var rowSpacing: CGFloat { isStoryboard ? storyboardRowSpacing : Self.spacing }
+    private var outerPadding: CGFloat { isStoryboard ? storyboardOuterPadding : Self.outerPadding }
 
     /// Largest `1...maxColumns` such that flexible cells are at least `minCellWidth` wide.
     /// Invalid/zero widths keep `maxColumns` so a transient layout pass can't pin the grid at 1.
@@ -142,6 +168,7 @@ struct CuratedWallGrid: View {
                             titleEditText: isEditingTitleRow ? $viewModel.titleEditText : .constant(""),
                             thumbnailService: thumbnailService,
                             displayMode: isStoryboard ? WallCardMediaMode.storyboard : .poster,
+                            storyboardDensity: isStoryboard ? storyboardDensity : .compact,
                             isMoving: isMoving,
                             resumeFraction: resumeFraction(for: video),
                             hoverPreviewEnabled: !isStoryboard
@@ -159,9 +186,12 @@ struct CuratedWallGrid: View {
                                 ? { location, size in
                                     playStoryboardCell(video, at: location, size: size)
                                 }
+                                : nil,
+                            onStoryboardChromeSelect: isStoryboard && !viewModel.isViewingAlbum
+                                ? { handleSelection(video) }
                                 : nil
                         )
-                        .id("\(video.id)|\(viewModel.filmstripRefreshId)|\(viewModel.viewMode.rawValue)")
+                        .id("\(video.id)|\(viewModel.filmstripRefreshId)|\(viewModel.viewMode.rawValue)|\(storyboardDensity.rawValue)")
                         .contentShape(Rectangle())
                         .modifier(AlbumSelectionGestures(
                             enabled: !viewModel.isViewingAlbum && !isStoryboard,
@@ -451,6 +481,10 @@ struct CuratedWallGrid: View {
             }
             .onChange(of: cols, initial: true) { _, n in
                 if Self.columns != n { Self.columns = n }
+            }
+            .onChange(of: viewModel.storyboardDensity) { _, _ in
+                // Force column static refresh when density changes while Storyboard is active.
+                if Self.columns != cols { Self.columns = cols }
             }
         .sheet(item: $filmstripSession) { session in
             FilmstripConfigView(

@@ -385,6 +385,26 @@ private struct LibraryContentView: View {
             }
             .controlSize(.small)
 
+            if vm.viewMode == .storyboard {
+                AppSegmentedControl(
+                    selection: Binding(
+                        get: { vm.storyboardDensity },
+                        set: { vm.storyboardDensity = $0 }
+                    ),
+                    items: StoryboardDensity.allCases,
+                    tooltip: { density in
+                        switch density {
+                        case .compact: "Compact storyboard — more columns, tighter gaps"
+                        case .comfortable: "Comfortable storyboard — fewer columns, more space"
+                        }
+                    }
+                ) { density in
+                    Text(density.label)
+                }
+                .controlSize(.small)
+                .help("Storyboard density")
+            }
+
             sortCluster
 
             Divider().frame(height: 16)

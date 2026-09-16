@@ -66,6 +66,21 @@ enum ViewMode: String, CaseIterable {
     }
 }
 
+/// Storyboard View packing only (persisted separately from Grid/List).
+enum StoryboardDensity: String, CaseIterable, Identifiable {
+    case compact
+    case comfortable
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .compact: return "Compact"
+        case .comfortable: return "Comfortable"
+        }
+    }
+}
+
 /// Media shown inside a Curated Wall card (poster still vs 2×3 storyboard collage).
 enum WallCardMediaMode: String {
     case poster

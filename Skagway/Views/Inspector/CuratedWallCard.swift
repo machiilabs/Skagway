@@ -14,6 +14,8 @@ struct CuratedWallCard: View {
     let thumbnailService: ThumbnailService
     /// Wall media: poster still vs 2×3 storyboard collage.
     var displayMode: WallCardMediaMode = .poster
+    /// Storyboard packing density (ignored for poster cards).
+    var storyboardDensity: StoryboardDensity = .compact
     /// True while this video has an active (queued or in-flight) cross-volume move — shows a
     /// spinner badge over the thumbnail so the "frozen" state is visible without right-clicking.
     var isMoving: Bool = false
@@ -34,9 +36,29 @@ struct CuratedWallCard: View {
     var onRenameEditingChanged: (Bool) -> Void
     /// Storyboard View: click a collage cell → seek/play at that cell’s stored sample time.
     var onStoryboardCellPlay: ((CGPoint, CGSize) -> Void)? = nil
+    /// Storyboard View: click title / footer chrome → select only (no seek).
+    var onStoryboardChromeSelect: (() -> Void)? = nil
 
     private var isInlineEditing: Bool { isRenaming || isEditingTitle }
     private var isStoryboard: Bool { displayMode == .storyboard }
+    private var isComfortableStoryboard: Bool {
+        isStoryboard && storyboardDensity == .comfortable
+    }
+
+    /// On-collage title band height (also the select-only hit strip over the bottom of the collage).
+    private var storyboardTitleBandHeight: CGFloat {
+        isComfortableStoryboard ? 52 : 40
+    }
+    /// Under-thumb date/rating strip — intentionally fat so select isn’t a hairline.
+    private var storyboardFooterMinHeight: CGFloat {
+        isComfortableStoryboard ? 40 : 28
+    }
+    private var storyboardCardPadding: CGFloat {
+        isComfortableStoryboard ? 10 : 6
+    }
+    private var storyboardFooterVSpacing: CGFloat {
+        isComfortableStoryboard ? 4 : 2
+    }
 
     @State private var thumbnail: NSImage?
     @State private var isHovering = false
@@ -61,7 +83,7 @@ struct CuratedWallCard: View {
         let isSelected = selectionState.isSelected
         let isFocused = selectionState.isFocused
         let titleVisible = !isInlineEditing && previewPlayer == nil
-        VStack(alignment: .leading, spacing: isStoryboard ? 2 : 6) {
+        VStack(alignment: .leading, spacing: isStoryboard ? storyboardFooterVSpacing : 6) {
             ZStack(alignment: .bottom) {
                 thumbMedia
                     .modifier(StoryboardThumbSizing(
@@ -74,14 +96,20 @@ struct CuratedWallCard: View {
                     .overlay {
                         if isStoryboard, let onStoryboardCellPlay, !isMoving, !isInlineEditing {
                             GeometryReader { geo in
+                                // Seek only above the title band; title/footer chrome selects separately.
+                                let seekHeight = max(0, geo.size.height - storyboardTitleBandHeight)
                                 Color.clear
+                                    .frame(width: geo.size.width, height: seekHeight, alignment: .top)
                                     .contentShape(Rectangle())
                                     .highPriorityGesture(
                                         SpatialTapGesture()
                                             .onEnded { value in
-                                                onStoryboardCellPlay(value.location, geo.size)
+                                                // Remap into full-collage coordinates so cell indices stay correct.
+                                                let fullSize = geo.size
+                                                onStoryboardCellPlay(value.location, fullSize)
                                             }
                                     )
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             }
                         }
                     }
@@ -148,7 +176,7 @@ struct CuratedWallCard: View {
                 }
             }
 
-            // Under-thumb row stays compact (date + stars) so card height is stable with on-scrim titles.
+            // Under-thumb row: date + stars. Storyboard keeps this intentionally tall for select-only hits.
             VStack(alignment: .leading, spacing: 1) {
                 if isInlineEditing {
                     TextField("", text: isEditingTitle ? $titleEditText : $renameText)
@@ -176,7 +204,7 @@ struct CuratedWallCard: View {
 
                 HStack(spacing: 6) {
                     Text(video.dateAdded.formatted(date: .abbreviated, time: .omitted))
-                        .font(.system(size: 9))
+                        .font(.system(size: isComfortableStoryboard ? 11 : 9))
                         .foregroundStyle(Color.appTextTertiary)
 
                     Spacer(minLength: 0)
@@ -185,7 +213,7 @@ struct CuratedWallCard: View {
                         HStack(spacing: 1) {
                             ForEach(0..<video.rating, id: \.self) { _ in
                                 Image(systemName: "star.fill")
-                                    .font(.system(size: 8))
+                                    .font(.system(size: isComfortableStoryboard ? 10 : 8))
                                     .foregroundStyle(.yellow)
                             }
                         }
@@ -193,9 +221,15 @@ struct CuratedWallCard: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 2)
+            .frame(maxWidth: .infinity, minHeight: isStoryboard ? storyboardFooterMinHeight : nil, alignment: .center)
+            .padding(.horizontal, isStoryboard ? 4 : 2)
+            .contentShape(Rectangle())
+            .modifier(StoryboardChromeTap(
+                enabled: isStoryboard && onStoryboardChromeSelect != nil && !isInlineEditing,
+                onSelect: { onStoryboardChromeSelect?() }
+            ))
         }
-        .padding(isStoryboard ? 4 : 8)
+        .padding(isStoryboard ? storyboardCardPadding : 8)
         .background(
             RoundedRectangle(cornerRadius: corner + 2, style: .continuous)
                 .fill(
@@ -322,23 +356,29 @@ struct CuratedWallCard: View {
     private var titleScrim: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
+                .allowsHitTesting(false)
             LinearGradient(
                 colors: [.clear, .black.opacity(0.55), .black.opacity(0.78)],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: isStoryboard ? 44 : 56)
+            .frame(height: isStoryboard ? storyboardTitleBandHeight : 56)
             .overlay(alignment: .bottomLeading) {
                 Text(video.displayTitle)
-                    .font(.system(size: isStoryboard ? 10 : 11, weight: .semibold))
+                    .font(.system(size: isComfortableStoryboard ? 12 : (isStoryboard ? 10 : 11), weight: .semibold))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.55), radius: 1, y: 1)
                     .lineLimit(isStoryboard ? 1 : 2)
                     .padding(.horizontal, isStoryboard ? 6 : 8)
-                    .padding(.bottom, isStoryboard ? 4 : 7)
+                    .padding(.bottom, isStoryboard ? (isComfortableStoryboard ? 8 : 4) : 7)
             }
+            .contentShape(Rectangle())
+            .modifier(StoryboardChromeTap(
+                enabled: isStoryboard && onStoryboardChromeSelect != nil,
+                onSelect: { onStoryboardChromeSelect?() }
+            ))
+            .allowsHitTesting(isStoryboard && onStoryboardChromeSelect != nil)
         }
-        .allowsHitTesting(false)
     }
 
     private var topBadgeCluster: some View {
@@ -406,6 +446,21 @@ struct CuratedWallCard: View {
                 content.aspectRatio(aspectRatio, contentMode: .fit)
             } else {
                 content.frame(height: posterHeight)
+            }
+        }
+    }
+
+    /// Select-only tap for storyboard title / footer chrome (does not start playback).
+    private struct StoryboardChromeTap: ViewModifier {
+        var enabled: Bool
+        let onSelect: () -> Void
+
+        func body(content: Content) -> some View {
+            if enabled {
+                content
+                    .highPriorityGesture(TapGesture().onEnded(onSelect))
+            } else {
+                content
             }
         }
     }

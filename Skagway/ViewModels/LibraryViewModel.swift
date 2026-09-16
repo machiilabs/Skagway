@@ -2414,6 +2414,7 @@ final class LibraryViewModel {
     private static let surpriseMeAutoPlaysKey = "Skagway.surpriseMeAutoPlays"
     private static let playAllLoopsKey = "Skagway.playAllLoops"
     private static let gridHoverPreviewEnabledKey = "Skagway.gridHoverPreviewEnabled"
+    private static let storyboardDensityKey = PrefsKeys.storyboardDensity
     private static let playerFloatingWidthKey = "Skagway.playerFloatingWidth"
     private static let playerFloatingHeightKey = "Skagway.playerFloatingHeight"
     private static let playerFloatingPositionXKey = "Skagway.playerFloatingPositionX"
@@ -2592,6 +2593,14 @@ final class LibraryViewModel {
     var gridHoverPreviewEnabled: Bool = true {
         didSet {
             UserDefaults.standard.set(gridHoverPreviewEnabled, forKey: Self.gridHoverPreviewEnabledKey)
+        }
+    }
+
+    /// Storyboard View packing only (Compact = tight default; Comfortable = fewer/wider cards).
+    var storyboardDensity: StoryboardDensity = .compact {
+        didSet {
+            guard storyboardDensity != oldValue else { return }
+            UserDefaults.standard.set(storyboardDensity.rawValue, forKey: Self.storyboardDensityKey)
         }
     }
 
@@ -3118,6 +3127,11 @@ final class LibraryViewModel {
         playAllLoops = defaults.object(forKey: Self.playAllLoopsKey) as? Bool
             ?? defaults.bool(forKey: "Skagway.albumPlaylistLoops")
         gridHoverPreviewEnabled = defaults.object(forKey: Self.gridHoverPreviewEnabledKey) as? Bool ?? true
+        if let raw = defaults.string(forKey: Self.storyboardDensityKey),
+           let density = StoryboardDensity(rawValue: raw)
+        {
+            storyboardDensity = density
+        }
         if let w = defaults.object(forKey: Self.playerFloatingWidthKey) as? Double, w > 0,
            let h = defaults.object(forKey: Self.playerFloatingHeightKey) as? Double, h > 0 {
             playerFloatingSize = CGSize(width: w, height: h)

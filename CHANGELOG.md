@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Storyboard hit targets + density** — Collage cells still seek/play (times sidecar). Title and fat footer chrome select only. Compact (default) vs Comfortable packing toggle sits beside the Grid/List/Storyboard control when Storyboard is active; preference is Storyboard-only.
 - **Fix: Storyboard click-to-play seek mismatch** — Collage bake now stores each cell’s sample time (`{hash}_storyboard_times.json`); click seeks to that time (precise AVPlayer seek). Filmstrip→storyboard remaps no longer jump to a different even-split slot. Legacy collages without times rebake automatically.
 - **Find missing folder…** — Missing-folder banner opens a **folder** sheet (`beginSheetModal`) for the orphan’s parent location (not a file hunt, not the Repair Links wizard). Chosen folder remaps all clips under the missing parent via relative paths / basename siblings; reuses Repair Links apply (DB, thumbs/storyboards, progress, Undo). File → **Repair Links…** stays the whole-Location wizard.
 - **Fix: Find missing file dialog hang** — Present the file panel synchronously from the banner click (same pattern as Repair Links’ folder picker). Calling `NSOpenPanel.runModal()` from `Task { await … }` on the MainActor deadlocked AppKit so the dialog froze.
