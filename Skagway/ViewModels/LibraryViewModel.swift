@@ -827,7 +827,9 @@ final class LibraryViewModel {
 
     struct LocationRelinkPresentation: Identifiable, Equatable {
         let id = UUID()
-        var oldRoot: String
+        /// Pre-selected old root when inferred from Missing; user can change in the sheet.
+        var preferredOldRoot: String?
+        var candidates: [LocationRelink.OldRootCandidate]
         var suggestedNewRoot: String?
     }
 
@@ -868,25 +870,40 @@ final class LibraryViewModel {
         )
     }
 
-    /// Opens the Relink sheet. Prefers the shared missing root; falls back to a folder picker for old root.
+    /// Known Location A options from catalog paths + data sources (never a filesystem picker).
+    func locationRelinkOldRootCandidates() async -> [LocationRelink.OldRootCandidate] {
+        let sources = (try? await dataSourceRepo.fetchAll()) ?? []
+        return LocationRelink.collectOldRootCandidates(
+            videoPaths: videos.map(\.filePath),
+            dataSourceRoots: sources.map(\.folderPath)
+        )
+    }
+
+    /// Opens the Relink sheet. Old location is chosen from known library paths — never via NSOpenPanel.
     func beginLocationRelink(preferredOldRoot: String? = nil) {
         Task { @MainActor in
-            let root: String
-            if let preferred = preferredOldRoot, !preferred.isEmpty {
-                root = LocationRelink.normalizeRoot(preferred)
-            } else if let inferred = await resolveSharedMissingRoot() {
-                root = inferred
-            } else {
-                let panel = NSOpenPanel()
-                panel.canChooseFiles = false
-                panel.canChooseDirectories = true
-                panel.allowsMultipleSelection = false
-                panel.message = "Select the old library folder location (the path that no longer exists)"
-                panel.prompt = "Use as Old Location"
-                guard panel.runModal() == .OK, let url = panel.url else { return }
-                root = LocationRelink.normalizeRoot(url.path)
+            let candidates = await locationRelinkOldRootCandidates()
+            guard !candidates.isEmpty else {
+                reportTransientError("No library folder paths available to relink")
+                return
             }
-            locationRelinkPresentation = LocationRelinkPresentation(oldRoot: root, suggestedNewRoot: nil)
+            let preferred: String?
+            if let preferredOldRoot, !preferredOldRoot.isEmpty,
+               candidates.contains(where: { $0.path.caseInsensitiveCompare(LocationRelink.normalizeRoot(preferredOldRoot)) == .orderedSame })
+            {
+                preferred = LocationRelink.normalizeRoot(preferredOldRoot)
+            } else if let inferred = await resolveSharedMissingRoot(),
+                      candidates.contains(where: { $0.path.caseInsensitiveCompare(inferred) == .orderedSame })
+            {
+                preferred = inferred
+            } else {
+                preferred = candidates.first?.path
+            }
+            locationRelinkPresentation = LocationRelinkPresentation(
+                preferredOldRoot: preferred,
+                candidates: candidates,
+                suggestedNewRoot: nil
+            )
         }
     }
 

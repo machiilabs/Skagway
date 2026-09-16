@@ -105,4 +105,46 @@ final class LocationRelinkTests: XCTestCase {
             LocationRelink.remapFolderPath("/elsewhere", oldRoot: "/old/Lib", newRoot: "/new/Lib")
         )
     }
+
+    func testCollectOldRootCandidatesIncludesDataSourceAndNestedFolders() {
+        let candidates = LocationRelink.collectOldRootCandidates(
+            videoPaths: [
+                "/Volumes/Old/Media/Shows/S1/ep1.mp4",
+                "/Volumes/Old/Media/Shows/S1/ep2.mp4",
+                "/Volumes/Old/Media/Movies/a.mp4"
+            ],
+            dataSourceRoots: ["/Volumes/Old/Media"]
+        )
+        let paths = Set(candidates.map(\.path))
+        XCTAssertTrue(paths.contains("/Volumes/Old/Media"))
+        XCTAssertTrue(paths.contains("/Volumes/Old/Media/Shows"))
+        XCTAssertTrue(paths.contains("/Volumes/Old/Media/Shows/S1"))
+        XCTAssertTrue(paths.contains("/Volumes/Old/Media/Movies"))
+
+        let media = candidates.first { $0.path == "/Volumes/Old/Media" }
+        XCTAssertEqual(media?.videoCount, 3)
+        XCTAssertTrue(media?.sources.contains(.dataSource) == true)
+
+        let s1 = candidates.first { $0.path == "/Volumes/Old/Media/Shows/S1" }
+        XCTAssertEqual(s1?.videoCount, 2)
+    }
+
+    func testCollectOldRootCandidatesWithoutDataSourceUsesParents() {
+        let candidates = LocationRelink.collectOldRootCandidates(
+            videoPaths: ["/Users/sam/Films/Action/a.mp4", "/Users/sam/Films/Drama/b.mp4"],
+            dataSourceRoots: []
+        )
+        let paths = Set(candidates.map(\.path))
+        XCTAssertTrue(paths.contains("/Users/sam/Films"))
+        XCTAssertTrue(paths.contains("/Users/sam/Films/Action"))
+        XCTAssertFalse(paths.contains("/Users/sam")) // too broad
+    }
+
+    func testIsSelectableOldRootRejectsShallowPaths() {
+        XCTAssertFalse(LocationRelink.isSelectableOldRoot("/"))
+        XCTAssertFalse(LocationRelink.isSelectableOldRoot("/Volumes"))
+        XCTAssertFalse(LocationRelink.isSelectableOldRoot("/Users/sam"))
+        XCTAssertTrue(LocationRelink.isSelectableOldRoot("/Volumes/Disk"))
+        XCTAssertTrue(LocationRelink.isSelectableOldRoot("/Users/sam/Films"))
+    }
 }

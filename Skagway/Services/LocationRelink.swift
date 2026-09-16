@@ -106,6 +106,117 @@ enum LocationRelink {
         return joined
     }
 
+    // MARK: - Old-location candidates (no filesystem picker)
+
+    enum OldRootSource: String, Equatable {
+        case dataSource
+        case libraryFolder
+    }
+
+    /// A folder the user can pick as Location A — derived from catalog paths, not from browsing disk.
+    struct OldRootCandidate: Equatable, Identifiable, Hashable {
+        var id: String { path }
+        var path: String
+        var videoCount: Int
+        var sources: Set<OldRootSource>
+
+        var subtitle: String {
+            var parts: [String] = ["\(videoCount) clip\(videoCount == 1 ? "" : "s")"]
+            if sources.contains(.dataSource) { parts.append("Data Source") }
+            return parts.joined(separator: " · ")
+        }
+    }
+
+    /// Collect selectable old roots from stored video paths and configured data sources.
+    ///
+    /// Includes:
+    /// - every data source root
+    /// - every ancestor folder of each video that sits under a data source (recursive under DS)
+    /// - parent folders of videos not under any data source (library path prefixes)
+    ///
+    /// Does **not** consult the live filesystem — missing/offline roots stay choosable.
+    static func collectOldRootCandidates(
+        videoPaths: [String],
+        dataSourceRoots: [String]
+    ) -> [OldRootCandidate] {
+        let videos = videoPaths.map(normalizeRoot).filter { !$0.isEmpty }
+        let sources = Array(Set(dataSourceRoots.map(normalizeRoot).filter { !$0.isEmpty }))
+            .sorted { $0.count > $1.count } // longest first for ownership
+
+        var candidatePaths = Set<String>()
+        var tags: [String: Set<OldRootSource>] = [:]
+
+        func note(_ path: String, _ source: OldRootSource) {
+            let p = normalizeRoot(path)
+            guard isSelectableOldRoot(p) else { return }
+            candidatePaths.insert(p)
+            tags[p, default: []].insert(source)
+        }
+
+        for source in sources {
+            note(source, .dataSource)
+        }
+
+        for video in videos {
+            let parent = URL(fileURLWithPath: video).deletingLastPathComponent().path
+            let owningSource = sources.first { isUnder(root: $0, path: video) }
+
+            if let owningSource {
+                // Walk from the file's folder up through the data source root (inclusive).
+                var cursor = normalizeRoot(parent)
+                while isSelectableOldRoot(cursor), isUnder(root: owningSource, path: cursor) {
+                    let tag: OldRootSource = (cursor.caseInsensitiveCompare(owningSource) == .orderedSame)
+                        ? .dataSource : .libraryFolder
+                    note(cursor, tag)
+                    if cursor.caseInsensitiveCompare(owningSource) == .orderedSame { break }
+                    let next = URL(fileURLWithPath: cursor).deletingLastPathComponent().path
+                    let nextNorm = normalizeRoot(next)
+                    if nextNorm == cursor { break }
+                    cursor = nextNorm
+                }
+            } else {
+                // No data source — offer parent folders up to a shallow bound.
+                var cursor = normalizeRoot(parent)
+                var depth = 0
+                while isSelectableOldRoot(cursor), depth < 8 {
+                    note(cursor, .libraryFolder)
+                    let next = URL(fileURLWithPath: cursor).deletingLastPathComponent().path
+                    let nextNorm = normalizeRoot(next)
+                    if nextNorm == cursor { break }
+                    cursor = nextNorm
+                    depth += 1
+                }
+            }
+        }
+
+        var result: [OldRootCandidate] = []
+        for path in candidatePaths {
+            let videoCount = videos.filter { isUnder(root: path, path: $0) }.count
+            let src = tags[path] ?? [.libraryFolder]
+            // Keep zero-video data sources; drop empty library-only folders.
+            if videoCount == 0 && !src.contains(.dataSource) { continue }
+            result.append(OldRootCandidate(path: path, videoCount: videoCount, sources: src))
+        }
+
+        return result.sorted { a, b in
+            if a.videoCount != b.videoCount { return a.videoCount > b.videoCount }
+            if a.sources.contains(.dataSource) != b.sources.contains(.dataSource) {
+                return a.sources.contains(.dataSource)
+            }
+            return a.path.localizedStandardCompare(b.path) == .orderedAscending
+        }
+    }
+
+    /// Skip `/`, bare `/Volumes`, and `/Users/name` — too broad to remount as Location A.
+    static func isSelectableOldRoot(_ path: String) -> Bool {
+        let p = normalizeRoot(path)
+        guard !p.isEmpty, p != "/" else { return false }
+        let comps = URL(fileURLWithPath: p).pathComponents.filter { $0 != "/" && !$0.isEmpty }
+        if comps.count < 2 { return false }
+        if comps.count == 2, comps[0] == "Users" { return false }
+        return true
+    }
+
     // MARK: - Preview
 
     enum MatchKind: Equatable {

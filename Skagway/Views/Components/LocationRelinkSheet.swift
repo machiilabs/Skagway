@@ -2,6 +2,9 @@ import SwiftUI
 import AppKit
 
 /// Preview + Apply sheet for whole-tree Location A → Location B remapping.
+///
+/// Old location is chosen from known catalog/data-source paths (never a filesystem picker —
+/// that folder usually no longer exists). New location still uses a normal folder picker.
 struct LocationRelinkSheet: View {
     @Bindable var viewModel: LibraryViewModel
     let presentation: LibraryViewModel.LocationRelinkPresentation
@@ -10,18 +13,28 @@ struct LocationRelinkSheet: View {
 
     @State private var oldRoot: String = ""
     @State private var newRoot: String = ""
+    @State private var oldRootSearch: String = ""
     @State private var preview: LocationRelink.Preview?
     @State private var includeNeedsAttention = false
     @State private var appliedCount: Int?
 
     private var isApplying: Bool { viewModel.isApplyingLocationRelink }
 
+    private var filteredOldRoots: [LocationRelink.OldRootCandidate] {
+        let q = oldRootSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return presentation.candidates }
+        return presentation.candidates.filter {
+            $0.path.localizedCaseInsensitiveContains(q)
+                || $0.subtitle.localizedCaseInsensitiveContains(q)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Relink Location")
                 .font(.title2.weight(.semibold))
 
-            Text("Reconnect clips that still live under the same relative folders after a whole-tree move. Ratings, collections, and tags stay put — no re-import.")
+            Text("Choose the old folder from paths already in your library, then pick the new folder on disk. Relative paths stay the same — ratings, collections, and tags stay put.")
                 .foregroundStyle(Color.appTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -32,23 +45,47 @@ struct LocationRelinkSheet: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 640, minHeight: 420)
+        .frame(minWidth: 680, minHeight: 520)
         .onAppear {
-            oldRoot = presentation.oldRoot
+            if let preferred = presentation.preferredOldRoot, !preferred.isEmpty {
+                oldRoot = preferred
+            } else {
+                oldRoot = presentation.candidates.first?.path ?? ""
+            }
             if let suggested = presentation.suggestedNewRoot {
                 newRoot = suggested
-                recompute()
             }
+            recompute()
         }
     }
 
     private var planningPane: some View {
         VStack(alignment: .leading, spacing: 12) {
-            pathRow(label: "Old location", path: oldRoot) {
-                pickOldRoot()
+            Text("Old location")
+                .font(.headline)
+
+            Text("From your library catalog — not from browsing the disk.")
+                .font(.caption)
+                .foregroundStyle(Color.appTextSecondary)
+
+            if presentation.candidates.count > 8 {
+                TextField("Search folders…", text: $oldRootSearch)
+                    .textFieldStyle(.roundedBorder)
             }
-            pathRow(label: "New location", path: newRoot.isEmpty ? "Choose a folder…" : newRoot) {
-                pickNewRoot()
+
+            oldRootList
+                .frame(minHeight: 160, maxHeight: 220)
+
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("New location")
+                    .frame(width: 100, alignment: .leading)
+                    .foregroundStyle(Color.appTextSecondary)
+                Text(newRoot.isEmpty ? "Choose a folder…" : newRoot)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Choose…") { pickNewRoot() }
+                    .disabled(isApplying || oldRoot.isEmpty)
             }
 
             if let preview {
@@ -58,7 +95,7 @@ struct LocationRelinkSheet: View {
                     .disabled(preview.needsAttentionCount == 0)
 
                 candidateList(preview)
-            } else if !newRoot.isEmpty {
+            } else if !oldRoot.isEmpty, !newRoot.isEmpty {
                 Text("No clips under the old location.")
                     .foregroundStyle(Color.appTextSecondary)
             }
@@ -79,6 +116,37 @@ struct LocationRelinkSheet: View {
         }
     }
 
+    private var oldRootList: some View {
+        List(selection: Binding(
+            get: { oldRoot.isEmpty ? nil : oldRoot },
+            set: { newValue in
+                oldRoot = newValue ?? ""
+                recompute()
+            }
+        )) {
+            if filteredOldRoots.isEmpty {
+                Text(oldRootSearch.isEmpty ? "No known library folders." : "No folders match “\(oldRootSearch)”.")
+                    .foregroundStyle(Color.appTextSecondary)
+                    .tag("")
+            } else {
+                ForEach(filteredOldRoots) { candidate in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(candidate.path)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                        Text(candidate.subtitle)
+                            .font(.caption)
+                            .foregroundStyle(Color.appTextSecondary)
+                    }
+                    .tag(candidate.path)
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .listStyle(.inset(alternatesRowBackgrounds: true))
+        .disabled(isApplying)
+    }
+
     private func resultsPane(_ count: Int) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Relinked \(count) clip\(count == 1 ? "" : "s").")
@@ -97,21 +165,7 @@ struct LocationRelinkSheet: View {
     private var applyDisabled: Bool {
         guard let preview, !isApplying else { return true }
         let n = preview.reconnectCount + (includeNeedsAttention ? preview.needsAttentionCount : 0)
-        return n == 0 || newRoot.isEmpty
-    }
-
-    private func pathRow(label: String, path: String, action: @escaping () -> Void) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(label)
-                .frame(width: 100, alignment: .leading)
-                .foregroundStyle(Color.appTextSecondary)
-            Text(path)
-                .lineLimit(2)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button("Choose…", action: action)
-                .disabled(isApplying)
-        }
+        return n == 0 || newRoot.isEmpty || oldRoot.isEmpty
     }
 
     private func summaryRow(_ preview: LocationRelink.Preview) -> some View {
@@ -152,7 +206,7 @@ struct LocationRelinkSheet: View {
             }
         }
         .listStyle(.inset(alternatesRowBackgrounds: true))
-        .frame(minHeight: 180)
+        .frame(minHeight: 140)
     }
 
     private func icon(for kind: LocationRelink.MatchKind) -> String {
@@ -168,19 +222,6 @@ struct LocationRelinkSheet: View {
         case .reconnect: return .green
         case .needsAttention: return .orange
         case .stillMissing: return Color.appTextTertiary
-        }
-    }
-
-    private func pickOldRoot() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.message = "Select the old library folder location"
-        panel.prompt = "Use as Old Location"
-        if panel.runModal() == .OK, let url = panel.url {
-            oldRoot = LocationRelink.normalizeRoot(url.path)
-            recompute()
         }
     }
 
