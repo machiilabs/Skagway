@@ -2217,7 +2217,7 @@ final class LibraryViewModel {
             ))
         }
 
-        // Find missing file (no wizard sheet) — show Repair Links apply progress in the strip.
+        // Find missing folder (no wizard sheet) — show Repair Links apply progress in the strip.
         // When the Repair Links sheet is open it renders its own bar; skip the strip then.
         if isApplyingLocationRelink,
            locationRelinkPresentation == nil,
