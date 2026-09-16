@@ -31,6 +31,8 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Storyboard grid view** — Grid-only Poster / Storyboard toggle on the Wall. Storyboard cards keep the same chrome and footprint as posters, showing a 2×3 frame collage. Disk stores one card-sized JPEG per clip (`{hash}_storyboard.jpg`, ~480×180) so cache cost stays poster-like; generation reuses an existing inspector filmstrip when it has ≥2×3 cells, otherwise samples six frames lazily under the shared AV gate.
+
 - **Repair Links (MVP)** — Whole-tree Location A → Location B remap for missing media (formerly Relink). File → **Repair Links…**, quiet “Library folder missing” cue on Missing, three-step wizard, **Repair** action, Undo Repair Links. Keeps ratings, collections, tags; no re-import or ffmpeg. Soft size checks flag conflicts only.
 - **Repair Links old-folder picker** — Old folder chosen from known library paths (data sources + folder prefixes of stored video paths), not a filesystem Open panel for a vanished path. New location still uses a normal folder picker.
 - **Repair Links progress** — Step 3 shows phase labels with determinate counts through the whole job (paths → folders → thumbnails → library → missing check). Thumb migration uses one cache-directory pass; same-path pairs skip renames. Bar reaches 100% only when Done-ready.

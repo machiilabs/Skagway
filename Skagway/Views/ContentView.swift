@@ -383,6 +383,30 @@ private struct LibraryContentView: View {
             }
             .controlSize(.small)
 
+            if vm.viewMode == .grid {
+                AppSegmentedControl(
+                    selection: Binding(
+                        get: { vm.gridDisplayMode },
+                        set: { newValue in
+                            vm.gridDisplayMode = newValue
+                        }
+                    ),
+                    items: GridDisplayMode.allCases,
+                    tooltip: { mode in
+                        switch mode {
+                        case .poster: "Poster cards"
+                        case .storyboard: "Storyboard cards (2×3 frames)"
+                        }
+                    }
+                ) { mode in
+                    switch mode {
+                    case .poster: Label("Poster", systemImage: "photo")
+                    case .storyboard: Label("Storyboard", systemImage: "square.grid.3x2")
+                    }
+                }
+                .controlSize(.small)
+            }
+
             sortCluster
 
             Divider().frame(height: 16)

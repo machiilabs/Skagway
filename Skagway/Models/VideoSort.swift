@@ -58,6 +58,20 @@ enum ViewMode: String, CaseIterable {
     case grid, list
 }
 
+/// Grid-only wall media: single poster still vs 2×3 storyboard collage.
+/// Orthogonal to `ViewMode` so list stays poster/list thumbnails only.
+enum GridDisplayMode: String, CaseIterable {
+    case poster
+    case storyboard
+
+    var label: String {
+        switch self {
+        case .poster: return "Poster"
+        case .storyboard: return "Storyboard"
+        }
+    }
+}
+
 enum GridSize: String, CaseIterable {
     case small, medium, large
 

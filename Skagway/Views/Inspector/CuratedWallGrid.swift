@@ -117,6 +117,7 @@ struct CuratedWallGrid: View {
                             renameText: isRenamingRow ? $viewModel.renameText : .constant(""),
                             titleEditText: isEditingTitleRow ? $viewModel.titleEditText : .constant(""),
                             thumbnailService: thumbnailService,
+                            displayMode: viewModel.gridDisplayMode,
                             isMoving: isMoving,
                             resumeFraction: resumeFraction(for: video),
                             hoverPreviewEnabled: viewModel.gridHoverPreviewEnabled && !viewModel.isPlayingInline,
