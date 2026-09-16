@@ -136,8 +136,9 @@ final class LocationRelinkTests: XCTestCase {
         )
     }
 
-    func testCollectOldRootCandidatesSortedAlphabetically() {
-        // Required inequalities — full-string localizedCaseInsensitiveCompare on the whole path is wrong.
+    func testComparePathsByComponentsMediaTreeBeforeMedia2() {
+        // Passes with comparePathsByComponents; fails if sorted by full-path localizedCaseInsensitiveCompare
+        // (space in "Media 2" sorts before '/' in "Media/…").
         XCTAssertEqual(
             LocationRelink.comparePathsByComponents("/Volumes/Media", "/Volumes/Media 2"),
             .orderedAscending
@@ -150,7 +151,14 @@ final class LocationRelinkTests: XCTestCase {
             LocationRelink.comparePathsByComponents("/Volumes/Media 2", "/Volumes/Media 2/Clips"),
             .orderedAscending
         )
+        // Old full-string order wrongly ranks Media 2 before Media/Shows.
+        XCTAssertEqual(
+            "/Volumes/Media 2".localizedCaseInsensitiveCompare("/Volumes/Media/Shows"),
+            .orderedAscending
+        )
+    }
 
+    func testCollectOldRootCandidatesSortedAlphabetically() {
         let candidates = LocationRelink.collectOldRootCandidates(
             videoPaths: [
                 "/Volumes/Media 2/Clips/x.mp4",
