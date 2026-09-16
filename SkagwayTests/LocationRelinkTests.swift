@@ -151,8 +151,8 @@ final class LocationRelinkTests: XCTestCase {
         XCTAssertEqual(roots, ["/Volumes/A/Lib", "/Volumes/M/Lib", "/Volumes/Z/Lib"])
     }
 
-    func testComparePathComponentWiseKeepsSiblingPrefixBeforeSpacedName() {
-        // Full-string sort wrongly orders "Media 2" before "Media/…" because ' ' < '/'.
+    func testComparePathComponentWiseMediaBeforeMedia2() {
+        // Required cases — component-wise, NOT full-string localizedCaseInsensitiveCompare.
         XCTAssertEqual(
             LocationRelink.comparePathComponentWise("/Volumes/Media", "/Volumes/Media 2"),
             .orderedAscending
@@ -161,6 +161,11 @@ final class LocationRelinkTests: XCTestCase {
             LocationRelink.comparePathComponentWise("/Volumes/Media/Shows", "/Volumes/Media 2"),
             .orderedAscending
         )
+        XCTAssertEqual(
+            LocationRelink.comparePathComponentWise("/Volumes/Media 2", "/Volumes/Media 2/Clips"),
+            .orderedAscending
+        )
+        // Extra: shorter equal-prefix before longer; spaced sibling after tree.
         XCTAssertEqual(
             LocationRelink.comparePathComponentWise("/Volumes/Media", "/Volumes/Media/Shows"),
             .orderedAscending
