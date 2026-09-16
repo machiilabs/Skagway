@@ -122,7 +122,10 @@ struct OverlayInlinePlayerView: View {
     }
 
     private func errorOverlay(_ message: String) -> some View {
-        ZStack {
+        let missingOnDisk = !FileManager.default.fileExists(
+            atPath: (playback.currentVideo ?? video).filePath
+        )
+        return ZStack {
             Color.black.opacity(0.55)
             VStack(spacing: AppSpacing.lg) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -136,13 +139,40 @@ struct OverlayInlinePlayerView: View {
                     .foregroundStyle(Color.appTextSecondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 280)
+                if missingOnDisk {
+                    Text("Library folder missing — repair links if you moved the folder tree.")
+                        .font(.caption)
+                        .foregroundStyle(Color.appTextSecondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 280)
+                }
                 HStack(spacing: AppSpacing.md) {
-                    Button("Open in External Player") {
-                        playback.openInExternalPlayer(video)
+                    if missingOnDisk {
+                        Button("Repair Links…") {
+                            let path = (playback.currentVideo ?? video).filePath
+                            viewModel.noteLibraryFileMissing(path: path)
+                            viewModel.beginLocationRelink(
+                                preferredOldRoot: viewModel.libraryFolderMissingBannerPreferredRoot
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.appAccent)
+                        .controlSize(.small)
+
+                        Button("Open in External Player") {
+                            playback.openInExternalPlayer(video)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Color.appAccent)
+                        .controlSize(.small)
+                    } else {
+                        Button("Open in External Player") {
+                            playback.openInExternalPlayer(video)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.appAccent)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.appAccent)
-                    .controlSize(.small)
                     Button("Dismiss") {
                         playback.dismissError()
                         viewModel.isPlayingInline = false

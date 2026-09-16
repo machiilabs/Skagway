@@ -518,6 +518,9 @@ private struct LibraryContentView: View {
 
             if vm.shouldShowLibraryFolderMissingBanner {
                 missingLibraryRepairCue
+                    // Stay above wall content; floating player can still cover it — Playback Failed
+                    // also offers Repair Links… for that case.
+                    .zIndex(2)
             }
 
             if vm.videos.isEmpty && !vm.hasCompletedInitialVideoLoad {

@@ -519,7 +519,15 @@ final class LibraryViewModel {
     var selectedVideoIds: Set<String> = []
     var lastSelectedVideoId: String?
     /// Clip being reviewed (player + Inspector). May sit outside `selectedVideoIds`.
-    var focusedVideoId: String?
+    /// Any assignment (grid plain click, list table selection, setReviewFocus, etc.) re-evaluates
+    /// the Library folder missing banner — do not set focus without going through this property.
+    var focusedVideoId: String? {
+        didSet {
+            if let focusedVideoId {
+                noteMissingClipFocusIfNeeded(path: focusedVideoId)
+            }
+        }
+    }
 
     var inspectorIsSetMode: Bool {
         guard selectedVideoIds.count > 1 else { return false }
@@ -4242,18 +4250,22 @@ final class LibraryViewModel {
     func setReviewFocus(_ id: String, retargetIfPlaying: Bool = true, scroll: Bool = false) {
         requestDefocusTextInputs()
         let previous = focusedVideoId
-        focusedVideoId = id
+        focusedVideoId = id // didSet → noteMissingClipFocusIfNeeded
         lastSelectedVideoId = id
         if scroll { scrollToVideoId = id }
-        noteMissingClipFocusIfNeeded(path: id)
         if retargetIfPlaying, isPlayingInline, previous != id,
            let video = filteredVideo(forPath: id) {
             retargetPlayback(to: video)
         }
     }
 
-    /// Show the Library folder missing banner when the focused clip’s file is gone.
-    /// Does not auto-open Repair Links (offline ≠ force repair).
+    /// Public entry for playback / other paths that discover a missing file without changing focus.
+    func noteLibraryFileMissing(path: String) {
+        noteMissingClipFocusIfNeeded(path: path)
+    }
+
+    /// Show the Library folder missing banner when a clip’s file is gone.
+    /// Does not auto-open Repair Links (offline ≠ force repair). Idempotent (no flicker).
     private func noteMissingClipFocusIfNeeded(path: String) {
         let knownMissing = missingVideoIds.contains(path)
         let missingOnDisk = !FileManager.default.fileExists(atPath: path)
@@ -4285,7 +4297,6 @@ final class LibraryViewModel {
             )
         }
 
-        // Already visible → keep it (no flicker); still refresh preferred root quietly.
         showRepairLinksBannerFromMissingClick = true
         updateRepairLinksBannerPreferredRoot(forMissingPath: path)
     }

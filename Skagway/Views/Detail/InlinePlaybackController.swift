@@ -121,6 +121,7 @@ final class InlinePlaybackController {
                         : "\(ext) files cannot be played by the built-in player."
                 } else {
                     playerError = "The file could not be found. The drive may not be mounted."
+                    viewModel.noteLibraryFileMissing(path: videoPath)
                 }
                 surfaceErrorKeepingPanel()
                 return
@@ -188,6 +189,9 @@ final class InlinePlaybackController {
                 guard !Task.isCancelled else { return }
                 if status == .failed {
                     playerError = item.error?.localizedDescription ?? "The file could not be opened for playback."
+                    if !FileManager.default.fileExists(atPath: videoPath) {
+                        viewModel.noteLibraryFileMissing(path: videoPath)
+                    }
                     surfaceErrorKeepingPanel()
                     return
                 } else if status == .readyToPlay {
