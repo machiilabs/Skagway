@@ -1028,24 +1028,34 @@ final class LibraryViewModel {
     }
 
     /// Resolve which missing clip "Find missing file…" should locate.
+    /// Avoids `FileManager.fileExists` — probing offline/NAS library paths can block the main
+    /// thread for tens of seconds before the open panel appears.
     func orphanPathForFindMissingFile() -> String? {
         let candidates = [
             focusedVideoId,
             lastSelectedVideoId,
             selectedVideoIds.first
         ].compactMap { $0 }
-        for path in candidates {
-            if missingVideoIds.contains(path) || !FileManager.default.fileExists(atPath: path) {
-                return path
-            }
+        for path in candidates where missingVideoIds.contains(path) {
+            return path
         }
-        return nil
+        // Banner was raised for a focused missing clip — trust that path without an FS probe.
+        if showRepairLinksBannerFromMissingClick, let focused = focusedVideoId {
+            return focused
+        }
+        return candidates.first
     }
 
-    /// Banner entry (sync). Present the file panel on the AppKit run loop — **not** inside
-    /// `Task { await … }` / an `async` MainActor function. `NSOpenPanel.runModal()` from a
-    /// Swift concurrency task deadlocks the MainActor (dialog appears frozen / unusable).
-    /// Matches File→Repair Links’ sync `pickNewLocationForRelink()` pattern.
+    /// Banner entry. Schedules the open panel on the next main-queue turn, then presents it as a
+    /// **sheet** on the key window (`beginSheetModal`) — not `runModal()` nested in the SwiftUI
+    /// button / MainActor update that raised the click.
+    ///
+    /// Why (Paul’s hang on build 1110):
+    /// - Sync `runModal()` from the banner button still ran inside SwiftUI’s click/update turn and
+    ///   could freeze the dialog (nested AppKit modal + MainActor work).
+    /// - Pre-panel `fileExists` on offline volumes blocked before the panel appeared.
+    /// - Movie `UTType` filtering can stall while browsing folders full of video.
+    /// - After OK, preview `fileExists` for every sibling on MainActor froze dismiss/apply.
     func beginFindMissingFile(for orphanPath: String? = nil) {
         guard !isApplyingLocationRelink else { return }
         guard locationRelinkPresentation == nil else { return }
@@ -1056,15 +1066,52 @@ final class LibraryViewModel {
         }
 
         let expectedName = URL(fileURLWithPath: orphan).lastPathComponent
+        // Leave the SwiftUI button/update turn before AppKit presents UI.
+        DispatchQueue.main.async { [weak self] in
+            self?.presentFindMissingFileOpenPanel(orphan: orphan, expectedName: expectedName)
+        }
+    }
+
+    private func presentFindMissingFileOpenPanel(orphan: String, expectedName: String) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie, .avi, .mpeg]
         panel.message = "Locate “\(expectedName)” on disk"
         panel.prompt = "Use This File"
         panel.nameFieldStringValue = expectedName
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        // Prefer filename-extension UTTypes over broad `.movie` (QL/metadata scans while browsing).
+        let extTypes = VideoExtensionManager.shared.enabledExtensions
+            .sorted()
+            .compactMap { UTType(filenameExtension: $0) }
+        if !extTypes.isEmpty {
+            panel.allowedContentTypes = extTypes
+        }
+
+        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            Task { @MainActor in
+                self?.finishFindMissingFile(orphan: orphan, response: response, panel: panel)
+            }
+        }
+
+        if let window = NSApp.keyWindow
+            ?? NSApp.mainWindow
+            ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeKey })
+        {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            // No window to sheet onto — still avoid calling runModal from the SwiftUI click turn
+            // (we're already on a deferred main-queue block).
+            finish(panel.runModal())
+        }
+    }
+
+    private func finishFindMissingFile(
+        orphan: String,
+        response: NSApplication.ModalResponse,
+        panel: NSOpenPanel
+    ) {
+        guard response == .OK, let url = panel.url else { return }
 
         let located = LocationRelink.normalizeRoot(url.path)
         switch LocationRelink.rootsFromLocatedFile(orphanPath: orphan, locatedPath: located) {
@@ -1073,17 +1120,32 @@ final class LibraryViewModel {
         case .failure(.emptyPath):
             reportTransientError("Couldn't use that file path")
         case .success(let roots):
-            // Remap apply (DB / thumbs / progress) runs after the panel closes.
             Task { @MainActor in
                 await self.applyFindMissingFileRemap(oldRoot: roots.oldRoot, newRoot: roots.newRoot)
             }
         }
     }
 
-    /// Parent-folder remap after the user located a file. Reuses Repair Links apply machinery.
+    /// Parent-folder remap after the user located a file. Preview FS checks run off the main actor.
     @discardableResult
     private func applyFindMissingFileRemap(oldRoot: String, newRoot: String) async -> Int {
-        let preview = buildLocationRelinkPreview(oldRoot: oldRoot, newRoot: newRoot)
+        let old = LocationRelink.normalizeRoot(oldRoot)
+        let neu = LocationRelink.normalizeRoot(newRoot)
+        let videosUnder = videos
+            .filter { LocationRelink.isUnder(root: old, path: $0.filePath) }
+            .map { (databaseId: $0.databaseId, filePath: $0.filePath, fileSize: $0.fileSize) }
+        let existing = Set(videos.map(\.filePath))
+
+        // Soft disk checks (exists/size) for every sibling — keep off MainActor so dismiss isn’t frozen.
+        let preview = await Task.detached(priority: .userInitiated) {
+            LocationRelink.buildPreview(
+                videos: videosUnder,
+                oldRoot: old,
+                newRoot: neu,
+                existingLibraryPaths: existing
+            )
+        }.value
+
         let applyable = LocationRelink.mappingsToApply(preview: preview, includeNeedsAttention: true)
         guard !applyable.isEmpty else {
             reportTransientError("No clips under that folder could be reconnected")

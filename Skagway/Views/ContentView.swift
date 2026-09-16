@@ -604,7 +604,7 @@ private struct LibraryContentView: View {
             }
             Spacer(minLength: 8)
             Button {
-                // Sync call — panel must not open inside Task/async MainActor (hangs).
+                // Defer + sheet modal lives in beginFindMissingFile — do not wrap in Task/async.
                 vm.beginFindMissingFile()
             } label: {
                 Text("Find missing file…")
