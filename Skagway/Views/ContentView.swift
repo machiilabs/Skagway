@@ -604,9 +604,8 @@ private struct LibraryContentView: View {
             }
             Spacer(minLength: 8)
             Button {
-                Task { @MainActor in
-                    await vm.findMissingFile()
-                }
+                // Sync call — panel must not open inside Task/async MainActor (hangs).
+                vm.beginFindMissingFile()
             } label: {
                 Text("Find missing file…")
             }

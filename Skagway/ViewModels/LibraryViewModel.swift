@@ -1042,18 +1042,17 @@ final class LibraryViewModel {
         return nil
     }
 
-    /// Banner entry: pick the on-disk file for one orphan, then remap that folder tree via Repair Links apply.
-    ///
-    /// Uses the orphan’s parent as Location A and the selected file’s parent as Location B
-    /// (`oldRoot/rel` → `newRoot/rel`). Basename must match. Does not open the Repair Links wizard.
-    @discardableResult
-    func findMissingFile(for orphanPath: String? = nil) async -> Int {
-        guard !isApplyingLocationRelink else { return 0 }
-        guard locationRelinkPresentation == nil else { return 0 }
+    /// Banner entry (sync). Present the file panel on the AppKit run loop — **not** inside
+    /// `Task { await … }` / an `async` MainActor function. `NSOpenPanel.runModal()` from a
+    /// Swift concurrency task deadlocks the MainActor (dialog appears frozen / unusable).
+    /// Matches File→Repair Links’ sync `pickNewLocationForRelink()` pattern.
+    func beginFindMissingFile(for orphanPath: String? = nil) {
+        guard !isApplyingLocationRelink else { return }
+        guard locationRelinkPresentation == nil else { return }
 
         guard let orphan = orphanPath ?? orphanPathForFindMissingFile() else {
             reportTransientError("Select a missing clip first, then Find missing file…")
-            return 0
+            return
         }
 
         let expectedName = URL(fileURLWithPath: orphan).lastPathComponent
@@ -1065,26 +1064,33 @@ final class LibraryViewModel {
         panel.message = "Locate “\(expectedName)” on disk"
         panel.prompt = "Use This File"
         panel.nameFieldStringValue = expectedName
-        guard panel.runModal() == .OK, let url = panel.url else { return 0 }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
 
         let located = LocationRelink.normalizeRoot(url.path)
         switch LocationRelink.rootsFromLocatedFile(orphanPath: orphan, locatedPath: located) {
         case .failure(.basenameMismatch(let expected, let found)):
             reportTransientError("Selected file must be named “\(expected)” (got “\(found)”)")
-            return 0
         case .failure(.emptyPath):
             reportTransientError("Couldn't use that file path")
-            return 0
         case .success(let roots):
-            let preview = buildLocationRelinkPreview(oldRoot: roots.oldRoot, newRoot: roots.newRoot)
-            let applyable = LocationRelink.mappingsToApply(preview: preview, includeNeedsAttention: true)
-            guard !applyable.isEmpty else {
-                reportTransientError("No clips under that folder could be reconnected")
-                return 0
+            // Remap apply (DB / thumbs / progress) runs after the panel closes.
+            Task { @MainActor in
+                await self.applyFindMissingFileRemap(oldRoot: roots.oldRoot, newRoot: roots.newRoot)
             }
-            // Soft size / collision flags still remap — user explicitly located the file.
-            return await applyLocationRelink(preview: preview, includeNeedsAttention: true)
         }
+    }
+
+    /// Parent-folder remap after the user located a file. Reuses Repair Links apply machinery.
+    @discardableResult
+    private func applyFindMissingFileRemap(oldRoot: String, newRoot: String) async -> Int {
+        let preview = buildLocationRelinkPreview(oldRoot: oldRoot, newRoot: newRoot)
+        let applyable = LocationRelink.mappingsToApply(preview: preview, includeNeedsAttention: true)
+        guard !applyable.isEmpty else {
+            reportTransientError("No clips under that folder could be reconnected")
+            return 0
+        }
+        // Soft size / collision flags still remap — user explicitly located the file.
+        return await applyLocationRelink(preview: preview, includeNeedsAttention: true)
     }
 
     func buildLocationRelinkPreview(oldRoot: String, newRoot: String) -> LocationRelink.Preview {
