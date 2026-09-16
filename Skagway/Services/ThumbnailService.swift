@@ -111,6 +111,8 @@ final class ThumbnailService: @unchecked Sendable {
     private var inflightFilmstrips: [String: Task<NSImage, Error>] = [:]
     private var inflightStoryboards: [String: Task<NSImage, Error>] = [:]
     private var inflightDetailPreviews: [String: Task<URL, Error>] = [:]
+    /// Per-file sample times (seconds) for the six storyboard collage cells — kept in sync with bake/build.
+    private var storyboardCellTimesByPath: [String: [Double]] = [:]
     private let scrubPrefetchLock = NSLock()
     private var scrubPrefetchTask: Task<Void, Never>?
 
@@ -147,14 +149,40 @@ final class ThumbnailService: @unchecked Sendable {
             && abs(image.size.height - storyboardCompositeSize.height) < 2
     }
 
-    /// Map a click inside a 2×3 storyboard collage to the even-timeline sample time for that cell.
-    static func storyboardClickSeconds(at location: CGPoint, size: CGSize, duration: Double) -> Double {
+    /// True when `seconds` is a full set of per-cell sample times for the 2×3 collage.
+    static func isValidStoryboardCellTimes(_ seconds: [Double]) -> Bool {
+        guard seconds.count == storyboardFrameCount else { return false }
+        return seconds.allSatisfy { $0.isFinite && $0 >= 0 }
+    }
+
+    /// Map a click inside a 2×3 storyboard collage to the cell index (row-major).
+    static func storyboardCellIndex(at location: CGPoint, size: CGSize) -> Int {
         let w = max(1.0, size.width)
         let h = max(1.0, size.height)
         let column = min(storyboardColumns - 1, max(0, Int(location.x / w * CGFloat(storyboardColumns))))
         let row = min(storyboardRows - 1, max(0, Int(location.y / h * CGFloat(storyboardRows))))
-        let index = row * storyboardColumns + column
-        return Double(index + 1) / Double(storyboardFrameCount + 1) * max(0, duration)
+        return row * storyboardColumns + column
+    }
+
+    /// Ideal even-timeline sample for cell `index` (fallback when no stored times exist yet).
+    static func storyboardEvenSplitSeconds(index: Int, duration: Double) -> Double {
+        let i = min(storyboardFrameCount - 1, max(0, index))
+        return Double(i + 1) / Double(storyboardFrameCount + 1) * max(0, duration)
+    }
+
+    /// Map a click to the sample time used for that cell’s pixels (stored at bake/build).
+    /// Falls back to even-split only if times are missing (should be rare after cache invalidation).
+    func storyboardClickSeconds(
+        for filePath: String,
+        at location: CGPoint,
+        size: CGSize,
+        duration: Double
+    ) -> Double {
+        let index = Self.storyboardCellIndex(at: location, size: size)
+        if let times = loadStoryboardCellTimes(for: filePath), Self.isValidStoryboardCellTimes(times) {
+            return times[index]
+        }
+        return Self.storyboardEvenSplitSeconds(index: index, duration: duration)
     }
 
     /// Recover the rows×columns grid of a filmstrip composite from its point size.
@@ -251,6 +279,12 @@ final class ThumbnailService: @unchecked Sendable {
         return cacheDirectory.appendingPathComponent("\(hash)_storyboard.jpg")
     }
 
+    /// Sidecar with six sample times (seconds) matching collage cell pixels (`{hash}_storyboard_times.json`).
+    func storyboardTimesURL(for filePath: String) -> URL {
+        let hash = pathHashString(for: filePath)
+        return cacheDirectory.appendingPathComponent("\(hash)_storyboard_times.json")
+    }
+
     private func filmstripMemoryKey(for filePath: String) -> NSString {
         (filePath + Self.filmstripCachePrefix + "_e\(filmstripEpoch)") as NSString
     }
@@ -320,8 +354,14 @@ final class ThumbnailService: @unchecked Sendable {
     }
 
     /// Sync load of the Wall storyboard collage (memory → disk). Never waits on AV.
-    /// Rejects legacy small composites so Storyboard View regenerates at `storyboardCompositeSize`.
+    /// Rejects legacy small composites and collages without a matching cell-times sidecar so
+    /// Storyboard View regenerates with the click-to-play time contract.
     func loadStoryboard(for filePath: String) -> NSImage? {
+        guard loadStoryboardCellTimes(for: filePath) != nil else {
+            // Drop orphan JPEG / stale memory so generateStoryboard rebakes with times.
+            memoryCache.removeObject(forKey: storyboardMemoryKey(for: filePath))
+            return nil
+        }
         let memKey = storyboardMemoryKey(for: filePath)
         if let cached = memoryCache.object(forKey: memKey), Self.isValidStoryboardImage(cached) {
             return cached
@@ -333,6 +373,45 @@ final class ThumbnailService: @unchecked Sendable {
         else { return nil }
         memoryCache.setObject(image, forKey: memKey)
         return image
+    }
+
+    /// Sample times (seconds) for the six collage cells, or nil if missing/invalid (forces rebake).
+    func loadStoryboardCellTimes(for filePath: String) -> [Double]? {
+        inflightLock.lock()
+        if let cached = storyboardCellTimesByPath[filePath], Self.isValidStoryboardCellTimes(cached) {
+            inflightLock.unlock()
+            return cached
+        }
+        inflightLock.unlock()
+
+        let url = storyboardTimesURL(for: filePath)
+        guard let data = try? Data(contentsOf: url),
+              let times = Self.decodeStoryboardCellTimes(data)
+        else { return nil }
+
+        inflightLock.lock()
+        storyboardCellTimesByPath[filePath] = times
+        inflightLock.unlock()
+        return times
+    }
+
+    private static func decodeStoryboardCellTimes(_ data: Data) -> [Double]? {
+        struct Payload: Decodable {
+            let version: Int?
+            let seconds: [Double]
+        }
+        guard let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              isValidStoryboardCellTimes(payload.seconds)
+        else { return nil }
+        return payload.seconds
+    }
+
+    private static func encodeStoryboardCellTimes(_ seconds: [Double]) throws -> Data {
+        struct Payload: Encodable {
+            let version: Int
+            let seconds: [Double]
+        }
+        return try JSONEncoder().encode(Payload(version: 1, seconds: seconds))
     }
 
     /// Hi-res detail preview on disk (`<hash>_detail_<longEdge>.jpg`) + `NSCache` keyed by path and long edge.
@@ -737,35 +816,42 @@ final class ThumbnailService: @unchecked Sendable {
 
     // MARK: - Storyboard (Wall 2×3 larger collage)
 
-    /// Load or build the Wall storyboard: one JPEG at `storyboardCompositeSize` with 2×3 frames.
+    /// Load or build the Wall storyboard: one JPEG at `storyboardCompositeSize` with 2×3 frames,
+    /// plus a sidecar of the six sample times used for those pixels (click-to-play contract).
     /// Prefers baking evenly spaced cells from an existing filmstrip when it has ≥6 frames; otherwise
     /// samples six frames evenly across the timeline (same gate/coalesce pattern as filmstrips).
     func generateStoryboard(for video: Video) async throws -> NSImage {
         let memKey = storyboardMemoryKey(for: video.filePath)
-        if let cached = memoryCache.object(forKey: memKey), Self.isValidStoryboardImage(cached) {
+        if let cached = memoryCache.object(forKey: memKey),
+           Self.isValidStoryboardImage(cached),
+           loadStoryboardCellTimes(for: video.filePath) != nil
+        {
             return cached
         }
         let cacheURL = storyboardURL(for: video.filePath)
         if FileManager.default.fileExists(atPath: cacheURL.path),
            let image = NSImage(contentsOf: cacheURL),
-           Self.isValidStoryboardImage(image)
+           Self.isValidStoryboardImage(image),
+           loadStoryboardCellTimes(for: video.filePath) != nil
         {
             memoryCache.setObject(image, forKey: memKey)
             return image
         }
 
-        if let filmstrip = loadFilmstrip(for: video.filePath),
-           let baked = bakeStoryboard(fromFilmstrip: filmstrip)
+        if let duration = video.duration, duration > 0,
+           let filmstrip = loadFilmstrip(for: video.filePath),
+           let baked = bakeStoryboard(fromFilmstrip: filmstrip, duration: duration)
         {
-            try storeStoryboard(baked, for: video.filePath)
-            return baked
+            try storeStoryboard(baked.image, cellTimes: baked.cellTimes, for: video.filePath)
+            return baked.image
         }
 
         return try await coalescedStoryboard(for: video)
     }
 
     private func storyboardInflightKey(filePath: String) -> String {
-        "\(filePath)\u{1e}sb\u{1e}2x3\u{1e}960x360"
+        // `t1` = cell-times sidecar contract (invalidates in-flight coalesces from older builds).
+        "\(filePath)\u{1e}sb\u{1e}2x3\u{1e}960x360\u{1e}t1"
     }
 
     private func coalescedStoryboard(for video: Video) async throws -> NSImage {
@@ -796,9 +882,14 @@ final class ThumbnailService: @unchecked Sendable {
         return try await task.value
     }
 
-    /// Composite six evenly spaced filmstrip cells into the Storyboard View collage.
-    /// Requires at least 6 cells so the bake can track the same even-timeline indices as AV sampling.
-    func bakeStoryboard(fromFilmstrip filmstrip: NSImage) -> NSImage? {
+    /// Composite six filmstrip cells into the Storyboard View collage and return the sample times
+    /// those cells were baked at (`(sourceIndex+1)/(N+1)×duration`).
+    /// Requires at least 6 cells so the bake can track filmstrip even-timeline indices.
+    func bakeStoryboard(
+        fromFilmstrip filmstrip: NSImage,
+        duration: Double
+    ) -> (image: NSImage, cellTimes: [Double])? {
+        guard duration.isFinite, duration > 0 else { return nil }
         guard let grid = Self.filmstripGrid(in: filmstrip) else { return nil }
         let totalFrames = grid.rows * grid.columns
         guard totalFrames >= Self.storyboardFrameCount else { return nil }
@@ -813,11 +904,17 @@ final class ThumbnailService: @unchecked Sendable {
         NSColor.black.setFill()
         NSRect(origin: .zero, size: destSize).fill()
 
+        var cellTimes: [Double] = []
+        cellTimes.reserveCapacity(Self.storyboardFrameCount)
+
         for storyboardIndex in 0..<Self.storyboardFrameCount {
-            // Same even-timeline fractions as `buildStoryboard` / inspector filmstrip clicks.
+            // Nearest filmstrip cell to the ideal even-split slot; seek uses that cell’s sample time.
             let sourceIndex = min(
                 totalFrames - 1,
                 max(0, Int((Double(storyboardIndex + 1) / Double(Self.storyboardFrameCount + 1)) * Double(totalFrames)))
+            )
+            cellTimes.append(
+                Double(sourceIndex + 1) / Double(totalFrames + 1) * duration
             )
             let srcCol = sourceIndex % grid.columns
             let srcRow = sourceIndex / grid.columns
@@ -838,7 +935,7 @@ final class ThumbnailService: @unchecked Sendable {
             filmstrip.draw(in: destRect, from: sourceRect, operation: .copy, fraction: 1.0)
         }
         out.unlockFocus()
-        return out
+        return (out, cellTimes)
     }
 
     private func buildStoryboard(for video: Video) async throws -> NSImage {
@@ -852,14 +949,15 @@ final class ThumbnailService: @unchecked Sendable {
         }
 
         // Prefer an inspector filmstrip that appeared while we waited on the gate.
-        if let filmstrip = loadFilmstrip(for: video.filePath),
-           let baked = bakeStoryboard(fromFilmstrip: filmstrip)
+        if let duration = video.duration, duration > 0,
+           let filmstrip = loadFilmstrip(for: video.filePath),
+           let baked = bakeStoryboard(fromFilmstrip: filmstrip, duration: duration)
         {
-            try storeStoryboard(baked, for: video.filePath)
-            return baked
+            try storeStoryboard(baked.image, cellTimes: baked.cellTimes, for: video.filePath)
+            return baked.image
         }
 
-        let frames: [CGImage] = try await withTimeout(seconds: 30) {
+        let sampled: (frames: [CGImage], cellTimes: [Double]) = try await withTimeout(seconds: 30) {
             let asset = AVURLAsset(url: url)
             let duration = try await asset.load(.duration)
             let totalSeconds = CMTimeGetSeconds(duration)
@@ -875,20 +973,30 @@ final class ThumbnailService: @unchecked Sendable {
             generator.appliesPreferredTrackTransform = true
             // Decode above cell size so the larger 960×360 collage stays sharp.
             generator.maximumSize = CGSize(width: 480, height: 480)
-            generator.requestedTimeToleranceBefore = CMTime(seconds: 2, preferredTimescale: 600)
-            generator.requestedTimeToleranceAfter = CMTime(seconds: 2, preferredTimescale: 600)
+            // Precise frames so stored actualTimes match the pixels click-to-play will seek to.
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .zero
 
-            var result: [CGImage] = []
+            var frames: [CGImage] = []
+            var cellTimes: [Double] = []
+            frames.reserveCapacity(totalFrames)
+            cellTimes.reserveCapacity(totalFrames)
             for time in times {
                 try Task.checkCancellation()
-                if let (cgImage, _) = try? await generator.image(at: time) {
-                    result.append(cgImage)
+                if let (cgImage, actual) = try? await generator.image(at: time) {
+                    frames.append(cgImage)
+                    let actualSeconds = CMTimeGetSeconds(actual)
+                    cellTimes.append(
+                        actualSeconds.isFinite ? actualSeconds : CMTimeGetSeconds(time)
+                    )
                 }
             }
-            return result
+            return (frames, cellTimes)
         }
 
-        guard frames.count == totalFrames else {
+        guard sampled.frames.count == totalFrames,
+              Self.isValidStoryboardCellTimes(sampled.cellTimes)
+        else {
             throw ThumbnailError.generationFailed
         }
 
@@ -899,7 +1007,7 @@ final class ThumbnailService: @unchecked Sendable {
         let composite = NSImage(size: destSize)
         composite.lockFocus()
         NSColor.black.setFill()
-        for (index, cgImage) in frames.enumerated() {
+        for (index, cgImage) in sampled.frames.enumerated() {
             let col = index % columns
             let row = index / columns
             let cellX = CGFloat(col) * cellWidth
@@ -919,12 +1027,16 @@ final class ThumbnailService: @unchecked Sendable {
         }
         composite.unlockFocus()
 
-        try storeStoryboard(composite, for: video.filePath)
+        try storeStoryboard(composite, cellTimes: sampled.cellTimes, for: video.filePath)
         return composite
     }
 
-    private func storeStoryboard(_ image: NSImage, for filePath: String) throws {
+    private func storeStoryboard(_ image: NSImage, cellTimes: [Double], for filePath: String) throws {
+        guard Self.isValidStoryboardCellTimes(cellTimes) else {
+            throw ThumbnailError.encodingFailed
+        }
         let cacheURL = storyboardURL(for: filePath)
+        let timesURL = storyboardTimesURL(for: filePath)
         let memKey = storyboardMemoryKey(for: filePath)
         guard let tiffData = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData),
@@ -932,9 +1044,14 @@ final class ThumbnailService: @unchecked Sendable {
         else {
             throw ThumbnailError.encodingFailed
         }
+        let timesData = try Self.encodeStoryboardCellTimes(cellTimes)
         try Task.checkCancellation()
         try jpegData.write(to: cacheURL)
+        try timesData.write(to: timesURL, options: .atomic)
         memoryCache.setObject(image, forKey: memKey)
+        inflightLock.lock()
+        storyboardCellTimesByPath[filePath] = cellTimes
+        inflightLock.unlock()
     }
 
     /// Regenerate the thumbnail *and* the 720pt detail-preview still — together, at the same fresh
@@ -1309,6 +1426,9 @@ final class ThumbnailService: @unchecked Sendable {
         UserDefaults.standard.set(filmstripEpoch, forKey: Self.filmstripEpochKey)
         managementLock.unlock()
         memoryCache.removeAllObjects()
+        inflightLock.lock()
+        storyboardCellTimesByPath.removeAll()
+        inflightLock.unlock()
 
         let directory = cacheDirectory
         Task.detached(priority: .utility) {
@@ -1424,6 +1544,11 @@ final class ThumbnailService: @unchecked Sendable {
                 to: storyboardURL(for: pair.to),
                 fm: fm
             )
+            moveOrReplaceCacheFile(
+                from: storyboardTimesURL(for: pair.from),
+                to: storyboardTimesURL(for: pair.to),
+                fm: fm
+            )
             for edge in Self.detailPreviewLongEdgeChoices {
                 moveOrReplaceCacheFile(
                     from: detailPreviewURL(for: pair.from, longEdge: edge),
@@ -1445,6 +1570,10 @@ final class ThumbnailService: @unchecked Sendable {
             memoryCache.removeObject(forKey: filmstripMemoryKey(for: pair.to))
             memoryCache.removeObject(forKey: storyboardMemoryKey(for: pair.from))
             memoryCache.removeObject(forKey: storyboardMemoryKey(for: pair.to))
+            inflightLock.lock()
+            storyboardCellTimesByPath.removeValue(forKey: pair.from)
+            storyboardCellTimesByPath.removeValue(forKey: pair.to)
+            inflightLock.unlock()
             memoryCache.removeObject(forKey: (pair.from + Self.detailPreviewCachePrefix) as NSString)
             memoryCache.removeObject(forKey: (pair.to + Self.detailPreviewCachePrefix) as NSString)
             for edge in Self.detailPreviewLongEdgeChoices {
@@ -1513,7 +1642,8 @@ final class ThumbnailService: @unchecked Sendable {
                 memoryCache.setObject(image, forKey: filmstripMemoryKey(for: pair.to))
             }
             if let image = NSImage(contentsOf: storyboardURL(for: pair.to)),
-               Self.isValidStoryboardImage(image)
+               Self.isValidStoryboardImage(image),
+               loadStoryboardCellTimes(for: pair.to) != nil
             {
                 memoryCache.setObject(image, forKey: storyboardMemoryKey(for: pair.to))
             }
@@ -1529,6 +1659,9 @@ final class ThumbnailService: @unchecked Sendable {
         managementLock.lock()
         defer { managementLock.unlock() }
         memoryCache.removeAllObjects()
+        inflightLock.lock()
+        storyboardCellTimesByPath.removeAll()
+        inflightLock.unlock()
         let contents = try FileManager.default.contentsOfDirectory(
             at: cacheDirectory,
             includingPropertiesForKeys: nil

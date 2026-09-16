@@ -522,7 +522,8 @@ struct CuratedWallGrid: View {
         selectionStore.syncFocus(to: video.id)
         viewModel.selectOnly(video.id)
         let duration = video.duration ?? 0
-        viewModel.pendingFilmstripSeekSeconds = ThumbnailService.storyboardClickSeconds(
+        viewModel.pendingFilmstripSeekSeconds = thumbnailService.storyboardClickSeconds(
+            for: video.filePath,
             at: location,
             size: size,
             duration: duration

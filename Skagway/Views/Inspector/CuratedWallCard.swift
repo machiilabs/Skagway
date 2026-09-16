@@ -32,7 +32,7 @@ struct CuratedWallCard: View {
     var onCommitTitle: () -> Void
     var onCancelTitle: () -> Void
     var onRenameEditingChanged: (Bool) -> Void
-    /// Storyboard View: click a collage cell → seek/play at that even-timeline sample.
+    /// Storyboard View: click a collage cell → seek/play at that cell’s stored sample time.
     var onStoryboardCellPlay: ((CGPoint, CGSize) -> Void)? = nil
 
     private var isInlineEditing: Bool { isRenaming || isEditingTitle }
