@@ -378,7 +378,7 @@ enum LocationRelink {
 
     // MARK: - Find missing file (single orphan → parent folder remap)
 
-    enum FindMissingFileRootsError: Equatable {
+    enum FindMissingFileRootsError: Error, Equatable {
         case basenameMismatch(expected: String, found: String)
         case emptyPath
     }
