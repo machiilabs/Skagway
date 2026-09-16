@@ -148,16 +148,27 @@ struct OverlayInlinePlayerView: View {
                 }
                 HStack(spacing: AppSpacing.md) {
                     if missingOnDisk {
-                        Button("Repair Links…") {
+                        Button {
                             let path = (playback.currentVideo ?? video).filePath
                             viewModel.noteLibraryFileMissing(path: path)
                             viewModel.beginLocationRelink(
                                 preferredOldRoot: viewModel.libraryFolderMissingBannerPreferredRoot
                             )
+                        } label: {
+                            if viewModel.isPreparingLocationRelink {
+                                HStack(spacing: 6) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Opening…")
+                                }
+                            } else {
+                                Text("Repair Links…")
+                            }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(Color.appAccent)
                         .controlSize(.small)
+                        .disabled(viewModel.isPreparingLocationRelink || viewModel.isApplyingLocationRelink)
 
                         Button("Open in External Player") {
                             playback.openInExternalPlayer(video)
@@ -165,6 +176,7 @@ struct OverlayInlinePlayerView: View {
                         .buttonStyle(.bordered)
                         .tint(Color.appAccent)
                         .controlSize(.small)
+                        .disabled(viewModel.isPreparingLocationRelink)
                     } else {
                         Button("Open in External Player") {
                             playback.openInExternalPlayer(video)
@@ -180,6 +192,7 @@ struct OverlayInlinePlayerView: View {
                     .buttonStyle(.bordered)
                     .tint(Color.appAccent)
                     .controlSize(.small)
+                    .disabled(viewModel.isPreparingLocationRelink)
                 }
             }
             .padding(AppSpacing.lg)

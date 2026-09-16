@@ -600,10 +600,20 @@ private struct LibraryContentView: View {
                     .foregroundStyle(Color.appTextSecondary)
             }
             Spacer(minLength: 8)
-            Button("Repair Links…") {
+            Button {
                 vm.beginLocationRelink(preferredOldRoot: vm.libraryFolderMissingBannerPreferredRoot)
+            } label: {
+                if vm.isPreparingLocationRelink {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Opening…")
+                    }
+                } else {
+                    Text("Repair Links…")
+                }
             }
-            .disabled(vm.isApplyingLocationRelink)
+            .disabled(vm.isApplyingLocationRelink || vm.isPreparingLocationRelink)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

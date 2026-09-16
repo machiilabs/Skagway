@@ -127,6 +127,25 @@ final class LocationRelinkTests: XCTestCase {
 
         let s1 = candidates.first { $0.path == "/Volumes/Old/Media/Shows/S1" }
         XCTAssertEqual(s1?.videoCount, 2)
+
+        // Alphabetical by full path (case-insensitive).
+        let ordered = candidates.map(\.path)
+        XCTAssertEqual(ordered, ordered.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending })
+    }
+
+    func testCollectOldRootCandidatesSortedAlphabetically() {
+        let candidates = LocationRelink.collectOldRootCandidates(
+            videoPaths: [
+                "/Volumes/Z/Lib/a.mp4",
+                "/Volumes/A/Lib/b.mp4",
+                "/Volumes/M/Lib/c.mp4"
+            ],
+            dataSourceRoots: ["/Volumes/Z/Lib", "/Volumes/A/Lib", "/Volumes/M/Lib"]
+        )
+        let roots = candidates.map(\.path).filter {
+            $0 == "/Volumes/A/Lib" || $0 == "/Volumes/M/Lib" || $0 == "/Volumes/Z/Lib"
+        }
+        XCTAssertEqual(roots, ["/Volumes/A/Lib", "/Volumes/M/Lib", "/Volumes/Z/Lib"])
     }
 
     func testCollectOldRootCandidatesWithoutDataSourceUsesParents() {

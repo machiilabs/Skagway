@@ -328,7 +328,8 @@ struct SkagwayApp: App {
                 }
                 .disabled(!appState.hasLibrary
                     || (appState.libraryViewModel?.videos.isEmpty ?? true)
-                    || (appState.libraryViewModel?.isApplyingLocationRelink ?? false))
+                    || (appState.libraryViewModel?.isApplyingLocationRelink ?? false)
+                    || (appState.libraryViewModel?.isPreparingLocationRelink ?? false))
                 .help("Repair catalog links after moving an entire library folder tree")
             }
             CommandGroup(replacing: .importExport) {

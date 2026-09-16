@@ -375,7 +375,7 @@ struct CuratedWallFiltersDrawer: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.appTextTertiary)
-                .disabled(viewModel.isApplyingLocationRelink)
+                .disabled(viewModel.isApplyingLocationRelink || viewModel.isPreparingLocationRelink)
                 .help("Repair Links…")
             }
         }

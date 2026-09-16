@@ -36,6 +36,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 - **Repair Links progress** — Step 3 shows phase labels with determinate counts through the whole job (paths → folders → thumbnails → library → missing check). Thumb migration uses one cache-directory pass; same-path pairs skip renames. Bar reaches 100% only when Done-ready.
 - **Library folder missing banner on click** — Same Repair Links banner also appears when focusing a grid/list clip whose file is not on disk (no duplicate flicker if already visible).
 - **Fix: missing banner on plain click / Playback Failed** — Grid/list focus no longer bypasses the missing check (`focusedVideoId` didSet). Playback Failed for a missing file raises the banner and adds **Repair Links…** on the error overlay.
+- **Repair Links open feedback** — Immediate “Opening…” spinner while catalog folder list builds off the main actor; pre-selected old folder scrolls into view; folder list sorted A–Z by full path.
 
 ## 1.2.0 (build 1082) - 2026-09-15
 

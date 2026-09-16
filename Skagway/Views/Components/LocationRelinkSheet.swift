@@ -163,30 +163,64 @@ struct LocationRelinkSheet: View {
     }
 
     private var oldRootList: some View {
-        List(selection: Binding(
-            get: { oldRoot.isEmpty ? nil : oldRoot },
-            set: { oldRoot = $0 ?? "" }
-        )) {
-            if filteredOldRoots.isEmpty {
-                Text(oldRootSearch.isEmpty ? "No known library folders." : "No folders match “\(oldRootSearch)”.")
-                    .foregroundStyle(Color.appTextSecondary)
-            } else {
-                ForEach(filteredOldRoots) { candidate in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(candidate.path)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                        Text(candidate.subtitle)
-                            .font(.caption)
-                            .foregroundStyle(Color.appTextSecondary)
+        ScrollViewReader { proxy in
+            List(selection: Binding(
+                get: { oldRoot.isEmpty ? nil : oldRoot },
+                set: { oldRoot = $0 ?? "" }
+            )) {
+                if filteredOldRoots.isEmpty {
+                    Text(oldRootSearch.isEmpty ? "No known library folders." : "No folders match “\(oldRootSearch)”.")
+                        .foregroundStyle(Color.appTextSecondary)
+                } else {
+                    ForEach(filteredOldRoots) { candidate in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(candidate.path)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .fontWeight(
+                                    candidate.path.caseInsensitiveCompare(oldRoot) == .orderedSame
+                                        ? .semibold : .regular
+                                )
+                            Text(candidate.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(Color.appTextSecondary)
+                        }
+                        .tag(candidate.path)
+                        .id(candidate.path)
+                        .padding(.vertical, 2)
+                        .listRowBackground(
+                            candidate.path.caseInsensitiveCompare(oldRoot) == .orderedSame
+                                ? Color.appAccent.opacity(0.14)
+                                : Color.clear
+                        )
                     }
-                    .tag(candidate.path)
-                    .padding(.vertical, 2)
                 }
             }
+            .listStyle(.inset(alternatesRowBackgrounds: true))
+            .disabled(isApplying)
+            .onAppear {
+                scrollSelectedOldRootIntoView(using: proxy)
+            }
+            .onChange(of: oldRoot) { _, _ in
+                scrollSelectedOldRootIntoView(using: proxy)
+            }
+            .onChange(of: oldRootSearch) { _, _ in
+                scrollSelectedOldRootIntoView(using: proxy)
+            }
         }
-        .listStyle(.inset(alternatesRowBackgrounds: true))
-        .disabled(isApplying)
+    }
+
+    private func scrollSelectedOldRootIntoView(using proxy: ScrollViewProxy) {
+        guard !oldRoot.isEmpty else { return }
+        // Defer so List finishes laying out before scrolling to the pre-selected row.
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(oldRoot, anchor: .center)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            proxy.scrollTo(oldRoot, anchor: .center)
+        }
     }
 
     // MARK: - Step 2: New folder

@@ -924,17 +924,29 @@ final class LibraryViewModel {
     }
 
     /// Known Location A options from catalog paths + data sources (never a filesystem picker).
+    /// Heavy path-prefix work runs off the main actor so opening Repair Links stays responsive.
     func locationRelinkOldRootCandidates() async -> [LocationRelink.OldRootCandidate] {
         let sources = (try? await dataSourceRepo.fetchAll()) ?? []
-        return LocationRelink.collectOldRootCandidates(
-            videoPaths: videos.map(\.filePath),
-            dataSourceRoots: sources.map(\.folderPath)
-        )
+        let videoPaths = videos.map(\.filePath)
+        let sourcePaths = sources.map(\.folderPath)
+        return await Task.detached(priority: .userInitiated) {
+            LocationRelink.collectOldRootCandidates(
+                videoPaths: videoPaths,
+                dataSourceRoots: sourcePaths
+            )
+        }.value
     }
 
+    /// True while catalog folder candidates are loading before the Repair Links sheet appears.
+    private(set) var isPreparingLocationRelink: Bool = false
+
     /// Opens the Repair Links sheet. Old location is chosen from known library paths — never via NSOpenPanel.
+    /// Sets `isPreparingLocationRelink` immediately so callers can show a spinner while candidates build.
     func beginLocationRelink(preferredOldRoot: String? = nil) {
+        guard !isPreparingLocationRelink, locationRelinkPresentation == nil else { return }
+        isPreparingLocationRelink = true
         Task { @MainActor in
+            defer { isPreparingLocationRelink = false }
             let candidates = await locationRelinkOldRootCandidates()
             guard !candidates.isEmpty else {
                 reportTransientError("No library folder paths available to repair")

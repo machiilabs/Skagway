@@ -198,12 +198,8 @@ enum LocationRelink {
             result.append(OldRootCandidate(path: path, videoCount: videoCount, sources: src))
         }
 
-        return result.sorted { a, b in
-            if a.videoCount != b.videoCount { return a.videoCount > b.videoCount }
-            if a.sources.contains(.dataSource) != b.sources.contains(.dataSource) {
-                return a.sources.contains(.dataSource)
-            }
-            return a.path.localizedStandardCompare(b.path) == .orderedAscending
+        return result.sorted {
+            $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
         }
     }
 
