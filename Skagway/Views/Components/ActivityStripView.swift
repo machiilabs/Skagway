@@ -120,6 +120,7 @@ struct ActivityStripView: View {
         case .reencoding: return "arrow.triangle.2.circlepath"
         case .moving: return "folder"
         case .deleting: return "trash"
+        case .repairingLinks: return "link"
         case .message: return "info.circle"
         case .error: return "exclamationmark.triangle.fill"
         }

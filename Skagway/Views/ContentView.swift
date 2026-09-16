@@ -589,7 +589,8 @@ private struct LibraryContentView: View {
     }
 
     /// Quiet repair cue — Missing filter, or after focusing a clip whose file is gone.
-    /// Never auto-forces Repair Links (offline ≠ broken).
+    /// Banner offers Find missing file… (file picker → parent-folder remap). File → Repair Links…
+    /// remains the whole-Location wizard.
     private var missingLibraryRepairCue: some View {
         HStack(spacing: 10) {
             Image(systemName: "folder.badge.questionmark")
@@ -603,9 +604,11 @@ private struct LibraryContentView: View {
             }
             Spacer(minLength: 8)
             Button {
-                vm.beginLocationRelink(preferredOldRoot: vm.libraryFolderMissingBannerPreferredRoot)
+                Task { @MainActor in
+                    await vm.findMissingFile()
+                }
             } label: {
-                Text("Repair Links…")
+                Text("Find missing file…")
             }
             .disabled(vm.isApplyingLocationRelink)
         }

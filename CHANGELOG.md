@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Find missing file…** — Missing-folder banner button opens an `NSOpenPanel` for the orphan’s video file (not the Repair Links wizard). Parent of the orphan → parent of the located file remaps all clips under that folder via relative paths (basename must match); reuses Repair Links apply (DB, thumbs/storyboards, progress, Undo). File → **Repair Links…** stays the whole-Location wizard.
 - **Storyboard View vertical density** — Reclaims letterbox chrome and gutters so more rows fit: collage height follows the 960×360 aspect (was a fixed 280pt frame), tighter row/column spacing (26→12/16), compact card padding and title scrim. Frame pixels stay width-driven — no shrink for density.
 - **Storyboard View (⌘3)** — First-class peer of Grid/List. Removes the nested Poster/Storyboard toggle (Grid is posters only). Storyboard uses fewer/taller wall cards, a larger 2×3 collage JPEG (~960×360) with even-timeline bake, no hover scrub, and click-a-cell to seek/play. Repair Links still remaps storyboard cache keys.
 

@@ -199,4 +199,70 @@ final class LocationRelinkTests: XCTestCase {
         XCTAssertTrue(LocationRelink.isSelectableOldRoot("/Volumes/Disk"))
         XCTAssertTrue(LocationRelink.isSelectableOldRoot("/Users/sam/Films"))
     }
+
+    func testRootsFromLocatedFileUsesParentsAndRequiresBasename() {
+        let ok = LocationRelink.rootsFromLocatedFile(
+            orphanPath: "/Volumes/Old/Shows/S1/ep1.mp4",
+            locatedPath: "/Volumes/New/Archive/Shows/S1/ep1.mp4"
+        )
+        switch ok {
+        case .success(let roots):
+            XCTAssertEqual(roots.oldRoot, "/Volumes/Old/Shows/S1")
+            XCTAssertEqual(roots.newRoot, "/Volumes/New/Archive/Shows/S1")
+        case .failure(let error):
+            XCTFail("expected success, got \(error)")
+        }
+
+        let mismatch = LocationRelink.rootsFromLocatedFile(
+            orphanPath: "/Volumes/Old/Shows/S1/ep1.mp4",
+            locatedPath: "/Volumes/New/Archive/Shows/S1/other.mp4"
+        )
+        if case .failure(.basenameMismatch(let expected, let found)) = mismatch {
+            XCTAssertEqual(expected, "ep1.mp4")
+            XCTAssertEqual(found, "other.mp4")
+        } else {
+            XCTFail("expected basenameMismatch")
+        }
+    }
+
+    func testFindMissingRemapDoesNotPointEveryClipAtSelectedFile() {
+        // Parent→parent relative remap: siblings keep their own basenames under newRoot.
+        let videos: [(Int64?, String, Int64)] = [
+            (1, "/old/Lib/a.mp4", 10),
+            (2, "/old/Lib/b.mp4", 20),
+            (3, "/old/Lib/nested/c.mp4", 30)
+        ]
+        let roots = LocationRelink.rootsFromLocatedFile(
+            orphanPath: "/old/Lib/a.mp4",
+            locatedPath: "/new/Lib/a.mp4"
+        )
+        guard case .success(let pair) = roots else {
+            XCTFail("roots"); return
+        }
+        XCTAssertEqual(pair.oldRoot, "/old/Lib")
+        XCTAssertEqual(pair.newRoot, "/new/Lib")
+
+        let preview = LocationRelink.buildPreview(
+            videos: videos,
+            oldRoot: pair.oldRoot,
+            newRoot: pair.newRoot,
+            existingLibraryPaths: Set(videos.map(\.1)),
+            fileExists: { _ in true },
+            fileSize: { path in
+                switch path {
+                case "/new/Lib/a.mp4": return 10
+                case "/new/Lib/b.mp4": return 20
+                case "/new/Lib/nested/c.mp4": return 30
+                default: return nil
+                }
+            }
+        )
+        let applied = LocationRelink.mappingsToApply(preview: preview, includeNeedsAttention: true)
+        XCTAssertEqual(Set(applied.map(\.newPath)), Set([
+            "/new/Lib/a.mp4",
+            "/new/Lib/b.mp4",
+            "/new/Lib/nested/c.mp4"
+        ]))
+        XCTAssertFalse(applied.allSatisfy { $0.newPath == "/new/Lib/a.mp4" })
+    }
 }

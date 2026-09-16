@@ -1027,6 +1027,66 @@ final class LibraryViewModel {
         return LocationRelink.normalizeRoot(url.path)
     }
 
+    /// Resolve which missing clip "Find missing file…" should locate.
+    func orphanPathForFindMissingFile() -> String? {
+        let candidates = [
+            focusedVideoId,
+            lastSelectedVideoId,
+            selectedVideoIds.first
+        ].compactMap { $0 }
+        for path in candidates {
+            if missingVideoIds.contains(path) || !FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+        return nil
+    }
+
+    /// Banner entry: pick the on-disk file for one orphan, then remap that folder tree via Repair Links apply.
+    ///
+    /// Uses the orphan’s parent as Location A and the selected file’s parent as Location B
+    /// (`oldRoot/rel` → `newRoot/rel`). Basename must match. Does not open the Repair Links wizard.
+    @discardableResult
+    func findMissingFile(for orphanPath: String? = nil) async -> Int {
+        guard !isApplyingLocationRelink else { return 0 }
+        guard locationRelinkPresentation == nil else { return 0 }
+
+        guard let orphan = orphanPath ?? orphanPathForFindMissingFile() else {
+            reportTransientError("Select a missing clip first, then Find missing file…")
+            return 0
+        }
+
+        let expectedName = URL(fileURLWithPath: orphan).lastPathComponent
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie, .avi, .mpeg]
+        panel.message = "Locate “\(expectedName)” on disk"
+        panel.prompt = "Use This File"
+        panel.nameFieldStringValue = expectedName
+        guard panel.runModal() == .OK, let url = panel.url else { return 0 }
+
+        let located = LocationRelink.normalizeRoot(url.path)
+        switch LocationRelink.rootsFromLocatedFile(orphanPath: orphan, locatedPath: located) {
+        case .failure(.basenameMismatch(let expected, let found)):
+            reportTransientError("Selected file must be named “\(expected)” (got “\(found)”)")
+            return 0
+        case .failure(.emptyPath):
+            reportTransientError("Couldn't use that file path")
+            return 0
+        case .success(let roots):
+            let preview = buildLocationRelinkPreview(oldRoot: roots.oldRoot, newRoot: roots.newRoot)
+            let applyable = LocationRelink.mappingsToApply(preview: preview, includeNeedsAttention: true)
+            guard !applyable.isEmpty else {
+                reportTransientError("No clips under that folder could be reconnected")
+                return 0
+            }
+            // Soft size / collision flags still remap — user explicitly located the file.
+            return await applyLocationRelink(preview: preview, includeNeedsAttention: true)
+        }
+    }
+
     func buildLocationRelinkPreview(oldRoot: String, newRoot: String) -> LocationRelink.Preview {
         let old = LocationRelink.normalizeRoot(oldRoot)
         let videosUnder = videos
@@ -2102,6 +2162,20 @@ final class LibraryViewModel {
             ))
         }
 
+        // Find missing file (no wizard sheet) — show Repair Links apply progress in the strip.
+        // When the Repair Links sheet is open it renders its own bar; skip the strip then.
+        if isApplyingLocationRelink,
+           locationRelinkPresentation == nil,
+           let progress = locationRelinkProgress
+        {
+            candidates.append(AppActivity(
+                id: "repair-links",
+                kind: .repairingLinks,
+                title: progress.statusText,
+                fraction: progress.total > 0 ? progress.fraction : nil
+            ))
+        }
+
         if isScanning {
             let title: String = {
                 if scanTotal > 0 { return "Scanning \(scanCurrent)/\(scanTotal)" }
@@ -2226,10 +2300,11 @@ final class LibraryViewModel {
             case .moving: return 1
             case .reencoding: return 2
             case .deleting: return 3
-            case .scanning: return 4
-            case .importingMetadata, .exportingMetadata: return 5
-            case .fingerprinting: return 6
-            case .message: return 7
+            case .repairingLinks: return 4
+            case .scanning: return 5
+            case .importingMetadata, .exportingMetadata: return 6
+            case .fingerprinting: return 7
+            case .message: return 8
             case .error: return 0
             }
         }

@@ -9,6 +9,7 @@ enum AppActivityKind: String, Equatable {
     case reencoding
     case moving
     case deleting
+    case repairingLinks
     case message
     case error
 }
