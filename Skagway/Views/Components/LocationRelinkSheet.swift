@@ -255,25 +255,33 @@ struct LocationRelinkSheet: View {
     }
 
     private func evidenceGroupedList(_ preview: LocationRelink.Preview) -> some View {
-        let grouped = LocationRelink.groupEvidenceCandidates(preview.candidates)
+        let ready = preview.candidates.filter { $0.kind == .reconnect }
+        let needsAttention = preview.candidates.filter {
+            if case .needsAttention = $0.kind { return true }
+            return false
+        }
+        let unmatched = preview.candidates.filter {
+            if case .stillMissing = $0.kind { return true }
+            return false
+        }
         return List {
-            ForEach(grouped.byDestination, id: \.destination) { group in
-                Section {
-                    ForEach(group.ready) { candidate in
+            if !ready.isEmpty {
+                Section("Ready (\(ready.count))") {
+                    ForEach(ready) { candidate in
                         candidateRow(candidate)
                     }
-                    ForEach(group.needsAttention) { candidate in
-                        candidateRow(candidate)
-                    }
-                } header: {
-                    Text("\(group.ready.count) Ready · \(group.needsAttention.count) Needs attention under \(group.destination)")
-                        .font(.caption)
-                        .lineLimit(2)
                 }
             }
-            if !grouped.unmatched.isEmpty {
-                Section("Unmatched (\(grouped.unmatched.count))") {
-                    ForEach(grouped.unmatched) { candidate in
+            if !needsAttention.isEmpty {
+                Section("Needs attention (\(needsAttention.count))") {
+                    ForEach(needsAttention) { candidate in
+                        candidateRow(candidate)
+                    }
+                }
+            }
+            if !unmatched.isEmpty {
+                Section("Unmatched (\(unmatched.count))") {
+                    ForEach(unmatched) { candidate in
                         candidateRow(candidate)
                     }
                 }
