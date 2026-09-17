@@ -113,11 +113,13 @@ struct LocationRelinkSheet: View {
         let ready = preview?.reconnectCount ?? 0
         let attention = preview?.needsAttentionCount ?? 0
         let unmatched = preview?.stillMissingCount ?? viewModel.reconnectMissingClipCount
+        let allMatched = ready > 0 && attention == 0 && unmatched == 0
         return HStack(spacing: 10) {
             summaryCard(
                 title: "\(ready) ready",
                 systemImage: "link",
-                accent: .green
+                accent: .green,
+                filledSuccess: allMatched
             )
             summaryCard(
                 title: "\(attention) need attention",
@@ -132,13 +134,18 @@ struct LocationRelinkSheet: View {
         }
     }
 
-    private func summaryCard(title: String, systemImage: String, accent: Color) -> some View {
+    private func summaryCard(
+        title: String,
+        systemImage: String,
+        accent: Color,
+        filledSuccess: Bool = false
+    ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
-                .foregroundStyle(accent)
+                .foregroundStyle(filledSuccess ? Color.white : accent)
             Text(title)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.appTextPrimary)
+                .foregroundStyle(filledSuccess ? Color.white : Color.appTextPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
             Spacer(minLength: 0)
@@ -148,7 +155,7 @@ struct LocationRelinkSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.appTextSecondary.opacity(0.08))
+                .fill(filledSuccess ? Color.green.opacity(0.85) : Color.appTextSecondary.opacity(0.08))
         )
     }
 

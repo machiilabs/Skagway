@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Reconnect Ready card go-state** — When every missing clip is Ready (0 needs attention, 0 unmatched), the Ready summary card uses a filled green success background.
 - **Fix: Missing banner count = full library missing set** — Focusing one orphan no longer shows a parent-folder-only N (e.g. 6 vs 10). Banner uses the same Missing scan IDs as Reconnect; shows “Checking…” while the scan runs, then the true total.
 - **Reconnect list sections** — Match list uses Ready (N) / Needs attention (N) / Unmatched (N) group headings; removed the destination path summary line above list rows.
 - **Reconnect summary cards** — Replaced the top “N missing clips” filename box with three session totals (ready / need attention / unmatched); dropped the duplicate inline counters above the match list.
