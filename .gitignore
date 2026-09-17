@@ -32,3 +32,6 @@ demo-library/
 # Misc
 *.swp
 *~
+
+# Wrangler local cache (R2 publish)
+.wrangler/
