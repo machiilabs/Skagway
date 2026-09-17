@@ -511,16 +511,17 @@ enum LocationRelink {
         let parent = normalizeRoot(
             URL(fileURLWithPath: filePath).deletingLastPathComponent().path
         )
-        let underParent = allMissing.filter { isUnder(root: parent, path: $0) }
-        let count = max(underParent.count, 1)
+        // Taxonomy from the focused orphan’s parent; count is always the full missing set.
+        let totalMissing = max(allMissing.count, 1)
         if fileExists(parent) {
-            return .parentPresent(missingCount: count)
+            return .parentPresent(missingCount: totalMissing)
         }
         let name = URL(fileURLWithPath: parent).lastPathComponent
         return .parentGone(folderName: name.isEmpty ? parent : name)
     }
 
     /// Exact customer-facing banner strings (Reconnect UX).
+    /// `parentPresent` count is the **full library** missing set (same as Missing / Reconnect).
     static func bannerCopy(for situation: MissingBannerSituation) -> BannerCopy {
         switch situation {
         case .parentGone(let folderName):
@@ -534,9 +535,9 @@ enum LocationRelink {
             let n = max(missingCount, 1)
             let body: String
             if n == 1 {
-                body = "1 clip is gone from this folder. Other clips here are fine — locate where the missing ones moved."
+                body = "1 clip is missing. Locate where it moved."
             } else {
-                body = "\(n) clips are gone from this folder. Other clips here are fine — locate where the missing ones moved."
+                body = "\(n) clips are missing. Locate where they moved."
             }
             return BannerCopy(
                 title: "Some clips are missing",
@@ -552,6 +553,16 @@ enum LocationRelink {
                 icon: "folder.badge.gearshape"
             )
         }
+    }
+
+    /// Placeholder while the full-library missing scan is still running.
+    static var bannerCopyChecking: BannerCopy {
+        BannerCopy(
+            title: "Some clips are missing",
+            body: "Checking…",
+            cta: "Reconnect…",
+            icon: "doc.badge.ellipsis"
+        )
     }
 
     /// Kept for call-site compatibility; Reconnect UI is Destinations-only.

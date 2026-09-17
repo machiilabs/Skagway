@@ -289,25 +289,34 @@ final class LocationRelinkTests: XCTestCase {
         let situation = LocationRelink.classifyMissingSituation(
             missingPaths: [
                 "\(parent)/a.mp4",
-                "\(parent)/b.mp4"
+                "\(parent)/b.mp4",
+                "/Volumes/Other/c.mp4" // also missing — count is full set, not parent-only
             ],
             focusPath: "\(parent)/a.mp4",
             fileExists: { $0 == parent || $0.hasPrefix("/Volumes/Live") }
         )
         if case .parentPresent(let count) = situation {
-            XCTAssertEqual(count, 2)
+            XCTAssertEqual(count, 3, "banner N must be full missing set, not under-parent only")
         } else {
             XCTFail("expected parentPresent, got \(situation)")
         }
         let copy = LocationRelink.bannerCopy(for: situation)
         XCTAssertEqual(copy.title, "Some clips are missing")
-        XCTAssertTrue(copy.body.hasPrefix("2 clips are gone"))
+        XCTAssertTrue(copy.body.hasPrefix("3 clips are missing"))
+        XCTAssertFalse(copy.body.contains("from this folder"))
         XCTAssertEqual(copy.cta, "Reconnect…")
         XCTAssertEqual(copy.icon, "doc.badge.ellipsis")
 
         let single = LocationRelink.bannerCopy(for: .parentPresent(missingCount: 1))
-        XCTAssertTrue(single.body.hasPrefix("1 clip is gone"))
+        XCTAssertTrue(single.body.hasPrefix("1 clip is missing"))
         XCTAssertFalse(single.body.contains("1 clips"))
+    }
+
+    func testBannerCopyCheckingPlaceholder() {
+        let copy = LocationRelink.bannerCopyChecking
+        XCTAssertEqual(copy.title, "Some clips are missing")
+        XCTAssertEqual(copy.body, "Checking…")
+        XCTAssertEqual(copy.cta, "Reconnect…")
     }
 
     func testClassifyScatteredAcrossDistinctParents() {

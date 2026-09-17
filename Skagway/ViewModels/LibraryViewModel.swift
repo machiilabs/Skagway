@@ -895,6 +895,8 @@ final class LibraryViewModel {
     private(set) var showRepairLinksBannerFromMissingClick: Bool = false
     /// Preferred old Location for Repair Links when opened from the banner (click or Missing filter).
     private(set) var repairLinksBannerPreferredRoot: String? = nil
+    /// True while a focus-triggered full missing scan is pending/running (banner shows “Checking…”).
+    private(set) var isMissingBannerScanPending: Bool = false
 
     /// Banner visibility: Missing filter with misses, or a missing clip was focused.
     var shouldShowLibraryFolderMissingBanner: Bool {
@@ -908,6 +910,7 @@ final class LibraryViewModel {
     }
 
     /// Situational banner classification (parent gone / parent present / scattered).
+    /// Count for parentPresent is always the full `missingVideoIds` set.
     var libraryFolderMissingBannerSituation: LocationRelink.MissingBannerSituation {
         let paths = Array(missingVideoIds)
         let focus: String? = showRepairLinksBannerFromMissingClick ? focusedVideoId : nil
@@ -918,8 +921,14 @@ final class LibraryViewModel {
     }
 
     /// Exact customer-facing banner copy for the current situation.
+    /// While a full missing scan is in flight after focusing an orphan, show “Checking…”.
     var libraryFolderMissingBannerCopy: LocationRelink.BannerCopy {
-        LocationRelink.bannerCopy(for: libraryFolderMissingBannerSituation)
+        if showRepairLinksBannerFromMissingClick
+            && (isRefreshingMissing || isMissingBannerScanPending)
+        {
+            return LocationRelink.bannerCopyChecking
+        }
+        return LocationRelink.bannerCopy(for: libraryFolderMissingBannerSituation)
     }
 
     /// Missing-clip count for Reconnect Destinations UI (avoids exposing private set).
@@ -4479,7 +4488,9 @@ final class LibraryViewModel {
 
         // Full scan (cheap) — banner + Reconnect then reflect the complete missing set.
         let anchorPath = path
+        isMissingBannerScanPending = true
         Task { @MainActor in
+            defer { self.isMissingBannerScanPending = false }
             await self.refreshMissingCount()
             guard self.missingVideoIds.contains(anchorPath) || !self.missingVideoIds.isEmpty else {
                 self.showRepairLinksBannerFromMissingClick = false
