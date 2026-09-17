@@ -554,25 +554,17 @@ enum LocationRelink {
         }
     }
 
-    /// Default sheet mode hint from banner classification.
+    /// Kept for call-site compatibility; Reconnect UI is Destinations-only.
     enum ReconnectMode: String, Equatable, CaseIterable, Identifiable {
-        case wholeFolder
         case destinations
 
         var id: String { rawValue }
 
-        var title: String {
-            switch self {
-            case .wholeFolder: return "Whole folder"
-            case .destinations: return "Destinations"
-            }
-        }
+        var title: String { "Destinations" }
 
         static func suggested(for situation: MissingBannerSituation) -> ReconnectMode {
-            switch situation {
-            case .parentGone: return .wholeFolder
-            case .parentPresent, .scattered: return .destinations
-            }
+            _ = situation
+            return .destinations
         }
     }
 

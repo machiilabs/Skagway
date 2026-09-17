@@ -863,18 +863,6 @@ final class LibraryViewModel {
 
     struct LocationRelinkPresentation: Identifiable, Equatable {
         let id = UUID()
-        /// Preferred / pre-selected old root (may be set before candidates finish loading).
-        var preferredOldRoot: String?
-        var candidates: [LocationRelink.OldRootCandidate]
-        /// True while the catalog folder list is still building off the main actor.
-        var isLoadingCandidates: Bool
-        /// 0…1 while building (nil = indeterminate start).
-        var catalogBuildFraction: Double?
-        var suggestedNewRoot: String?
-        /// Whole folder vs Evidence Destinations — suggested from banner situation.
-        var initialMode: LocationRelink.ReconnectMode = .wholeFolder
-        /// Happy-path: skip old-folder step when the preferred root is already known.
-        var startAtNewFolder: Bool = false
     }
 
     struct LocationRelinkUndoPayload: Equatable {
@@ -976,122 +964,42 @@ final class LibraryViewModel {
         }.value
     }
 
-    /// Opens the unified Reconnect sheet immediately, then fills the folder list in the background.
-    /// Also refreshes the full missing set (same scan as Missing smart library) so Destinations
-    /// and banner-derived scope cover every missing clip — not only a focused orphan.
-    /// Banner and File → Reconnect… share this entry (one product story).
+    /// Opens the unified Reconnect sheet (Evidence Destinations). Refreshes the full missing
+    /// set so the sheet covers every missing clip. Banner and File → Reconnect… share this entry.
     func beginLocationRelink(
         preferredOldRoot: String? = nil,
         initialMode: LocationRelink.ReconnectMode? = nil,
         startAtNewFolder: Bool = false
     ) {
+        // preferredOldRoot / initialMode / startAtNewFolder kept for call-site compatibility;
+        // UI is Destinations-only (no Whole folder tab).
+        _ = preferredOldRoot
+        _ = initialMode
+        _ = startAtNewFolder
         guard locationRelinkPresentation == nil else { return }
         guard !isApplyingLocationRelink else { return }
-        let requestedPreferred: String? = {
-            guard let preferredOldRoot, !preferredOldRoot.isEmpty else { return nil }
-            return LocationRelink.normalizeRoot(preferredOldRoot)
-        }()
-        let mode = initialMode
-            ?? LocationRelink.ReconnectMode.suggested(for: libraryFolderMissingBannerSituation)
-        // Present the sheet in this click turn — catalog + missing scan start after SwiftUI can paint.
-        locationRelinkPresentation = LocationRelinkPresentation(
-            preferredOldRoot: requestedPreferred,
-            candidates: [],
-            isLoadingCandidates: true,
-            catalogBuildFraction: nil,
-            suggestedNewRoot: nil,
-            initialMode: mode,
-            startAtNewFolder: startAtNewFolder && requestedPreferred != nil
-        )
+        locationRelinkPresentation = LocationRelinkPresentation()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             Task { @MainActor in
-                async let missingScan: Void = self.refreshMissingCount()
-                await self.loadLocationRelinkCandidates(requestedPreferred: requestedPreferred)
-                await missingScan
+                await self.refreshMissingCount()
             }
         }
     }
 
     /// Banner CTA — same Reconnect product; awaits a full missing scan first so the sheet
-    /// opens already scoped to every missing clip (not only the focused orphan).
+    /// opens already scoped to every missing clip.
     func beginReconnectFromBanner() {
         guard locationRelinkPresentation == nil else { return }
         guard !isApplyingLocationRelink else { return }
         Task { @MainActor in
             await refreshMissingCount()
             guard locationRelinkPresentation == nil else { return }
-            let preferred = libraryFolderMissingBannerPreferredRoot
-            let situation = libraryFolderMissingBannerSituation
-            let mode = LocationRelink.ReconnectMode.suggested(for: situation)
-            let skipOld = mode == .wholeFolder && preferred != nil
-            beginLocationRelink(
-                preferredOldRoot: preferred,
-                initialMode: mode,
-                startAtNewFolder: skipOld
-            )
+            beginLocationRelink()
         }
     }
 
-    private func updateLocationRelinkCatalogProgress(_ fraction: Double) {
-        guard var presentation = locationRelinkPresentation, presentation.isLoadingCandidates else { return }
-        let clamped = min(1, max(0, fraction))
-        if let existing = presentation.catalogBuildFraction,
-           clamped < 1,
-           abs(existing - clamped) < 0.01
-        {
-            return
-        }
-        presentation.catalogBuildFraction = clamped
-        locationRelinkPresentation = presentation
-    }
-
-    private func loadLocationRelinkCandidates(requestedPreferred: String?) async {
-        guard locationRelinkPresentation?.isLoadingCandidates == true else { return }
-        let candidates = await locationRelinkOldRootCandidates { [weak self] fraction in
-            Task { @MainActor in
-                self?.updateLocationRelinkCatalogProgress(fraction)
-            }
-        }
-        guard var presentation = locationRelinkPresentation else { return }
-        guard !candidates.isEmpty else {
-            locationRelinkPresentation = nil
-            reportTransientError("No library folder paths available to reconnect")
-            return
-        }
-        let preferred: String?
-        if let requestedPreferred,
-           candidates.contains(where: { $0.path.caseInsensitiveCompare(requestedPreferred) == .orderedSame })
-        {
-            preferred = requestedPreferred
-        } else if let inferred = await resolveSharedMissingRoot(),
-                  candidates.contains(where: { $0.path.caseInsensitiveCompare(inferred) == .orderedSame })
-        {
-            preferred = inferred
-        } else {
-            preferred = candidates.first?.path
-        }
-        presentation.candidates = candidates
-        presentation.preferredOldRoot = preferred
-        presentation.isLoadingCandidates = false
-        presentation.catalogBuildFraction = 1
-        locationRelinkPresentation = presentation
-    }
-
-    /// Pick the new folder for an in-progress Reconnect sheet (Whole folder mode).
-    func pickNewLocationForRelink() -> String? {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.message = "Select the new folder that replaces the missing library location"
-        panel.prompt = "Use as New Location"
-        // Offline/unplugged volumes should not force Reconnect — only open when the user asks.
-        guard panel.runModal() == .OK, let url = panel.url else { return nil }
-        return LocationRelink.normalizeRoot(url.path)
-    }
-
-    /// Pick an Evidence Destination folder (Destinations mode).
+    /// Pick an Evidence Destination folder.
     func pickEvidenceDestination() -> String? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false

@@ -552,7 +552,7 @@ final class LocationRelinkTests: XCTestCase {
     func testReconnectModeSuggestedFromSituation() {
         XCTAssertEqual(
             LocationRelink.ReconnectMode.suggested(for: .parentGone(folderName: "X")),
-            .wholeFolder
+            .destinations
         )
         XCTAssertEqual(
             LocationRelink.ReconnectMode.suggested(for: .parentPresent(missingCount: 3)),
