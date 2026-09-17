@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Fix: Evidence Destinations nested-folder false conflict** — Adding parent B after nested C no longer flags the same file as “2 matches” of itself; basename hits dedupe by standardized path (unique path → Ready; Needs attention only for distinct path collisions).
 - **Fix: Reconnect scopes to all missing clips** — Focusing one orphan (or Playback Failed → Reconnect) runs the same full missing scan as the Missing smart library, so banner count/copy and the Reconnect sheet cover every missing clip—not only the clicked one. Evidence Destinations / whole-folder remap can fix the batch. Grammar: “1 clip is gone…”.
 - **Reconnect (unified Relink UX)** — One product for banner + File menu: situational Missing banner copy (parent gone / parent present / scattered), **Reconnect…** CTA, Whole folder happy path (preview → apply → Undo), and **Evidence Destinations** multi-folder basename (+ soft size) matching with Ready / Needs attention / Unmatched. No silent rewrite; offline ≠ force reconnect; no telemetry. Edit → **Undo Reconnect**.
 - **Storyboard hit targets + density** — Collage cells still seek/play (times sidecar). Title and fat footer chrome select only. Compact (default) vs Comfortable packing toggle sits beside the Grid/List/Storyboard control when Storyboard is active; preference is Storyboard-only.

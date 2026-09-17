@@ -705,6 +705,9 @@ enum LocationRelink {
                     }
                 }
             }
+            // Nested destinations (B containing C) index the same file twice — collapse by
+            // standardized path so one unique URL stays Ready, not “2 matches” of itself.
+            hits = uniqueEvidenceHits(hits)
 
             let candidate: Candidate
             if hits.isEmpty {
@@ -750,7 +753,7 @@ enum LocationRelink {
                     matchSource: .evidenceDestination(root: hit.destination)
                 )
             } else {
-                // Ambiguous basename — propose first hit, flag Needs attention.
+                // Distinct paths share this basename — propose first hit, flag Needs attention.
                 let sortedHits = hits.sorted {
                     comparePathsByComponents($0.file.path, $1.file.path) == .orderedAscending
                 }
@@ -787,6 +790,32 @@ enum LocationRelink {
             candidates: candidates,
             evidenceDestinations: destinationIndexes.map(\.root)
         )
+    }
+
+    /// Collapse basename hits that resolve to the same on-disk path (nested Evidence Destinations).
+    /// Prefers the more specific destination root (longer path) when the same file appears twice.
+    static func uniqueEvidenceHits(
+        _ hits: [(destination: String, file: IndexedFile)]
+    ) -> [(destination: String, file: IndexedFile)] {
+        var bestByPath: [String: (destination: String, file: IndexedFile)] = [:]
+        var order: [String] = []
+
+        for hit in hits {
+            let pathKey = normalizeRoot(hit.file.path).lowercased()
+            if let existing = bestByPath[pathKey] {
+                let existingRootLen = normalizeRoot(existing.destination).count
+                let newRootLen = normalizeRoot(hit.destination).count
+                // Same standardized path — keep the more nested destination root for grouping.
+                if newRootLen > existingRootLen {
+                    bestByPath[pathKey] = hit
+                }
+            } else {
+                bestByPath[pathKey] = hit
+                order.append(pathKey)
+            }
+        }
+
+        return order.compactMap { bestByPath[$0] }
     }
 
     /// Group candidates for Destinations UI: Ready / Needs attention / Unmatched per destination.

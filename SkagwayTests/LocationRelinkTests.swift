@@ -435,6 +435,77 @@ final class LocationRelinkTests: XCTestCase {
         }
     }
 
+    func testNestedDestinationsDoNotDuplicateIdenticalPaths() {
+        // C nested under B: same file indexed under both destinations must stay Ready (1 unique path).
+        let nestedPath = "/Volumes/Media2/B/C/saigon.mp4"
+        let videos: [(Int64?, String, Int64)] = [
+            (1, "/old/Lib/saigon.mp4", 100),
+            (2, "/old/Lib/other.mp4", 200)
+        ]
+        let destC = LocationRelink.DestinationIndex(
+            root: "/Volumes/Media2/B/C",
+            byBasename: [
+                "saigon.mp4": [
+                    LocationRelink.IndexedFile(path: nestedPath, basename: "saigon.mp4", size: 100)
+                ]
+            ]
+        )
+        let destB = LocationRelink.DestinationIndex(
+            root: "/Volumes/Media2/B",
+            byBasename: [
+                "saigon.mp4": [
+                    LocationRelink.IndexedFile(path: nestedPath, basename: "saigon.mp4", size: 100)
+                ],
+                "other.mp4": [
+                    LocationRelink.IndexedFile(
+                        path: "/Volumes/Media2/B/other.mp4",
+                        basename: "other.mp4",
+                        size: 200
+                    )
+                ]
+            ]
+        )
+        let preview = LocationRelink.buildSessionPreview(
+            videos: videos,
+            wholeFolder: nil,
+            destinationIndexes: [destC, destB],
+            existingLibraryPaths: Set(videos.map(\.1))
+        )
+        XCTAssertEqual(preview.reconnectCount, 2)
+        XCTAssertEqual(preview.needsAttentionCount, 0)
+        let saigon = preview.candidates.first { $0.oldPath.hasSuffix("saigon.mp4") }
+        XCTAssertEqual(saigon?.kind, .reconnect)
+        XCTAssertEqual(LocationRelink.normalizeRoot(saigon?.newPath ?? ""), nestedPath)
+        if case .evidenceDestination(let root) = saigon?.matchSource {
+            // Prefer nested C for grouping when path is identical.
+            XCTAssertEqual(root, "/Volumes/Media2/B/C")
+        } else {
+            XCTFail("expected evidenceDestination matchSource")
+        }
+    }
+
+    func testUniqueEvidenceHitsDedupesIdenticalPathsAcrossDestinations() {
+        let path = "/Volumes/Media2/B/C/clip.mp4"
+        let hits: [(destination: String, file: LocationRelink.IndexedFile)] = [
+            (
+                "/Volumes/Media2/B/C",
+                LocationRelink.IndexedFile(path: path, basename: "clip.mp4", size: 1)
+            ),
+            (
+                "/Volumes/Media2/B",
+                LocationRelink.IndexedFile(path: path + "/", basename: "clip.mp4", size: 1)
+            ),
+            (
+                "/Volumes/Media2/B",
+                LocationRelink.IndexedFile(path: path, basename: "clip.mp4", size: 1)
+            )
+        ]
+        let unique = LocationRelink.uniqueEvidenceHits(hits)
+        XCTAssertEqual(unique.count, 1)
+        XCTAssertEqual(unique[0].destination, "/Volumes/Media2/B/C")
+        XCTAssertEqual(LocationRelink.normalizeRoot(unique[0].file.path), path)
+    }
+
     func testSessionPreviewWholeFolderThenDestinationsForLeftovers() {
         let videos: [(Int64?, String, Int64)] = [
             (1, "/old/Lib/keep/a.mp4", 10),
