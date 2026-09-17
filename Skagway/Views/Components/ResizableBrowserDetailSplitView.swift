@@ -11,6 +11,9 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
     let layoutModeKey: String
     let contentWidth: CGFloat
     let detailWidth: CGFloat
+    /// When false, the detail column is collapsed. Last `detailWidth` is kept in the model and
+    /// applied again on show — never persist a zero width from the collapsed frame.
+    let isDetailVisible: Bool
     let contentID: AnyHashable
     let detailID: AnyHashable
     let freezeContent: Bool
@@ -41,17 +44,23 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
         ])
 
         splitView.addArrangedSubview(contentContainer)
-        splitView.addArrangedSubview(detailHost)
-
         splitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
-        splitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
 
         context.coordinator.splitView = splitView
         context.coordinator.contentContainer = contentContainer
+        context.coordinator.detailHost = detailHost
         context.coordinator.onSizesChanged = onSizesChanged
         context.coordinator.lastContentID = contentID
         context.coordinator.lastDetailID = detailID
         context.coordinator.lastLayoutModeKey = layoutModeKey
+        context.coordinator.lastDetailVisible = isDetailVisible
+
+        // Attach detail only when visible — `isHidden` alone leaves a blank reserved strip
+        // with Auto Layout hosting views (see `applyDetailVisibility`).
+        if isDetailVisible {
+            splitView.addArrangedSubview(detailHost)
+            splitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
+        }
 
         return splitView
     }
@@ -61,58 +70,61 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
         let coord = context.coordinator
 
         coord.syncLayoutModeKey(layoutModeKey)
+        coord.syncDetailVisible(isDetailVisible)
 
         let subviews = splitView.arrangedSubviews
-        guard subviews.count >= 2 else { return }
+        guard !subviews.isEmpty else { return }
 
-        // Freeze / unfreeze browser column during inline playback
-        if freezeContent, let container = coord.contentContainer, !container.isFrozen {
-            splitView.layoutSubtreeIfNeeded()
-            container.layoutSubtreeIfNeeded()
-            if let hosted = container.subviews.first {
-                hosted.layoutSubtreeIfNeeded()
-            }
-            // Width to restore on exit (pre-playback column size), before any playback divider snap.
-            coord.browsingDividerPosition = subviews[0].frame.width
-            // Match exit path: apply saved playback divider synchronously, then freeze — avoids
-            // freeze-then-async setPosition (two visible steps when entering play mode).
-            let totalW = splitView.bounds.width
-            if totalW > 0, let savedBrowser = coord.playbackDividerPositions?.browser {
-                let clamped = min(max(savedBrowser, 80), totalW - 200)
-                coord.isProgrammaticResize = true
-                splitView.setPosition(clamped, ofDividerAt: 0)
-                coord.isProgrammaticResize = false
+        // Freeze / unfreeze only applies when both panes are present (playback reshape path).
+        if subviews.count >= 2 {
+            if freezeContent, let container = coord.contentContainer, !container.isFrozen {
                 splitView.layoutSubtreeIfNeeded()
                 container.layoutSubtreeIfNeeded()
                 if let hosted = container.subviews.first {
                     hosted.layoutSubtreeIfNeeded()
                 }
-            }
-            container.freeze()
-        } else if !freezeContent, let container = coord.contentContainer, container.isFrozen {
-            // Restore the browsing column width synchronously when possible, and sync
-            // `lastAppliedContentWidthFromModel` so `applyModelBrowserWidthIfNeeded` below
-            // does not issue a second `setPosition` (avoids visible jerk on exit play mode).
-            let savedWidth = coord.browsingDividerPosition
-            let totalW = splitView.bounds.width
-            if let savedWidth {
-                if totalW > 0 {
-                    coord.restoreBrowserDividerAfterUnfreeze(savedWidth: savedWidth, totalWidth: totalW, splitView: splitView)
-                } else {
-                    DispatchQueue.main.async { [weak coord, weak splitView] in
-                        guard let coord, let splitView else { return }
-                        splitView.layoutSubtreeIfNeeded()
-                        let tw = splitView.bounds.width
-                        guard tw > 0 else { return }
-                        coord.restoreBrowserDividerAfterUnfreeze(savedWidth: savedWidth, totalWidth: tw, splitView: splitView)
+                // Width to restore on exit (pre-playback column size), before any playback divider snap.
+                coord.browsingDividerPosition = subviews[0].frame.width
+                // Match exit path: apply saved playback divider synchronously, then freeze — avoids
+                // freeze-then-async setPosition (two visible steps when entering play mode).
+                let totalW = splitView.bounds.width
+                if totalW > 0, let savedBrowser = coord.playbackDividerPositions?.browser {
+                    let clamped = min(max(savedBrowser, 80), totalW - 200)
+                    coord.isProgrammaticResize = true
+                    splitView.setPosition(clamped, ofDividerAt: 0)
+                    coord.isProgrammaticResize = false
+                    splitView.layoutSubtreeIfNeeded()
+                    container.layoutSubtreeIfNeeded()
+                    if let hosted = container.subviews.first {
+                        hosted.layoutSubtreeIfNeeded()
                     }
                 }
+                container.freeze()
+            } else if !freezeContent, let container = coord.contentContainer, container.isFrozen {
+                // Restore the browsing column width synchronously when possible, and sync
+                // `lastAppliedContentWidthFromModel` so `applyModelBrowserWidthIfNeeded` below
+                // does not issue a second `setPosition` (avoids visible jerk on exit play mode).
+                let savedWidth = coord.browsingDividerPosition
+                let totalW = splitView.bounds.width
+                if let savedWidth {
+                    if totalW > 0 {
+                        coord.restoreBrowserDividerAfterUnfreeze(savedWidth: savedWidth, totalWidth: totalW, splitView: splitView)
+                    } else {
+                        DispatchQueue.main.async { [weak coord, weak splitView] in
+                            guard let coord, let splitView else { return }
+                            splitView.layoutSubtreeIfNeeded()
+                            let tw = splitView.bounds.width
+                            guard tw > 0 else { return }
+                            coord.restoreBrowserDividerAfterUnfreeze(savedWidth: savedWidth, totalWidth: tw, splitView: splitView)
+                        }
+                    }
+                }
+                container.unfreeze()
+                coord.browsingDividerPosition = nil
             }
-            container.unfreeze()
-            coord.browsingDividerPosition = nil
         }
 
-        if let container = subviews[0] as? ClippingContainer,
+        if let container = (coord.contentContainer ?? subviews[0] as? ClippingContainer),
            let contentHost = container.subviews.first as? NSHostingView<Content>
         {
             if coord.lastContentID != contentID {
@@ -120,13 +132,13 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
             }
             contentHost.rootView = content()
         }
-        // Always refresh detail `rootView` (mirrors browser `content()` above).
+        // Always refresh detail `rootView` while the host exists (even when detached).
         //
         // If we only update when `detailID` changes, the first snapshot after an in-place rename can be
         // `detailID == new path` while `filteredVideos` still resolves to no row — SwiftUI emits the
         // “Select a video” placeholder. When the filtered list catches up, `detailID` is unchanged, so we
         // would skip `detailHost.rootView = detail()` forever and stick on the placeholder/stale pane.
-        if let detailHost = subviews[1] as? NSHostingView<Detail> {
+        if let detailHost = coord.detailHost as? NSHostingView<Detail> {
             if coord.lastDetailID != detailID {
                 coord.lastDetailID = detailID
             }
@@ -142,8 +154,10 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
                 splitView.layoutSubtreeIfNeeded()
                 let tw = splitView.bounds.width
                 guard tw > 0 else { return }
-                coord.applyModelBrowserWidthIfNeeded(
+                coord.applyDetailVisibility(
+                    visible: isDetailVisible,
                     contentWidth: contentWidth,
+                    detailWidth: detailWidth,
                     totalWidth: tw,
                     splitView: splitView
                 )
@@ -151,10 +165,10 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
             return
         }
 
-        // Only move the divider when the *model* changed (initial layout, prefs load, or successful drag save).
-        // Do NOT fight the live split when current frame ≠ model but the model hasn't updated yet (avoids snapping back).
-        coord.applyModelBrowserWidthIfNeeded(
+        coord.applyDetailVisibility(
+            visible: isDetailVisible,
             contentWidth: contentWidth,
+            detailWidth: detailWidth,
             totalWidth: totalWidth,
             splitView: splitView
         )
@@ -167,6 +181,8 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
     final class Coordinator: NSObject, NSSplitViewDelegate {
         weak var splitView: NSSplitView?
         fileprivate weak var contentContainer: ClippingContainer?
+        /// Strong — detail is detached from the split when hidden and must outlive removal.
+        fileprivate var detailHost: NSView?
         var onSizesChanged: ((CGFloat, CGFloat) -> Void)?
         var lastContentID: AnyHashable?
         var lastDetailID: AnyHashable?
@@ -176,6 +192,7 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
         fileprivate var lastAppliedContentWidthFromModel: CGFloat?
         /// After first `setPosition` from saved layout; until then, ignore `splitViewDidResizeSubviews` so default 50/50 layout doesn't persist over loaded `LayoutParams`.
         private var hasAppliedInitialBrowserWidth = false
+        fileprivate var lastDetailVisible: Bool?
         var browsingDividerPosition: CGFloat?
         /// Debounces the frozen-grid reflow so it runs once the user stops dragging the divider during
         /// detail-pane playback, not on every drag frame.
@@ -190,6 +207,7 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
 
         func splitViewDidResizeSubviews(_ notification: Notification) {
             guard !isProgrammaticResize else { return }
+            guard lastDetailVisible != false else { return }
             guard let sv = notification.object as? NSSplitView, sv.arrangedSubviews.count >= 2 else { return }
             let subviews = sv.arrangedSubviews
             let browserW = subviews[0].frame.width
@@ -234,6 +252,72 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
                 lastAppliedContentWidthFromModel = nil
                 hasAppliedInitialBrowserWidth = false
             }
+        }
+
+        fileprivate func syncDetailVisible(_ visible: Bool) {
+            if lastDetailVisible != visible {
+                lastDetailVisible = visible
+                lastAppliedContentWidthFromModel = nil
+                hasAppliedInitialBrowserWidth = false
+            }
+        }
+
+        /// Detach the Inspector pane entirely when hidden (browser fills the window). Re-attach and
+        /// restore `detailWidth` on show. Hiding via `isHidden` left a blank reserved strip.
+        fileprivate func applyDetailVisibility(
+            visible: Bool,
+            contentWidth: CGFloat,
+            detailWidth: CGFloat,
+            totalWidth: CGFloat,
+            splitView: NSSplitView
+        ) {
+            guard let detail = detailHost else { return }
+            let detailAttached = detail.superview === splitView
+
+            if !visible {
+                guard detailAttached || splitView.arrangedSubviews.count >= 2 else {
+                    // Already a single-pane split — ensure browser claims full width.
+                    lastAppliedContentWidthFromModel = totalWidth
+                    hasAppliedInitialBrowserWidth = true
+                    return
+                }
+                isProgrammaticResize = true
+                detail.isHidden = false
+                splitView.removeArrangedSubview(detail)
+                detail.removeFromSuperview()
+                splitView.adjustSubviews()
+                splitView.layoutSubtreeIfNeeded()
+                contentContainer?.layoutSubtreeIfNeeded()
+                lastAppliedContentWidthFromModel = totalWidth
+                isProgrammaticResize = false
+                hasAppliedInitialBrowserWidth = true
+                return
+            }
+
+            if !detailAttached {
+                isProgrammaticResize = true
+                detail.isHidden = false
+                splitView.addArrangedSubview(detail)
+                splitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
+                let clampedDetail = min(max(detailWidth, 200), totalWidth - 80)
+                let browserW = max(80, totalWidth - clampedDetail)
+                splitView.layoutSubtreeIfNeeded()
+                splitView.setPosition(browserW, ofDividerAt: 0)
+                lastAppliedContentWidthFromModel = browserW
+                isProgrammaticResize = false
+                hasAppliedInitialBrowserWidth = true
+                let persist = onSizesChanged
+                DispatchQueue.main.async {
+                    persist?(browserW, clampedDetail)
+                }
+                return
+            }
+
+            applyModelBrowserWidthIfNeeded(
+                contentWidth: contentWidth,
+                totalWidth: totalWidth,
+                splitView: splitView
+            )
         }
 
         /// After unfreezing the browser column, apply the saved divider width once and mark the

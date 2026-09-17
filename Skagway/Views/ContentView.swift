@@ -394,8 +394,8 @@ private struct LibraryContentView: View {
                     items: StoryboardDensity.allCases,
                     tooltip: { density in
                         switch density {
+                        case .normal: "Normal storyboard — fewer columns, more space"
                         case .compact: "Compact storyboard — more columns, tighter gaps"
-                        case .comfortable: "Comfortable storyboard — fewer columns, more space"
                         }
                     }
                 ) { density in
@@ -426,6 +426,17 @@ private struct LibraryContentView: View {
             // Icon-only queue access when the strip is not already showing that job.
             if showsHeaderConversionIconOnly { conversionPill }
             if showsHeaderMoveIconOnly { movePill }
+
+            Button {
+                vm.toggleInspectorVisible()
+            } label: {
+                Image(systemName: "sidebar.right")
+                    .symbolVariant(vm.isInspectorVisible ? .fill : .none)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(vm.isInspectorVisible ? Color.appAccent : Color.appTextSecondary)
+            .help(vm.isInspectorVisible ? "Hide Inspector (⌥⌘I)" : "Show Inspector (⌥⌘I)")
+            .accessibilityLabel(vm.isInspectorVisible ? "Hide Inspector" : "Show Inspector")
 
             // Unified filter drawer (⌘⇧F) — Quick and Advanced are tabs inside.
             Button {
@@ -643,11 +654,13 @@ private struct LibraryContentView: View {
                 layoutModeKey: vm.viewMode.rawValue,
                 contentWidth: browsingSplitContentWidth,
                 detailWidth: browsingSplitDetailWidth,
+                isDetailVisible: vm.isInspectorVisible,
                 contentID: "curatedWall",
                 detailID: detailID,
                 // Playback no longer reshapes the browser, so the wall never needs freezing during play.
                 freezeContent: false,
                 onSizesChanged: { browserW, detailW in
+                    guard vm.isInspectorVisible, detailW >= 100 else { return }
                     vm.updateCurrentLayoutWithSizes(sidebarWidth: nil, contentWidth: browserW, detailWidth: detailW)
                 },
                 content: {
@@ -713,7 +726,13 @@ private struct LibraryContentView: View {
                     // last left at (including sticky compact mode); `.compact` re-enables compact.
                     switch vm.playerStartPreference {
                     case .fullScreen: vm.isPlayerFullScreen = true
-                    case .compact: vm.playerSizeIsCompact = true
+                    case .compact:
+                        if vm.isInspectorVisible {
+                            vm.setPlayerCompactMode(true)
+                        } else {
+                            // Compact needs the Inspector; open Windowed until it is shown.
+                            vm.setPlayerCompactMode(false)
+                        }
                     case .lastSize: if vm.playerLastWasFullScreen { vm.isPlayerFullScreen = true }
                     }
                 } else {
@@ -1098,6 +1117,10 @@ private struct LibraryContentView: View {
             }
             if event.keyCode == 0 /* 'a' */ {
                 DispatchQueue.main.async { lvm.openFiltersDrawer(mode: .advanced) }
+                return nil
+            }
+            if event.keyCode == 34 /* 'i' */ {
+                DispatchQueue.main.async { lvm.toggleInspectorVisible() }
                 return nil
             }
         }

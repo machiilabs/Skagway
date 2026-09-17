@@ -15,7 +15,7 @@ struct CuratedWallCard: View {
     /// Wall media: poster still vs 2×3 storyboard collage.
     var displayMode: WallCardMediaMode = .poster
     /// Storyboard packing density (ignored for poster cards).
-    var storyboardDensity: StoryboardDensity = .compact
+    var storyboardDensity: StoryboardDensity = .normal
     /// True while this video has an active (queued or in-flight) cross-volume move — shows a
     /// spinner badge over the thumbnail so the "frozen" state is visible without right-clicking.
     var isMoving: Bool = false
@@ -41,23 +41,23 @@ struct CuratedWallCard: View {
 
     private var isInlineEditing: Bool { isRenaming || isEditingTitle }
     private var isStoryboard: Bool { displayMode == .storyboard }
-    private var isComfortableStoryboard: Bool {
-        isStoryboard && storyboardDensity == .comfortable
+    private var isNormalStoryboard: Bool {
+        isStoryboard && storyboardDensity == .normal
     }
 
     /// On-collage title band height (also the select-only hit strip over the bottom of the collage).
     private var storyboardTitleBandHeight: CGFloat {
-        isComfortableStoryboard ? 52 : 40
+        isNormalStoryboard ? 52 : 40
     }
     /// Under-thumb date/rating strip — intentionally fat so select isn’t a hairline.
     private var storyboardFooterMinHeight: CGFloat {
-        isComfortableStoryboard ? 40 : 28
+        isNormalStoryboard ? 40 : 28
     }
     private var storyboardCardPadding: CGFloat {
-        isComfortableStoryboard ? 10 : 6
+        isNormalStoryboard ? 10 : 6
     }
     private var storyboardFooterVSpacing: CGFloat {
-        isComfortableStoryboard ? 4 : 2
+        isNormalStoryboard ? 4 : 2
     }
 
     @State private var thumbnail: NSImage?
@@ -204,7 +204,7 @@ struct CuratedWallCard: View {
 
                 HStack(spacing: 6) {
                     Text(video.dateAdded.formatted(date: .abbreviated, time: .omitted))
-                        .font(.system(size: isComfortableStoryboard ? 11 : 9))
+                        .font(.system(size: isNormalStoryboard ? 11 : 9))
                         .foregroundStyle(Color.appTextTertiary)
 
                     Spacer(minLength: 0)
@@ -213,7 +213,7 @@ struct CuratedWallCard: View {
                         HStack(spacing: 1) {
                             ForEach(0..<video.rating, id: \.self) { _ in
                                 Image(systemName: "star.fill")
-                                    .font(.system(size: isComfortableStoryboard ? 10 : 8))
+                                    .font(.system(size: isNormalStoryboard ? 10 : 8))
                                     .foregroundStyle(.yellow)
                             }
                         }
@@ -365,12 +365,12 @@ struct CuratedWallCard: View {
             .frame(height: isStoryboard ? storyboardTitleBandHeight : 56)
             .overlay(alignment: .bottomLeading) {
                 Text(video.displayTitle)
-                    .font(.system(size: isComfortableStoryboard ? 12 : (isStoryboard ? 10 : 11), weight: .semibold))
+                    .font(.system(size: isNormalStoryboard ? 12 : (isStoryboard ? 10 : 11), weight: .semibold))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.55), radius: 1, y: 1)
                     .lineLimit(isStoryboard ? 1 : 2)
                     .padding(.horizontal, isStoryboard ? 6 : 8)
-                    .padding(.bottom, isStoryboard ? (isComfortableStoryboard ? 8 : 4) : 7)
+                    .padding(.bottom, isStoryboard ? (isNormalStoryboard ? 8 : 4) : 7)
             }
             .contentShape(Rectangle())
             .modifier(StoryboardChromeTap(

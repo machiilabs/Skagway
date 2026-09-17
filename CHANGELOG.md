@@ -31,6 +31,9 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Hide/Show Inspector** — View menu, header button, and ⌥⌘I detach the Inspector pane (browser fills the window) and restore the last dragged width on show. Grid can use up to 8 columns (Storyboard Normal 3 / Compact 4) when the browser is wide. Compact player applies only while the Inspector is visible (hides → Windowed; show restores Compact preference). Clicking **N clips collected** shows the Inspector in batch-inspect mode.
+- **Storyboard density** — Renamed Comfortable → **Normal** (default); Compact remains the denser packing. Existing “comfortable” preference migrates to Normal.
+
 ## 1.3.0 (build 1123) - 2026-09-16
 
 - **Storyboard view (⌘3)** — First-class peer of Grid/List with Compact/Comfortable density and accurate click-to-seek on collage cells.

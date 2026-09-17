@@ -478,6 +478,31 @@ final class LibraryViewModel {
     /// a separate view — can track the resize in realtime instead of only snapping to the new size
     /// once the drag ends and `inspectorHeroHeight` commits. `nil` outside an active drag.
     var inspectorHeroLiveHeight: CGFloat?
+
+    /// User-owned Inspector chrome (View menu / toolbar / ⌥⌘I). Default on. Hide does **not**
+    /// write a zero detail width — show restores the last dragged Inspector width.
+    var isInspectorVisible: Bool = true {
+        didSet {
+            guard isInspectorVisible != oldValue else { return }
+            UserDefaults.standard.set(isInspectorVisible, forKey: Self.inspectorVisibleKey)
+        }
+    }
+
+    func toggleInspectorVisible() {
+        isInspectorVisible.toggle()
+        scrollToSelected()
+    }
+
+    /// Header collection pill: show Inspector at last width, in batch-inspect mode.
+    func revealInspectorForCollectedSet() {
+        guard selectedVideoIds.count > 1 else { return }
+        activateBatchInspectIfMultiCollected()
+        if !isInspectorVisible {
+            isInspectorVisible = true
+            scrollToSelected()
+        }
+    }
+
     var ffmpegUserPath: String = "" {
         didSet { UserDefaults.standard.set(ffmpegUserPath, forKey: Self.ffmpegPathKey) }
     }
@@ -2388,6 +2413,7 @@ final class LibraryViewModel {
     private static let filterDrawerHeightModeKey = "Skagway.filterDrawerHeightMode"
     private static let filtersDrawerModeKey = "Skagway.filtersDrawerMode"
     private static let inspectorHeroHeightKey = "Skagway.inspectorHeroHeight"
+    private static let inspectorVisibleKey = PrefsKeys.inspectorVisible
     private static let missingVideoIdsKey = "Skagway.missingVideoIds"
     private static let listColumnPreferencesKey = "Skagway.listColumnPreferences"
 
@@ -2537,8 +2563,8 @@ final class LibraryViewModel {
         }
     }
 
-    /// Storyboard View packing only (Compact = tight default; Comfortable = fewer/wider cards).
-    var storyboardDensity: StoryboardDensity = .compact {
+    /// Storyboard View packing only (Normal = roomier default; Compact = tighter).
+    var storyboardDensity: StoryboardDensity = .normal {
         didSet {
             guard storyboardDensity != oldValue else { return }
             UserDefaults.standard.set(storyboardDensity.rawValue, forKey: Self.storyboardDensityKey)
@@ -2597,14 +2623,34 @@ final class LibraryViewModel {
         }
     }
 
-    /// Sticky "compact" mode: while true the player's size *is* the live inspector still/filmstrip
-    /// footprint (so it follows the wall/inspector splitter). Cleared when the user picks an explicit
-    /// size (S/M/L preset or a manual resize). Persisted so it survives across launches.
+    /// Sticky "compact" mode preference: while active *and* the Inspector is visible, the player's
+    /// size is the live inspector still/filmstrip footprint. Cleared when the user picks Windowed
+    /// or resizes. Persisted. Compact does not apply while the Inspector is hidden — see
+    /// `isPlayerCompactMode`.
     var playerSizeIsCompact: Bool = false {
         didSet {
             guard playerSizeIsCompact != oldValue else { return }
             UserDefaults.standard.set(playerSizeIsCompact, forKey: Self.playerSizeIsCompactKey)
         }
+    }
+
+    /// Effective Compact layout: Inspector footprint only while the Inspector pane is showing.
+    /// Hiding the Inspector promotes the on-screen player to Windowed without clearing the
+    /// Compact preference, so showing the Inspector again restores Compact.
+    var isPlayerCompactMode: Bool {
+        playerSizeIsCompact && isInspectorVisible
+    }
+
+    /// Enter or leave Compact. No-ops entering Compact while the Inspector is hidden.
+    func setPlayerCompactMode(_ compact: Bool) {
+        guard compact else {
+            playerSizeIsCompact = false
+            return
+        }
+        guard isInspectorVisible else { return }
+        playerSizeIsCompact = true
+        playerFloatingPosition = nil
+        playerLastWasFullScreen = false
     }
 
     /// Preferred size the player opens at when playback starts.
@@ -2982,7 +3028,7 @@ final class LibraryViewModel {
             case .list: updated.contentWidthList = Double(w)
             }
         }
-        if let w = detailWidth {
+        if let w = detailWidth, w >= 100 {
             switch viewMode {
             case .grid, .storyboard: updated.detailWidthGrid = Double(w)
             case .list: updated.detailWidthList = Double(w)
@@ -3068,10 +3114,14 @@ final class LibraryViewModel {
         playAllLoops = defaults.object(forKey: Self.playAllLoopsKey) as? Bool
             ?? defaults.bool(forKey: "Skagway.albumPlaylistLoops")
         gridHoverPreviewEnabled = defaults.object(forKey: Self.gridHoverPreviewEnabledKey) as? Bool ?? true
-        if let raw = defaults.string(forKey: Self.storyboardDensityKey),
-           let density = StoryboardDensity(rawValue: raw)
-        {
-            storyboardDensity = density
+        if let raw = defaults.string(forKey: Self.storyboardDensityKey) {
+            // Pre-1.3.x stored "comfortable" for the roomier packing — map to Normal.
+            if raw == "comfortable" {
+                storyboardDensity = .normal
+                defaults.set(StoryboardDensity.normal.rawValue, forKey: Self.storyboardDensityKey)
+            } else if let density = StoryboardDensity(rawValue: raw) {
+                storyboardDensity = density
+            }
         }
         if let w = defaults.object(forKey: Self.playerFloatingWidthKey) as? Double, w > 0,
            let h = defaults.object(forKey: Self.playerFloatingHeightKey) as? Double, h > 0 {
@@ -3171,6 +3221,9 @@ final class LibraryViewModel {
         }
         if let v = defaults.object(forKey: Self.inspectorHeroHeightKey) as? Double {
             inspectorHeroHeight = max(CGFloat(v), Self.inspectorHeroMinHeight)
+        }
+        if defaults.object(forKey: Self.inspectorVisibleKey) != nil {
+            isInspectorVisible = defaults.bool(forKey: Self.inspectorVisibleKey)
         }
         if let ids = defaults.stringArray(forKey: Self.missingVideoIdsKey) { missingVideoIds = Set(ids) }
         if defaults.object(forKey: Self.showThumbnailInDetailKey) != nil {

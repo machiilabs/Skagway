@@ -85,6 +85,7 @@ enum PrefsKeys {
     static let filterDrawerHeightMode = "Skagway.filterDrawerHeightMode"
     static let filtersDrawerMode = "Skagway.filtersDrawerMode"
     static let inspectorHeroHeight = "Skagway.inspectorHeroHeight"
+    static let inspectorVisible = "Skagway.inspectorVisible"
     static let missingVideoIds = "Skagway.missingVideoIds"
     static let listColumnPreferences = "Skagway.listColumnPreferences"
 
@@ -149,6 +150,7 @@ enum PrefsKeys {
         "filtersDrawerHeight",
         "filterDrawerHeightMode",
         "inspectorHeroHeight",
+        "inspectorVisible",
         "missingVideoIds",
         "listColumnPreferences",
         "detailHeight",

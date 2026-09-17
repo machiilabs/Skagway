@@ -52,13 +52,20 @@ struct ActiveFilterPills: View {
     private var collectedSetPill: some View {
         let label = collectedCount == 1 ? "1 clip collected" : "\(collectedCount) clips collected"
         return HStack(spacing: 4) {
-            HStack(spacing: 4) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.caption)
-                Text(label)
-                    .font(.caption.weight(.semibold))
+            Button {
+                viewModel.revealInspectorForCollectedSet()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
+                    Text(label)
+                        .font(.caption.weight(.semibold))
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .foregroundStyle(Color.appAccent)
+            .help("Inspect collected set — show Inspector in batch mode")
 
             Button {
                 viewModel.deselectAllVideos()
@@ -80,7 +87,7 @@ struct ActiveFilterPills: View {
             Capsule().stroke(Color.appAccent.opacity(0.45), lineWidth: 1)
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label). Clear collection, ⌘⇧A.")
+        .accessibilityLabel("\(label). Show Inspector for the collected set. Clear collection, ⌘⇧A.")
     }
 
     @ViewBuilder

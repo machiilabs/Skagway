@@ -50,7 +50,7 @@ private enum OpenWithAppCache {
 
 /// The elegant "Wall" browsing surface for the Curated Wall experience.
 /// Matches the refined mockups:
-/// - Poster Grid: up to 5 columns, ~188pt thumbs
+/// - Poster Grid: up to 8 columns when the browser is wide, ~188pt thumbs
 /// - Storyboard View: fewer/taller cards with a large 2×3 collage per clip
 /// - Clean gallery cards (no dense metadata overload)
 /// - No in-wall header or controls — search/count/toggle/filters live in the thin bar above
@@ -75,42 +75,42 @@ struct CuratedWallGrid: View {
 
     // Max from the full-window mock; live `columns` is the source of truth for ↑/↓ row steps
     // in ContentView and for scroll-to-row math below.
-    static let maxColumns = 5
+    static let maxColumns = 8
     private(set) static var columns = 5
     /// Whole-card floor: thumb (188) + under-thumb row + card padding ≈ 220.
     private static let minCellWidth: CGFloat = 220
     private static let spacing: CGFloat = 22
     private static let outerPadding: CGFloat = 18
 
-    /// Storyboard packing knobs — Compact matches the prior tight wall; Comfortable is airier.
+    /// Storyboard packing knobs — Normal is the roomier default; Compact is tighter.
     private var storyboardMaxColumns: Int {
         switch storyboardDensity {
-        case .compact: return 3
-        case .comfortable: return 2
+        case .compact: return 4
+        case .normal: return 3
         }
     }
     private var storyboardMinCellWidth: CGFloat {
         switch storyboardDensity {
         case .compact: return 360
-        case .comfortable: return 440
+        case .normal: return 440
         }
     }
     private var storyboardColumnSpacing: CGFloat {
         switch storyboardDensity {
         case .compact: return 16
-        case .comfortable: return 28
+        case .normal: return 28
         }
     }
     private var storyboardRowSpacing: CGFloat {
         switch storyboardDensity {
         case .compact: return 12
-        case .comfortable: return 22
+        case .normal: return 22
         }
     }
     private var storyboardOuterPadding: CGFloat {
         switch storyboardDensity {
         case .compact: return 12
-        case .comfortable: return 18
+        case .normal: return 18
         }
     }
 
@@ -168,7 +168,7 @@ struct CuratedWallGrid: View {
                             titleEditText: isEditingTitleRow ? $viewModel.titleEditText : .constant(""),
                             thumbnailService: thumbnailService,
                             displayMode: isStoryboard ? WallCardMediaMode.storyboard : .poster,
-                            storyboardDensity: isStoryboard ? storyboardDensity : .compact,
+                            storyboardDensity: isStoryboard ? storyboardDensity : .normal,
                             isMoving: isMoving,
                             resumeFraction: resumeFraction(for: video),
                             hoverPreviewEnabled: !isStoryboard

@@ -54,6 +54,20 @@ struct SkagwayApp: App {
 
                 Divider()
 
+                Toggle("Inspector", isOn: Binding(
+                    get: { appState.libraryViewModel?.isInspectorVisible ?? true },
+                    set: { newValue in
+                        guard let vm = appState.libraryViewModel else { return }
+                        if vm.isInspectorVisible != newValue {
+                            vm.toggleInspectorVisible()
+                        }
+                    }
+                ))
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .disabled(!appState.hasLibrary)
+
+                Divider()
+
                 Button("Scroll to Selection") {
                     appState.libraryViewModel?.scrollToSelected()
                 }
@@ -120,18 +134,18 @@ struct SkagwayApp: App {
                 Button("Compact") {
                     guard let vm = appState.libraryViewModel else { return }
                     if vm.isPlayerFullScreen { vm.isPlayerFullScreen = false }
-                    vm.playerSizeIsCompact = true
-                    vm.playerLastWasFullScreen = false
-                    vm.playerFloatingPosition = nil   // compact always anchors top-right
+                    vm.setPlayerCompactMode(true)
                 }
                 .keyboardShortcut("c", modifiers: [.command, .control])
-                .disabled(appState.libraryViewModel?.isPlayingInline != true)
+                .disabled(
+                    appState.libraryViewModel?.isPlayingInline != true
+                        || appState.libraryViewModel?.isInspectorVisible != true
+                )
 
                 Button("Windowed") {
                     guard let vm = appState.libraryViewModel else { return }
                     if vm.isPlayerFullScreen { vm.isPlayerFullScreen = false }
-                    vm.playerSizeIsCompact = false
-                    vm.playerLastWasFullScreen = false
+                    vm.setPlayerCompactMode(false)
                 }
                 .keyboardShortcut("w", modifiers: [.command, .control])
                 .disabled(appState.libraryViewModel?.isPlayingInline != true)

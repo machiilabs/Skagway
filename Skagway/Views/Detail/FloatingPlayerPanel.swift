@@ -44,6 +44,8 @@ struct FloatingPlayerPanel: View {
     // MARK: - Size helpers
 
     private var compactSize: CGSize {
+        // Matches the Inspector's last user-adjusted width × hero height, even when the Inspector
+        // pane is hidden — Compact stays that footprint, pinned top-right of the content area.
         let detailWidth = CGFloat(viewModel.browsingLayout.detailColumnWidth(for: viewModel.viewMode))
         // Matches the Inspector's user-adjustable, persisted hero height exactly (see
         // `LibraryViewModel.inspectorHeroHeight`), so Compact always snaps to whatever footprint
@@ -69,7 +71,7 @@ struct FloatingPlayerPanel: View {
 
     private var size: CGSize {
         if let dragSize { return dragSize }
-        if viewModel.playerSizeIsCompact { return compactSize }
+        if viewModel.isPlayerCompactMode { return compactSize }
         return clampSize(viewModel.playerFloatingSize)
     }
 
@@ -91,7 +93,7 @@ struct FloatingPlayerPanel: View {
     /// Default center for the current mode: top-right for Compact, centered for S/M/L.
     private var defaultCenter: CGPoint {
         let tw = totalSize.width; let th = totalSize.height
-        if viewModel.playerSizeIsCompact {
+        if viewModel.isPlayerCompactMode {
             return CGPoint(x: available.width - tw / 2, y: th / 2)
         }
         return CGPoint(x: available.width / 2, y: available.height / 2)
@@ -99,7 +101,7 @@ struct FloatingPlayerPanel: View {
 
     /// Committed center from the ViewModel (or the mode default), clamped to current bounds.
     private var baseCenter: CGPoint {
-        if viewModel.playerSizeIsCompact { return defaultCenter }
+        if viewModel.isPlayerCompactMode { return defaultCenter }
         let tw = totalSize.width; let th = totalSize.height
         let raw = viewModel.playerFloatingPosition ?? defaultCenter
         return clampCenter(raw, totalW: tw, totalH: th)
@@ -156,29 +158,24 @@ struct FloatingPlayerPanel: View {
             .overlay(alignment: .topLeading) {
                 // Supplement to the bottom size cluster (kept in all modes).
                 PlayerTrafficLights(
-                    mode: viewModel.playerSizeIsCompact ? .compact : .windowed,
+                    mode: viewModel.isPlayerCompactMode ? .compact : .windowed,
                     onClose: { viewModel.isPlayingInline = false },
                     onYellow: {
-                        if viewModel.playerSizeIsCompact {
+                        if viewModel.isPlayerCompactMode {
                             // Option A: no-op. Option B: step up to Windowed.
                             guard PlayerTrafficLights.compactMapping == .optionB_compactLadder else { return }
-                            viewModel.playerSizeIsCompact = false
-                            viewModel.playerLastWasFullScreen = false
+                            viewModel.setPlayerCompactMode(false)
                         } else {
-                            viewModel.playerSizeIsCompact = true
-                            viewModel.playerLastWasFullScreen = false
-                            viewModel.playerFloatingPosition = nil
+                            viewModel.setPlayerCompactMode(true)
                         }
                     },
                     onGreen: {
-                        if viewModel.playerSizeIsCompact {
+                        if viewModel.isPlayerCompactMode {
                             switch PlayerTrafficLights.compactMapping {
                             case .optionA_yellowNopGreenWindowed:
-                                viewModel.playerSizeIsCompact = false
-                                viewModel.playerLastWasFullScreen = false
+                                viewModel.setPlayerCompactMode(false)
                             case .optionB_compactLadder:
-                                viewModel.playerSizeIsCompact = false
-                                viewModel.playerLastWasFullScreen = false
+                                viewModel.setPlayerCompactMode(false)
                                 viewModel.isPlayerFullScreen = true
                             }
                         } else {
@@ -341,12 +338,11 @@ struct FloatingPlayerPanel: View {
                     .onChanged { value in
                         if dragStartCenter == nil {
                             dragStartCenter = baseCenter   // snapshot before exiting compact
-                            if viewModel.playerSizeIsCompact {
+                            if viewModel.isPlayerCompactMode {
                                 // Freeze the current (compact) size as the new floating size so
                                 // dragging doesn't also cause a visual resize jump.
                                 viewModel.playerFloatingSize = size
-                                viewModel.playerSizeIsCompact = false
-                                viewModel.playerLastWasFullScreen = false
+                                viewModel.setPlayerCompactMode(false)
                             }
                         }
                         let tw = totalSize.width; let th = totalSize.height
@@ -374,14 +370,17 @@ struct FloatingPlayerPanel: View {
             iconButton("camera.viewfinder", help: "Make thumbnail from current frame (⌥⌘M)") {
                 viewModel.playback.makeThumbnailFromCurrentFrame()
             }
-            iconButton("rectangle", help: "Compact (follows the inspector width) (⌃⌘C)") {
-                viewModel.playerSizeIsCompact = true
-                viewModel.playerLastWasFullScreen = false
-                viewModel.playerFloatingPosition = nil   // compact always anchors top-right
+            iconButton(
+                "rectangle",
+                help: viewModel.isInspectorVisible
+                    ? "Compact (follows the inspector width) (⌃⌘C)"
+                    : "Compact needs the Inspector — show it first (⌥⌘I)",
+                disabled: !viewModel.isInspectorVisible
+            ) {
+                viewModel.setPlayerCompactMode(true)
             }
             iconButton("macwindow", help: "Windowed — last used size (⌃⌘W)") {
-                viewModel.playerSizeIsCompact = false
-                viewModel.playerLastWasFullScreen = false
+                viewModel.setPlayerCompactMode(false)
             }
             iconButton("arrow.up.left.and.arrow.down.right", help: "Full screen (⌃⌘F)") {
                 viewModel.isPlayerFullScreen = true
@@ -401,7 +400,12 @@ struct FloatingPlayerPanel: View {
         .padding(.top, 2)
     }
 
-    private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(
+        _ systemName: String,
+        help: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 // 14pt vs. the original .caption2 (~11pt) — 25% larger, matching the drag bar.
@@ -415,6 +419,8 @@ struct FloatingPlayerPanel: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(Color.appTextSecondary)
+        .disabled(disabled)
+        .opacity(disabled ? 0.4 : 1)
         // Sitting over the player's title/drag bar area otherwise resolves the hover cursor to
         // an I-beam (text-edit) instead of the normal arrow every other button in the app shows.
         .onHover { hovering in
@@ -499,7 +505,7 @@ struct FloatingPlayerPanel: View {
         _ edge: ResizeEdge,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        let enabled = !viewModel.playerSizeIsCompact
+        let enabled = !viewModel.isPlayerCompactMode
         return content()
             .contentShape(Rectangle())
             .gesture(resizeDragGesture(for: edge))
@@ -521,11 +527,10 @@ struct FloatingPlayerPanel: View {
                 if dragStartSize == nil {
                     dragStartSize = size
                     dragStartCenter = effectiveCenter
-                    if viewModel.playerSizeIsCompact {
+                    if viewModel.isPlayerCompactMode {
                         viewModel.playerFloatingSize = size
                     }
-                    viewModel.playerSizeIsCompact = false
-                    viewModel.playerLastWasFullScreen = false
+                    viewModel.setPlayerCompactMode(false)
                 }
                 applyResize(edge: edge, translation: value.translation)
             }

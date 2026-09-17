@@ -68,15 +68,17 @@ enum ViewMode: String, CaseIterable {
 
 /// Storyboard View packing only (persisted separately from Grid/List).
 enum StoryboardDensity: String, CaseIterable, Identifiable {
+    /// Roomier packing — default. Fewer/wider cards.
+    case normal
+    /// Tighter packing — more columns, smaller gaps.
     case compact
-    case comfortable
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
+        case .normal: return "Normal"
         case .compact: return "Compact"
-        case .comfortable: return "Comfortable"
         }
     }
 }

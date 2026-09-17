@@ -125,15 +125,12 @@ final class FullscreenTransportChromeView: NSView {
             },
             onYellow: { [weak self] in
                 guard let self else { return }
-                self.viewModel.playerSizeIsCompact = true
-                self.viewModel.playerLastWasFullScreen = false
-                self.viewModel.playerFloatingPosition = nil
+                self.viewModel.setPlayerCompactMode(true)
                 _ = self.exitTarget?.perform(self.exitAction)
             },
             onGreen: { [weak self] in
                 guard let self else { return }
-                self.viewModel.playerSizeIsCompact = false
-                self.viewModel.playerLastWasFullScreen = false
+                self.viewModel.setPlayerCompactMode(false)
                 _ = self.exitTarget?.perform(self.exitAction)
             }
         )
