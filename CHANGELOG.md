@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Reconnect summary cards** — Replaced the top “N missing clips” filename box with three session totals (ready / need attention / unmatched); dropped the duplicate inline counters above the match list.
 - **Reconnect UI: Destinations only** — Removed the Whole folder tab. One sheet: Add destination… → Ready / Needs attention / Unmatched → Reconnect → Undo. Situational Missing banner + File → Reconnect… unchanged.
 - **Fix: Evidence Destinations nested-folder false conflict** — Adding parent B after nested C no longer flags the same file as “2 matches” of itself; basename hits dedupe by standardized path (unique path → Ready; Needs attention only for distinct path collisions).
 - **Fix: Reconnect scopes to all missing clips** — Focusing one orphan (or Playback Failed → Reconnect) runs the same full missing scan as the Missing smart library, so banner count/copy and the Reconnect sheet cover every missing clip—not only the clicked one. Evidence Destinations / whole-folder remap can fix the batch. Grammar: “1 clip is gone…”.

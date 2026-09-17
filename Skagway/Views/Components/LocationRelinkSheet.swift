@@ -28,10 +28,6 @@ struct LocationRelinkSheet: View {
         return preview.reconnectCount + (includeNeedsAttention ? preview.needsAttentionCount : 0)
     }
 
-    private var missingSampleNames: [String] {
-        viewModel.reconnectMissingSampleNames
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Reconnect")
@@ -71,7 +67,7 @@ struct LocationRelinkSheet: View {
                 .foregroundStyle(Color.appTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            missingSetSummary
+            sessionSummaryCards
 
             HStack {
                 Button {
@@ -96,7 +92,6 @@ struct LocationRelinkSheet: View {
             }
 
             if let preview {
-                summaryRow(preview)
                 evidenceGroupedList(preview)
                     .frame(minHeight: 160, maxHeight: .infinity)
 
@@ -113,23 +108,44 @@ struct LocationRelinkSheet: View {
         }
     }
 
-    private var missingSetSummary: some View {
-        let count = viewModel.reconnectMissingClipCount
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("\(count) missing clip\(count == 1 ? "" : "s")")
-                .font(.subheadline.weight(.medium))
-            if !missingSampleNames.isEmpty {
-                Text(
-                    missingSampleNames.joined(separator: ", ")
-                        + (count > missingSampleNames.count ? "…" : "")
-                )
-                .font(.caption)
-                .foregroundStyle(Color.appTextTertiary)
-                .lineLimit(2)
-            }
+    /// Session totals: Ready / Needs attention / Unmatched (replaces the old missing-filename box).
+    private var sessionSummaryCards: some View {
+        let ready = preview?.reconnectCount ?? 0
+        let attention = preview?.needsAttentionCount ?? 0
+        let unmatched = preview?.stillMissingCount ?? viewModel.reconnectMissingClipCount
+        return HStack(spacing: 10) {
+            summaryCard(
+                title: "\(ready) ready",
+                systemImage: "link",
+                accent: .green
+            )
+            summaryCard(
+                title: "\(attention) need attention",
+                systemImage: "exclamationmark.triangle",
+                accent: .orange
+            )
+            summaryCard(
+                title: "\(unmatched) unmatched",
+                systemImage: "questionmark.circle",
+                accent: Color.appTextSecondary
+            )
         }
+    }
+
+    private func summaryCard(title: String, systemImage: String, accent: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .foregroundStyle(accent)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.appTextPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.appTextSecondary.opacity(0.08))
@@ -175,13 +191,12 @@ struct LocationRelinkSheet: View {
                 .foregroundStyle(Color.appTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let preview {
-                summaryRow(preview)
-                if includeNeedsAttention && preview.needsAttentionCount > 0 {
-                    Text("Flagged matches will be included.")
-                        .font(.caption)
-                        .foregroundStyle(Color.appTextSecondary)
-                }
+            sessionSummaryCards
+
+            if includeNeedsAttention, let preview, preview.needsAttentionCount > 0 {
+                Text("Flagged matches will be included.")
+                    .font(.caption)
+                    .foregroundStyle(Color.appTextSecondary)
             }
 
             if isApplying {
@@ -237,17 +252,6 @@ struct LocationRelinkSheet: View {
                     .lineLimit(3)
             }
         }
-    }
-
-    private func summaryRow(_ preview: LocationRelink.Preview) -> some View {
-        HStack(spacing: 16) {
-            Label("\(preview.reconnectCount) ready", systemImage: "link")
-            Label("\(preview.needsAttentionCount) need attention", systemImage: "exclamationmark.triangle")
-            Label("\(preview.stillMissingCount) unmatched", systemImage: "questionmark.circle")
-            Spacer()
-        }
-        .font(.subheadline.weight(.medium))
-        .foregroundStyle(Color.appTextPrimary)
     }
 
     private func evidenceGroupedList(_ preview: LocationRelink.Preview) -> some View {
