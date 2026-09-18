@@ -412,7 +412,7 @@ struct CuratedWallInspector: View {
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if viewModel.selectedVideoIds.count > 1 {
-                            Button("Batch") {
+                            Button("\(collectedSetCount) Videos") {
                                 viewModel.activateBatchInspectIfMultiCollected(
                                     lastTouchedId: v.id
                                 )
@@ -421,7 +421,7 @@ struct CuratedWallInspector: View {
                             .buttonStyle(.plain)
                             .foregroundStyle(Self.inspectorModeBarText.opacity(0.72))
                             .help("Inspect the collected set")
-                            .accessibilityLabel("Batch inspect collected set")
+                            .accessibilityLabel("Inspect \(collectedSetCount) collected videos")
                         }
                     }
                 }
