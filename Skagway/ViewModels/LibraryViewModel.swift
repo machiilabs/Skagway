@@ -479,7 +479,7 @@ final class LibraryViewModel {
     /// once the drag ends and `inspectorHeroHeight` commits. `nil` outside an active drag.
     var inspectorHeroLiveHeight: CGFloat?
 
-    /// User-owned Inspector chrome (View menu / toolbar / ⌥⌘I). Default on. Hide does **not**
+    /// User-owned Inspector chrome (View menu / toolbar / ⌘I). Default on. Hide does **not**
     /// write a zero detail width — show restores the last dragged Inspector width.
     var isInspectorVisible: Bool = true {
         didSet {
@@ -489,8 +489,13 @@ final class LibraryViewModel {
     }
 
     func toggleInspectorVisible() {
+        // Capture viewport pin *before* width/columns change, then restore after layout so the
+        // focused clip stays at the same on-screen position across show ↔ hide (no ⌘J jump).
+        let pin = browserScrollPinStore.pin
         isInspectorVisible.toggle()
-        scrollToSelected()
+        guard let pin else { return }
+        pendingBrowserScrollPinRestore = pin
+        browserScrollPinRestoreToken &+= 1
     }
 
     /// Header collection pill: show Inspector at last width, in batch-inspect mode.
@@ -502,6 +507,14 @@ final class LibraryViewModel {
             scrollToSelected()
         }
     }
+
+    /// Live viewport pin for the focused / selected clip (updated by `BrowserScrollPinController`).
+    /// Not `@Observable`-tracked — mutated in place so scroll tracking does not thrash the UI.
+    let browserScrollPinStore = BrowserScrollPinStore()
+
+    /// Set just before an Inspector width change; consumed by the browser scroll pin controller.
+    var pendingBrowserScrollPinRestore: BrowserScrollPinStore.Pin?
+    private(set) var browserScrollPinRestoreToken: Int = 0
 
     var ffmpegUserPath: String = "" {
         didSet { UserDefaults.standard.set(ffmpegUserPath, forKey: Self.ffmpegPathKey) }
@@ -640,9 +653,12 @@ final class LibraryViewModel {
     struct ScrollCommand: Equatable {
         enum Kind: Equatable {
             case top, bottom, pageUp, pageDown
-            /// Jump so row `index` of `total` rows is centered — used to restore the selection on a
-            /// List→Grid switch without SwiftUI instantiating every intermediate cell (the ~6s freeze).
+            /// Jump so row `index` of `total` rows is revealed with minimal scroll — used to restore
+            /// the selection on a List→Grid switch without SwiftUI instantiating every intermediate cell.
             case toRow(index: Int, total: Int)
+            /// After Inspector show/hide, place row `index` so its midY sits `offsetFromVisibleTop`
+            /// points below the visible top — same on-screen slot as before the width change.
+            case pinRow(index: Int, total: Int, offsetFromVisibleTop: CGFloat)
             /// Force the scroll view to re-tile its visible cells *without* changing position — repaints a
             /// grid/list revealed after the edge-to-edge fullscreen player closes (occlusion can blank cells).
             case retile
@@ -4458,7 +4474,12 @@ final class LibraryViewModel {
         filteredVideos.first { FileManager.default.fileExists(atPath: $0.filePath) }
     }
 
-    /// Grid keyboard navigation: move focus along `filteredVideos` (same order as list). List relies on `Table` arrow handling.
+    /// Grid / List “Scroll to Selection” (⌘J): focus, last focus, or any collected clip.
+    var hasScrollToSelectionTarget: Bool {
+        focusedVideoId != nil || lastSelectedVideoId != nil || !selectedVideoIds.isEmpty
+    }
+
+    /// Scroll the browser so the reviewed / focused clip (or a collected stand-in) is visible.
     func scrollToSelected() {
         guard let id = focusedVideoId ?? lastSelectedVideoId ?? selectedVideoIds.first,
               filteredVideos.contains(where: { $0.id == id }) else { return }

@@ -432,22 +432,30 @@ private struct LibraryContentView: View {
             } label: {
                 Image(systemName: "sidebar.right")
                     .symbolVariant(vm.isInspectorVisible ? .fill : .none)
+                    .frame(minWidth: 24, minHeight: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(vm.isInspectorVisible ? Color.appAccent : Color.appTextSecondary)
-            .help(vm.isInspectorVisible ? "Hide Inspector (⌥⌘I)" : "Show Inspector (⌥⌘I)")
+            .help(vm.isInspectorVisible ? "Hide Inspector (⌘I)" : "Show Inspector (⌘I)")
             .accessibilityLabel(vm.isInspectorVisible ? "Hide Inspector" : "Show Inspector")
 
             // Unified filter drawer (⌘⇧F) — Quick and Advanced are tabs inside.
             Button {
                 vm.toggleFiltersDrawer()
             } label: {
-                if vm.isCuratedWallFiltersDrawerOpen {
-                    Image(systemName: "xmark.circle")
-                } else {
-                    Image(systemName: "slider.horizontal.3")
-                        .symbolVariant(vm.hasActiveFilters ? .fill : .none)
+                Group {
+                    if vm.isCuratedWallFiltersDrawerOpen {
+                        Image(systemName: "xmark.circle")
+                    } else {
+                        Image(systemName: "slider.horizontal.3")
+                            .symbolVariant(vm.hasActiveFilters ? .fill : .none)
+                    }
                 }
+                // Plain SF Symbol buttons only hit-test glyph ink — gaps between the three
+                // slider lines were dead clicks. Force a solid rectangular target.
+                .frame(minWidth: 24, minHeight: 24)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(
@@ -457,6 +465,7 @@ private struct LibraryContentView: View {
             )
             .help(vm.isCuratedWallFiltersDrawerOpen ? "Close Filter (⌘⇧F)" : "Filter (⌘⇧F)")
             .keyboardShortcut("f", modifiers: [.command, .shift])
+            .accessibilityLabel(vm.isCuratedWallFiltersDrawerOpen ? "Close Filter" : "Filter")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 3)
@@ -1109,6 +1118,7 @@ private struct LibraryContentView: View {
         }
 
         // ⌘⌥Q / ⌘⌥A — Quick / Advanced filter tab (opens the drawer if it is closed).
+        // (⌥⌘I is Import Metadata — do not steal it here.)
         if !lvm.isEditingText,
            event.modifierFlags.intersection(commandModifiers) == [.command, .option] {
             if event.keyCode == 12 /* 'q' */ {
@@ -1119,10 +1129,23 @@ private struct LibraryContentView: View {
                 DispatchQueue.main.async { lvm.openFiltersDrawer(mode: .advanced) }
                 return nil
             }
-            if event.keyCode == 34 /* 'i' */ {
-                DispatchQueue.main.async { lvm.toggleInspectorVisible() }
-                return nil
-            }
+        }
+
+        // ⌘I — toggle Inspector (⌥⌘I is Import Metadata; ⌃⌘F is full screen while playing).
+        if event.modifierFlags.intersection(commandModifiers) == [.command],
+           event.keyCode == 34 /* 'i' */ {
+            DispatchQueue.main.async { lvm.toggleInspectorVisible() }
+            return nil
+        }
+
+        // ⌘J — Scroll to Selection. Menu shortcut alone is disabled when only focus exists
+        // (collection empty after always-on collection); also handle here so Table/grid focus
+        // cannot swallow the chord.
+        if event.modifierFlags.intersection(commandModifiers) == [.command],
+           event.keyCode == 38 /* 'j' */,
+           !lvm.isEditingText {
+            DispatchQueue.main.async { lvm.scrollToSelected() }
+            return nil
         }
 
         // While playing: ←/→ nudge 5s, ⌥←/⌥→ skip 15s. Takes priority over grid navigation.

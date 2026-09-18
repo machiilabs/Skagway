@@ -31,8 +31,11 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
-- **Hide/Show Inspector** — View menu, header button, and ⌥⌘I detach the Inspector pane (browser fills the window) and restore the last dragged width on show. Grid can use up to 8 columns (Storyboard Normal 3 / Compact 4) when the browser is wide. Compact player applies only while the Inspector is visible (hides → Windowed; show restores Compact preference). Clicking **N clips collected** shows the Inspector in batch-inspect mode.
+- **Hide/Show Inspector** — View menu, header button, and ⌘I detach the Inspector pane (browser fills the window) and restore the last dragged width on show. Grid can use up to 8 columns (Storyboard Normal 3 / Compact 4) when the browser is wide. Compact player applies only while the Inspector is visible (hides → Windowed; show restores Compact preference). Clicking **N clips collected** shows the Inspector in batch-inspect mode.
 - **Storyboard density** — Renamed Comfortable → **Normal** (default); Compact remains the denser packing. Existing “comfortable” preference migrates to Normal.
+- **Filter toolbar hit target** — Filter (and Inspector) header icons use a solid rectangular click area so clicks between SF Symbol strokes still open the drawer.
+- **Fix: ⌘J Scroll to Selection** — Enabled again when a clip is focused but the collected set is empty (plain click after always-on collection). Local key monitor backup so the chord is not lost to Table/grid focus.
+- **Inspector toggle keeps scroll position** — Show/Hide Inspector (⌘I) pins the focused clip in its on-screen slot across the width/column change instead of jumping via Scroll to Selection.
 
 ## 1.3.0 (build 1123) - 2026-09-16
 

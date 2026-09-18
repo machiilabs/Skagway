@@ -42,7 +42,7 @@ struct ScrollCommandHandler: NSViewRepresentable {
 
     // MARK: - Scrolling
 
-    private static func apply(_ kind: LibraryViewModel.ScrollCommand.Kind, to scrollView: NSScrollView, mode: Mode) {
+    static func apply(_ kind: LibraryViewModel.ScrollCommand.Kind, to scrollView: NSScrollView, mode: Mode) {
         let clip = scrollView.contentView
         let insets = scrollView.contentInsets
         let clipH = clip.bounds.height
@@ -103,6 +103,19 @@ struct ScrollCommandHandler: NSViewRepresentable {
             if abs(y - visibleTop) < 0.5 {
                 return
             }
+        case .pinRow(let index, let total, let offsetFromVisibleTop):
+            // Put the row’s mid back at the same distance from the visible top as before Inspector toggle.
+            if mode == .list {
+                Self.pinListRow(index, offsetFromVisibleTop: offsetFromVisibleTop, scrollView: scrollView)
+                return
+            }
+            guard total > 0 else { break }
+            let rowHeight = docHeight / CGFloat(total)
+            let rowMid = CGFloat(index) * rowHeight + rowHeight * 0.5
+            y = min(maxY, max(minY, rowMid - offsetFromVisibleTop))
+            if abs(y - clip.bounds.origin.y) < 0.5 {
+                return
+            }
         case .retile:
             // Keep the current offset; the nudge-and-restore below forces a re-tile in place.
             break
@@ -119,7 +132,7 @@ struct ScrollCommandHandler: NSViewRepresentable {
         // a bounds-changed notification and the grid re-instantiates its visible cells. Net visible position
         // is unchanged (the bump is sub-row, so the re-tiled region matches the target).
         switch kind {
-        case .toRow, .retile:
+        case .toRow, .retile, .pinRow:
             let bump = NSPoint(x: target.x, y: target.y > minY ? target.y - 1 : target.y + 1)
             DispatchQueue.main.async { [weak scrollView, weak clip] in
                 guard let scrollView, let clip else { return }
@@ -134,6 +147,19 @@ struct ScrollCommandHandler: NSViewRepresentable {
         default:
             break
         }
+    }
+
+    /// List: pin row midY to the same offset from the visible top (table document coordinates).
+    private static func pinListRow(_ row: Int, offsetFromVisibleTop: CGFloat, scrollView: NSScrollView) {
+        scrollView.layoutSubtreeIfNeeded()
+        guard let table = findTableView(under: scrollView),
+              row >= 0, row < table.numberOfRows
+        else { return }
+        table.layoutSubtreeIfNeeded()
+        let rowRect = table.rect(ofRow: row)
+        guard !rowRect.isEmpty else { return }
+        let targetY = rowRect.midY - offsetFromVisibleTop
+        table.scroll(NSPoint(x: table.visibleRect.minX, y: targetY))
     }
 
     // MARK: - List top (precise under-header pinning)

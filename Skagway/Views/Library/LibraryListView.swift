@@ -575,6 +575,27 @@ struct LibraryListView: View {
         .id("\(viewModel.filteredVideosVersion)-\(viewModel.listColumnConfigurationSignature)")
         .background(TableScrollHelper(scrollToRow: scrollToRow))
         .background(ScrollCommandHandler(command: viewModel.scrollCommand, mode: .list))
+        .background(
+            BrowserScrollPinController(
+                store: viewModel.browserScrollPinStore,
+                restoreToken: viewModel.browserScrollPinRestoreToken,
+                pendingRestore: viewModel.pendingBrowserScrollPinRestore,
+                onRestoreConsumed: { viewModel.pendingBrowserScrollPinRestore = nil },
+                mode: .list,
+                anchorVideoId: viewModel.focusedVideoId
+                    ?? viewModel.lastSelectedVideoId
+                    ?? viewModel.selectedVideoIds.first,
+                anchorIndex: {
+                    let id = viewModel.focusedVideoId
+                        ?? viewModel.lastSelectedVideoId
+                        ?? viewModel.selectedVideoIds.first
+                    guard let id else { return nil }
+                    return viewModel.filteredVideos.firstIndex(where: { $0.id == id })
+                }(),
+                columnCount: 1,
+                videoCount: viewModel.filteredVideos.count
+            )
+        )
         .onAppear {
             if viewModel.scrollToSelectedOnViewSwitch {
                 viewModel.scrollToSelectedOnViewSwitch = false

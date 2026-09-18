@@ -430,6 +430,27 @@ struct CuratedWallGrid: View {
                 }
                 .padding(outerPadding)
                 .background(ScrollCommandHandler(command: viewModel.scrollCommand, mode: .grid))
+                .background(
+                    BrowserScrollPinController(
+                        store: viewModel.browserScrollPinStore,
+                        restoreToken: viewModel.browserScrollPinRestoreToken,
+                        pendingRestore: viewModel.pendingBrowserScrollPinRestore,
+                        onRestoreConsumed: { viewModel.pendingBrowserScrollPinRestore = nil },
+                        mode: .grid,
+                        anchorVideoId: viewModel.focusedVideoId
+                            ?? viewModel.lastSelectedVideoId
+                            ?? viewModel.selectedVideoIds.first,
+                        anchorIndex: {
+                            let id = viewModel.focusedVideoId
+                                ?? viewModel.lastSelectedVideoId
+                                ?? viewModel.selectedVideoIds.first
+                            guard let id else { return nil }
+                            return viewModel.filteredVideos.firstIndex(where: { $0.id == id })
+                        }(),
+                        columnCount: cols,
+                        videoCount: viewModel.filteredVideos.count
+                    )
+                )
             }
             .scrollIndicators(.visible)
             .background(Color(red: 3 / 255, green: 13 / 255, blue: 23 / 255))   // #030D17

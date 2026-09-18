@@ -63,7 +63,7 @@ struct SkagwayApp: App {
                         }
                     }
                 ))
-                .keyboardShortcut("i", modifiers: [.command, .option])
+                .keyboardShortcut("i", modifiers: .command)
                 .disabled(!appState.hasLibrary)
 
                 Divider()
@@ -72,7 +72,7 @@ struct SkagwayApp: App {
                     appState.libraryViewModel?.scrollToSelected()
                 }
                 .keyboardShortcut("j", modifiers: .command)
-                .disabled(appState.libraryViewModel?.selectedVideoIds.isEmpty != false)
+                .disabled(!(appState.libraryViewModel?.hasScrollToSelectionTarget ?? false))
 
                 Button("Surprise Me!") {
                     appState.libraryViewModel?.surpriseMePickRandom()

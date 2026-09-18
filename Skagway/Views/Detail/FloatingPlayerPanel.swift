@@ -374,7 +374,7 @@ struct FloatingPlayerPanel: View {
                 "rectangle",
                 help: viewModel.isInspectorVisible
                     ? "Compact (follows the inspector width) (⌃⌘C)"
-                    : "Compact needs the Inspector — show it first (⌥⌘I)",
+                    : "Compact needs the Inspector — show it first (⌘I)",
                 disabled: !viewModel.isInspectorVisible
             ) {
                 viewModel.setPlayerCompactMode(true)
