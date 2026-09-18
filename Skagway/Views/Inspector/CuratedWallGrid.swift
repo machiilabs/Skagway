@@ -175,6 +175,7 @@ struct CuratedWallGrid: View {
                                 && viewModel.gridHoverPreviewEnabled
                                 && !viewModel.isPlayingInline,
                             thumbnailReloadId: viewModel.filmstripRefreshId,
+                            storyboardSeekGestureEpoch: viewModel.browserPointerRefreshToken,
                             showAlbumReorderHandle: viewModel.isViewingAlbum,
                             renameFocus: $renameFocus,
                             onCommitRename: { commitRename(video) },
@@ -585,14 +586,20 @@ struct CuratedWallGrid: View {
         viewModel.requestDefocusTextInputs()
         lastClickedId = video.id
         let duration = video.duration ?? 0
-        viewModel.pendingFilmstripSeekSeconds = thumbnailService.storyboardClickSeconds(
+        let seconds = thumbnailService.storyboardClickSeconds(
             for: video.filePath,
             at: location,
             size: size,
             duration: duration
         )
         viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
-        viewModel.isPlayingInline = true
+        if viewModel.isPlayingInline {
+            // `isPlayingInline = true` would no-op; seek the live player instead.
+            viewModel.playback.seek(toSeconds: seconds, resumePlayback: true)
+        } else {
+            viewModel.pendingFilmstripSeekSeconds = seconds
+            viewModel.isPlayingInline = true
+        }
     }
     private func handleSelection(_ video: Video, flags: NSEvent.ModifierFlags = NSEvent.modifierFlags) {
         viewModel.requestDefocusTextInputs()

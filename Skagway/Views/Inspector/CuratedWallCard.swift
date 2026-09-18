@@ -26,6 +26,8 @@ struct CuratedWallCard: View {
     var hoverPreviewEnabled: Bool = true
     /// Bumped after Repair Links / filmstrip regen so `.task(id:)` reloads (poster + storyboard).
     var thumbnailReloadId: Int = 0
+    /// Remount Storyboard collage seek gestures after the floating player dismisses.
+    var storyboardSeekGestureEpoch: Int = 0
     /// Accent grip drawn on the thumbnail while an album is the active filter (visual only).
     var showAlbumReorderHandle: Bool = false
     var renameFocus: FocusState<Bool>.Binding
@@ -98,18 +100,25 @@ struct CuratedWallCard: View {
                             GeometryReader { geo in
                                 // Seek only above the title band; title/footer chrome selects separately.
                                 let seekHeight = max(0, geo.size.height - storyboardTitleBandHeight)
+                                let seekSize = CGSize(width: geo.size.width, height: seekHeight)
                                 Color.clear
-                                    .frame(width: geo.size.width, height: seekHeight, alignment: .top)
+                                    .frame(width: seekSize.width, height: seekSize.height, alignment: .top)
                                     .contentShape(Rectangle())
+                                    // highPriority so the card’s select tap does not win; DragGesture
+                                    // recovers more reliably than SpatialTap after overlay dismiss.
                                     .highPriorityGesture(
-                                        SpatialTapGesture()
+                                        DragGesture(minimumDistance: 0, coordinateSpace: .local)
                                             .onEnded { value in
-                                                // Remap into full-collage coordinates so cell indices stay correct.
-                                                let fullSize = geo.size
-                                                onStoryboardCellPlay(value.location, fullSize)
+                                                let moved = hypot(
+                                                    value.translation.width,
+                                                    value.translation.height
+                                                )
+                                                guard moved < 8 else { return }
+                                                onStoryboardCellPlay(value.startLocation, seekSize)
                                             }
                                     )
                                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                    .id(storyboardSeekGestureEpoch)
                             }
                         }
                     }

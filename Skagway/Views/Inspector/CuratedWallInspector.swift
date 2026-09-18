@@ -310,8 +310,13 @@ struct CuratedWallInspector: View {
         // Seek to the clicked time and play in whatever mode the setting indicates (the host that
         // mounts for that mode consumes `pendingFilmstripSeekSeconds`).
         let dur = video.duration ?? 0.0
-        viewModel.pendingFilmstripSeekSeconds = filmstripClickSeconds(at: location, size: size, duration: dur)
-        viewModel.isPlayingInline = true
+        let seconds = filmstripClickSeconds(at: location, size: size, duration: dur)
+        if viewModel.isPlayingInline {
+            viewModel.playback.seek(toSeconds: seconds, resumePlayback: true)
+        } else {
+            viewModel.pendingFilmstripSeekSeconds = seconds
+            viewModel.isPlayingInline = true
+        }
     }
 
     /// Map a click on the filmstrip composite to the timestamp of the clicked frame.

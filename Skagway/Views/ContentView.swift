@@ -747,6 +747,10 @@ private struct LibraryContentView: View {
                 } else {
                     vm.isPlayerFullScreen = false
                     vm.playback.stop()
+                    // Next runloop: overlay is gone; rebind hover under the stationary cursor.
+                    DispatchQueue.main.async {
+                        PointerHitTesting.refreshHover()
+                    }
                 }
             }
             // Surprise Me auto-play: `surpriseMePickRandom()` selects a random video and (if enabled)
