@@ -581,11 +581,9 @@ struct CuratedWallGrid: View {
     }
 
     private func playStoryboardCell(_ video: Video, at location: CGPoint, size: CGSize) {
+        // Seek+play only — do not touch the collected set (unlike exclusive select).
         viewModel.requestDefocusTextInputs()
         lastClickedId = video.id
-        selectionStore.sync(to: [video.id])
-        selectionStore.syncFocus(to: video.id)
-        viewModel.selectOnly(video.id)
         let duration = video.duration ?? 0
         viewModel.pendingFilmstripSeekSeconds = thumbnailService.storyboardClickSeconds(
             for: video.filePath,
