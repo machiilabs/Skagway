@@ -185,15 +185,16 @@ struct CuratedWallGrid: View {
                             onRenameEditingChanged: { viewModel.isEditingText = $0 },
                             onStoryboardCellPlay: isStoryboard
                                 ? { location, size in
-                                    // Option 2: plain collage click selects/focuses first; a second
-                                    // plain click on the already-focused card seeks+plays. Modifier
-                                    // clicks always go through selection (collect / range / exclusive).
+                                    // Collage is Option 2 without the collected-set batch toggle:
+                                    // unfocused → focus only; focused → seek+play. Title/footer
+                                    // chrome still uses full handleSelection (batch ↔ single).
                                     let flags = NSEvent.modifierFlags
-                                    if ListSelectionModifiers.usesExtendedSelection(flags)
-                                        || viewModel.focusedVideoId != video.id {
+                                    if ListSelectionModifiers.usesExtendedSelection(flags) {
                                         handleSelection(video, flags: flags)
-                                    } else {
+                                    } else if viewModel.focusedVideoId == video.id {
                                         playStoryboardCell(video, at: location, size: size)
+                                    } else {
+                                        focusStoryboardCollage(video)
                                     }
                                 }
                                 : nil,
@@ -566,8 +567,8 @@ struct CuratedWallGrid: View {
     }
 
 
-    /// Storyboard View: chrome clicks select; collage cells select on first focus, seek+play on a
-    /// second plain click while that card is already focused (modifier clicks always select).
+    /// Storyboard View: chrome clicks use full selection (incl. batch toggle); collage cells
+    /// focus-only on first plain click, seek+play on a second while focused (modifier clicks collect).
     private struct StoryboardSelectionGestures: ViewModifier {
         var enabled: Bool
         let onSelect: () -> Void
@@ -579,6 +580,14 @@ struct CuratedWallGrid: View {
                 content
             }
         }
+    }
+
+    /// Storyboard collage: focus without batch-inspect toggle (collection membership unchanged).
+    private func focusStoryboardCollage(_ video: Video) {
+        viewModel.requestDefocusTextInputs()
+        lastClickedId = video.id
+        viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
+        selectionStore.syncFocus(to: video.id)
     }
 
     private func playStoryboardCell(_ video: Video, at location: CGPoint, size: CGSize) {
