@@ -31,20 +31,15 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
-- **Hide/Show Inspector** — View menu, header button, and ⌘I detach the Inspector pane (browser fills the window) and restore the last dragged width on show. Grid can use up to 8 columns (Storyboard Normal 3 / Compact 4) when the browser is wide. Compact player applies only while the Inspector is visible (hides → Windowed; show restores Compact preference). Clicking **N clips collected** shows the Inspector in batch-inspect mode.
-- **Storyboard density** — Renamed Comfortable → **Normal** (default); Compact remains the denser packing. Existing “comfortable” preference migrates to Normal.
-- **Filter toolbar hit target** — Filter (and Inspector) header icons use a solid rectangular click area so clicks between SF Symbol strokes still open the drawer.
-- **Fix: ⌘J Scroll to Selection** — Enabled again when a clip is focused but the collected set is empty (plain click after always-on collection). Local key monitor backup so the chord is not lost to Table/grid focus.
-- **Inspector toggle keeps scroll position** — Show/Hide Inspector (⌘I) pins the focused clip in its on-screen slot across the width/column change instead of jumping via Scroll to Selection.
-- **Storyboard collage click** — First plain collage click focuses (never toggles batch inspect); a second plain click on the focused collage seeks and plays without changing the collected set. Title/footer chrome keeps full selection / batch behavior. ⌘/⇧/⌥ on the collage still collect.
-- **Inspector set-inspect link** — When 2+ clips are collected and the Inspector is on a single focused clip (light blue bar), a trailing **N Videos** control switches to set inspect (orange bar), mirroring **Clear** on the batch bar.
-- **Collected plain click** — In batch mode (or when another clip is focused), plain-clicking a collected clip focuses it immediately for single inspect; click the same focused collected clip again to return to batch.
+## 1.3.0 (build 1138) - 2026-09-17
+
+- **Storyboard view (⌘3)** — First-class peer of Grid/List. Density: **Normal** (default) or Compact. First plain collage click focuses (never toggles batch inspect); a second plain click on the focused collage seeks and plays without wiping the collected set. Title/footer chrome keeps selection / batch behavior. ⌘/⇧/⌥ on the collage still collect.
+- **Hide/Show Inspector** — View menu, header button, and ⌘I detach the Inspector (browser fills the window) and restore the last dragged width on show. The focused clip stays in its on-screen slot across the width/column change. Grid can use up to 8 columns (Storyboard Normal 3 / Compact 4) when the browser is wide. Compact player applies only while the Inspector is visible. Clicking **N clips collected** shows the Inspector in batch-inspect mode.
+- **Batch and single inspect** — Orange Inspector bar for the collected set; light blue for one focused clip. Trailing **N Videos** on the light blue bar switches to set inspect. Plain-click a collected clip focuses it immediately for single inspect; click the same focused collected clip again to return to batch.
+- **Reconnect** — Unified missing-file flow: situational Missing banner, Evidence Destinations matching, Ready / Needs attention / Unmatched summary (Ready turns green when every clip matches), and Undo.
+- **Filter toolbar hit target** — Filter (and Inspector) header icons use a solid rectangular click area so clicks between SF Symbol strokes still register.
+- **Fix: ⌘J Scroll to Selection** — Enabled when a clip is focused even if the collected set is empty; local key monitor backup so the chord is not lost to Table/grid focus.
 - **Fix: Storyboard frame click after Esc** — After stopping playback, rebind pointer hit-testing and remount collage seek gestures so a stationary cursor over the card does not silently swallow the next frame click.
-
-## 1.3.0 (build 1123) - 2026-09-16
-
-- **Storyboard view (⌘3)** — First-class peer of Grid/List with Compact/Comfortable density and accurate click-to-seek on collage cells.
-- **Reconnect** — Unified missing-file flow: situational Missing banner, Evidence Destinations matching, Ready / Needs attention / Unmatched summary, and Undo.
 
 ## 1.2.0 (build 1082) - 2026-09-15
 
