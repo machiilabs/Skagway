@@ -36,6 +36,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 - **Filter toolbar hit target** — Filter (and Inspector) header icons use a solid rectangular click area so clicks between SF Symbol strokes still open the drawer.
 - **Fix: ⌘J Scroll to Selection** — Enabled again when a clip is focused but the collected set is empty (plain click after always-on collection). Local key monitor backup so the chord is not lost to Table/grid focus.
 - **Inspector toggle keeps scroll position** — Show/Hide Inspector (⌘I) pins the focused clip in its on-screen slot across the width/column change instead of jumping via Scroll to Selection.
+- **Storyboard collage click** — First plain click on a collage focuses/selects; a second plain click on the already-focused card seeks and plays from that frame. ⌘/⇧/⌥ clicks still collect or exclusive-select without starting playback.
 
 ## 1.3.0 (build 1123) - 2026-09-16
 

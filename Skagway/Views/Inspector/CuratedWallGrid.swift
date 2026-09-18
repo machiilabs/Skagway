@@ -184,7 +184,16 @@ struct CuratedWallGrid: View {
                             onRenameEditingChanged: { viewModel.isEditingText = $0 },
                             onStoryboardCellPlay: isStoryboard
                                 ? { location, size in
-                                    playStoryboardCell(video, at: location, size: size)
+                                    // Option 2: plain collage click selects/focuses first; a second
+                                    // plain click on the already-focused card seeks+plays. Modifier
+                                    // clicks always go through selection (collect / range / exclusive).
+                                    let flags = NSEvent.modifierFlags
+                                    if ListSelectionModifiers.usesExtendedSelection(flags)
+                                        || viewModel.focusedVideoId != video.id {
+                                        handleSelection(video, flags: flags)
+                                    } else {
+                                        playStoryboardCell(video, at: location, size: size)
+                                    }
                                 }
                                 : nil,
                             onStoryboardChromeSelect: isStoryboard && !viewModel.isViewingAlbum
@@ -556,7 +565,8 @@ struct CuratedWallGrid: View {
     }
 
 
-    /// Storyboard View: chrome/under-thumb clicks still select; collage cells seek+play via the card.
+    /// Storyboard View: chrome clicks select; collage cells select on first focus, seek+play on a
+    /// second plain click while that card is already focused (modifier clicks always select).
     private struct StoryboardSelectionGestures: ViewModifier {
         var enabled: Bool
         let onSelect: () -> Void

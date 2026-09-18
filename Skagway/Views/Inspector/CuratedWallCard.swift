@@ -34,7 +34,7 @@ struct CuratedWallCard: View {
     var onCommitTitle: () -> Void
     var onCancelTitle: () -> Void
     var onRenameEditingChanged: (Bool) -> Void
-    /// Storyboard View: click a collage cell → seek/play at that cell’s stored sample time.
+    /// Storyboard View: click a collage cell — parent decides select vs seek/play (focus-armed).
     var onStoryboardCellPlay: ((CGPoint, CGSize) -> Void)? = nil
     /// Storyboard View: click title / footer chrome → select only (no seek).
     var onStoryboardChromeSelect: (() -> Void)? = nil
