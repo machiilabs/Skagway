@@ -11,21 +11,21 @@ enum ListSelectionModifiers {
 
 /// Always-on split between the clip you are reviewing and the collected working set.
 ///
-/// Focus can sit outside the set (scan a maybe). With 2+ collected and review focus cleared
-/// (plain click on a collected clip), Inspector batch-edits the whole set; repeat click on
-/// the same collected clip focuses it for single inspect; further clicks toggle back to batch.
+/// Focus can sit outside the set (scan a maybe). With 2+ collected and review focus cleared,
+/// Inspector batch-edits the whole set. Plain-click a collected clip to single-inspect it;
+/// plain-click that same focused clip again to return to batch.
 struct ReviewSession: Equatable {
     var focusedId: String?
     var selectedIds: Set<String> = []
 
-    /// Batch inspect when 2+ collected and review focus is cleared (plain click on a collected clip).
+    /// Batch inspect when 2+ collected and review focus is cleared.
     var isSetMode: Bool {
         guard selectedIds.count > 1 else { return false }
         return focusedId == nil
     }
 
     /// Videos Inspector tags, rates, and edits — the collected set when 2+ are selected
-    /// and focus is in the set; otherwise the focused clip.
+    /// and focus is cleared; otherwise the focused clip.
     var actionIds: Set<String> {
         if isSetMode { return selectedIds }
         if let focusedId { return [focusedId] }
@@ -40,23 +40,20 @@ struct ReviewSession: Equatable {
         focusedId = nil
     }
 
-    /// Plain click (no modifiers). Collected clips alternate batch inspect (focus cleared) and
-    /// single focus on repeat clicks to the same clip.
+    /// Plain click (no modifiers). With 2+ collected: click the focused collected clip → batch;
+    /// otherwise focus that clip (from batch or from another focus). Outside the multi-set → focus.
     @discardableResult
     mutating func applyPlainClick(on id: String, lastClickedId: String?) -> String {
+        _ = lastClickedId
         guard selectedIds.contains(id), selectedIds.count > 1 else {
             focus(id)
             return id
         }
         if focusedId == id {
             clearFocus()
-            return id
-        }
-        if lastClickedId == id, focusedId == nil {
+        } else {
             focus(id)
-            return id
         }
-        clearFocus()
         return id
     }
 

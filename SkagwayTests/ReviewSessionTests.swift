@@ -76,26 +76,32 @@ final class ReviewSessionTests: XCTestCase {
     }
 
     func testPlainClickCollectedTogglesBatchAndFocus() {
-        var session = ReviewSession(focusedId: d, selectedIds: [a, b, c])
-        _ = session.applyPlainClick(on: a, lastClickedId: nil)
-        XCTAssertNil(session.focusedId)
+        var session = ReviewSession(focusedId: nil, selectedIds: [a, b, c])
         XCTAssertTrue(session.isSetMode)
 
-        _ = session.applyPlainClick(on: a, lastClickedId: a)
+        _ = session.applyPlainClick(on: a, lastClickedId: nil)
         XCTAssertEqual(session.focusedId, a)
         XCTAssertFalse(session.isSetMode)
 
         _ = session.applyPlainClick(on: a, lastClickedId: a)
         XCTAssertNil(session.focusedId)
         XCTAssertTrue(session.isSetMode)
+
+        _ = session.applyPlainClick(on: a, lastClickedId: a)
+        XCTAssertEqual(session.focusedId, a)
+        XCTAssertFalse(session.isSetMode)
     }
 
-    func testPlainClickDifferentCollectedResetsToBatch() {
+    func testPlainClickDifferentCollectedFocusesImmediately() {
         var session = ReviewSession(focusedId: a, selectedIds: [a, b, c])
-        _ = session.applyPlainClick(on: a, lastClickedId: nil)
         _ = session.applyPlainClick(on: b, lastClickedId: a)
-        XCTAssertNil(session.focusedId)
-        XCTAssertTrue(session.isSetMode)
+        XCTAssertEqual(session.focusedId, b)
+        XCTAssertFalse(session.isSetMode)
+
+        var batch = ReviewSession(focusedId: nil, selectedIds: [a, b, c])
+        _ = batch.applyPlainClick(on: c, lastClickedId: a)
+        XCTAssertEqual(batch.focusedId, c)
+        XCTAssertFalse(batch.isSetMode)
     }
 
     func testPruneDropsInvalidFocusAndSetMembers() {

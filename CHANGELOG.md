@@ -38,6 +38,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 - **Inspector toggle keeps scroll position** — Show/Hide Inspector (⌘I) pins the focused clip in its on-screen slot across the width/column change instead of jumping via Scroll to Selection.
 - **Storyboard collage click** — First plain collage click focuses (never toggles batch inspect); a second plain click on the focused collage seeks and plays without changing the collected set. Title/footer chrome keeps full selection / batch behavior. ⌘/⇧/⌥ on the collage still collect.
 - **Inspector set-inspect link** — When 2+ clips are collected and the Inspector is on a single focused clip (light blue bar), a trailing **N Videos** control switches to set inspect (orange bar), mirroring **Clear** on the batch bar.
+- **Collected plain click** — In batch mode (or when another clip is focused), plain-clicking a collected clip focuses it immediately for single inspect; click the same focused collected clip again to return to batch.
 - **Fix: Storyboard frame click after Esc** — After stopping playback, rebind pointer hit-testing and remount collage seek gestures so a stationary cursor over the card does not silently swallow the next frame click.
 
 ## 1.3.0 (build 1123) - 2026-09-16
