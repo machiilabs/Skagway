@@ -250,7 +250,7 @@ struct FloatingPlayerPanel: View {
             }
             .background {
                 PanelChromeMouseTracker(
-                    transportHeight: PlaybackTimelineBar.barHeight + 8,
+                    transportHeight: PlaybackTimelineBar.barHeight(for: viewModel) + 8,
                     titleHeight: Self.titleChromeHeight,
                     onActivity: { point, overChrome, force in
                         notePointerActivity(at: point, overChrome: overChrome, force: force)

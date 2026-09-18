@@ -819,6 +819,12 @@ struct CuratedWallInspector: View {
             }
         }
         .onChange(of: viewModel.bookmarksRevision) { _, _ in
+            // Drop stale drafts so renames from the player diamond (or elsewhere) show up here.
+            // Keep the draft only for the row currently being edited.
+            let editingId = focusedBookmarkTitleId
+            for id in Array(bookmarkTitleDrafts.keys) where id != editingId {
+                bookmarkTitleDrafts.removeValue(forKey: id)
+            }
             // Newly added bookmark: focus the title so rename is discoverable without a modal.
             if let id = viewModel.pendingBookmarkTitleFocusId {
                 viewModel.pendingBookmarkTitleFocusId = nil
@@ -859,6 +865,9 @@ struct CuratedWallInspector: View {
                 .textFieldStyle(.plain)
                 .font(.caption.weight(.medium))
                 .focused($focusedBookmarkTitleId, equals: bookmarkId)
+                // Remount when the model title changes externally (e.g. scrubber Rename) so the
+                // field doesn’t keep a stale displayed string while not editing.
+                .id("bookmark-title-\(bookmarkId)-\(isEditingTitle ? "editing" : bookmark.title)")
                 .help("Click to rename")
                 .padding(.bottom, 1)
                 .overlay(alignment: .bottom) {

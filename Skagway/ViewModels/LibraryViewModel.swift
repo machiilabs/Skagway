@@ -2397,6 +2397,7 @@ final class LibraryViewModel {
     private static let excludeCorruptKey = "Skagway.excludeCorrupt"
     private static let confirmDeletionsKey = "Skagway.confirmDeletions"
     private static let showThumbnailInDetailKey = "Skagway.showThumbnailInDetail"
+    private static let showFilmstripInPlayerKey = "Skagway.showFilmstripInPlayer"
     private static let browsingLayoutKey = "Skagway.browsingLayout"
     private static let filmstripRowsKey = "Skagway.filmstripRows"
     private static let filmstripColumnsKey = "Skagway.filmstripColumns"
@@ -2735,6 +2736,13 @@ final class LibraryViewModel {
     var showThumbnailInDetail: Bool = true {
         didSet {
             UserDefaults.standard.set(showThumbnailInDetail, forKey: Self.showThumbnailInDetailKey)
+        }
+    }
+
+    /// In-player filmstrip above the scrubber (same idle fade as transport chrome). Default on.
+    var showFilmstripInPlayer: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showFilmstripInPlayer, forKey: Self.showFilmstripInPlayerKey)
         }
     }
 
@@ -3253,6 +3261,11 @@ final class LibraryViewModel {
         if let ids = defaults.stringArray(forKey: Self.missingVideoIdsKey) { missingVideoIds = Set(ids) }
         if defaults.object(forKey: Self.showThumbnailInDetailKey) != nil {
             showThumbnailInDetail = defaults.bool(forKey: Self.showThumbnailInDetailKey)
+        }
+        if defaults.object(forKey: Self.showFilmstripInPlayerKey) != nil {
+            showFilmstripInPlayer = defaults.bool(forKey: Self.showFilmstripInPlayerKey)
+        } else {
+            showFilmstripInPlayer = true
         }
         loadCustomMetadataFieldDefinitions()
 

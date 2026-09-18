@@ -31,6 +31,11 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **In-player filmstrip (IPF)** — Horizontal frame strip above the scrubber in Compact / Windowed / Full screen; shares the transport chrome fade (`controlsVisible`). Strip spans the same width as the scrubber track; frame count is chosen from that width so cells stay ~16:9 (dedicated bake, not the Inspector filmstrip). Click a frame to seek; playhead highlight follows scrubber time. Settings → Video → Show filmstrip in player (default on; thinner in Compact).
+- **Scrubber bookmark hover** — Frame preview stays visible alongside the bookmark title chip (no longer suppressed).
+- **Scrubber bookmark context menu** — Right-click a diamond for Rename Bookmark… (alert with Name / Cancel / Save) or Delete Bookmark. Inspector list updates when renamed from the player.
+- **Return-to chip** — Cleared when the user seeks via the scrubber (click or drag), so it only remains after a bookmark jump. Medium-grey ghost playhead (same size as the live head) marks the leave point; Return to [time] sits centered underneath. Ghost + chip dismiss when playback catches that point.
+
 ## 1.3.0 (build 1138) - 2026-09-17
 
 - **Storyboard view (⌘3)** — First-class peer of Grid/List. Density: **Normal** (default) or Compact. First plain collage click focuses (never toggles batch inspect); a second plain click on the focused collage seeks and plays without wiping the collected set. Title/footer chrome keeps selection / batch behavior. ⌘/⇧/⌥ on the collage still collect.

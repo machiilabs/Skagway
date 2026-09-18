@@ -19,7 +19,6 @@ final class FullscreenTransportChromeView: NSView {
     private static let activitySlop: CGFloat = 3
 
     private static let previewClearance: CGFloat = PlaybackTimelineBar.scrubPreviewHeight + 16
-    static var chromeHeight: CGFloat { previewClearance + PlaybackTimelineBar.barHeight }
 
     private let viewModel: LibraryViewModel
     private let timelineHost: NSHostingView<FullscreenTimelineOverlay>
@@ -29,6 +28,7 @@ final class FullscreenTransportChromeView: NSView {
     private var lastActivityLocation: CGPoint?
     private var wheelScrubActive = false
     private(set) var isChromeVisible = true
+    private var timelineHeightConstraint: NSLayoutConstraint?
 
     /// Called after chrome hides so the window can re-enable mouse-moved delivery (lightweight).
     var onDidHide: (() -> Void)?
@@ -36,8 +36,12 @@ final class FullscreenTransportChromeView: NSView {
     private weak var exitTarget: AnyObject?
     private let exitAction: Selector
 
+    private var chromeHeight: CGFloat {
+        Self.previewClearance + PlaybackTimelineBar.barHeight(for: viewModel)
+    }
+
     private var barHitRect: NSRect {
-        NSRect(x: 0, y: 0, width: bounds.width, height: PlaybackTimelineBar.barHeight)
+        NSRect(x: 0, y: 0, width: bounds.width, height: PlaybackTimelineBar.barHeight(for: viewModel))
     }
 
     private var trafficLightsHitRect: NSRect {
@@ -98,7 +102,6 @@ final class FullscreenTransportChromeView: NSView {
             timelineHost.leadingAnchor.constraint(equalTo: leadingAnchor),
             timelineHost.trailingAnchor.constraint(equalTo: trailingAnchor),
             timelineHost.bottomAnchor.constraint(equalTo: bottomAnchor),
-            timelineHost.heightAnchor.constraint(equalToConstant: Self.chromeHeight),
 
             trafficLightsHost.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             trafficLightsHost.topAnchor.constraint(equalTo: topAnchor, constant: 14),
@@ -108,6 +111,9 @@ final class FullscreenTransportChromeView: NSView {
             closeButton.widthAnchor.constraint(equalToConstant: 28),
             closeButton.heightAnchor.constraint(equalToConstant: 28),
         ])
+        let heightConstraint = timelineHost.heightAnchor.constraint(equalToConstant: chromeHeight)
+        heightConstraint.isActive = true
+        timelineHeightConstraint = heightConstraint
 
         alphaValue = 1
     }

@@ -110,9 +110,12 @@ final class ThumbnailService: @unchecked Sendable {
     private var inflightThumbnails: [String: Task<URL, Error>] = [:]
     private var inflightFilmstrips: [String: Task<NSImage, Error>] = [:]
     private var inflightStoryboards: [String: Task<NSImage, Error>] = [:]
+    private var inflightPlayerStrips: [String: Task<NSImage, Error>] = [:]
     private var inflightDetailPreviews: [String: Task<URL, Error>] = [:]
     /// Per-file sample times (seconds) for the six storyboard collage cells — kept in sync with bake/build.
     private var storyboardCellTimesByPath: [String: [Double]] = [:]
+    /// Per-file sample times for the in-player filmstrip (1×N).
+    private var playerStripCellTimesByPath: [String: [Double]] = [:]
     private let scrubPrefetchLock = NSLock()
     private var scrubPrefetchTask: Task<Void, Never>?
 
@@ -124,6 +127,7 @@ final class ThumbnailService: @unchecked Sendable {
 
     private static let filmstripCachePrefix = "_filmstrip"
     private static let storyboardCachePrefix = "_storyboard"
+    private static let playerStripCachePrefix = "_playerstrip"
     private static let detailPreviewCachePrefix = "_detailPreview"
     private static let filmstripEpochKey = "Skagway.filmstripCacheEpoch"
 
@@ -147,6 +151,67 @@ final class ThumbnailService: @unchecked Sendable {
     static func isValidStoryboardImage(_ image: NSImage) -> Bool {
         abs(image.size.width - storyboardCompositeSize.width) < 2
             && abs(image.size.height - storyboardCompositeSize.height) < 2
+    }
+
+    /// In-player filmstrip (IPF): 1×N strip above the scrubber. N is chosen from track width so
+    /// each cell stays ~16:9 while the strip spans the same horizontal extent as the scrubber.
+    static let playerStripMinFrames = 4
+    static let playerStripMaxFrames = 24
+    static let playerStripCellAspect: CGFloat = 16.0 / 9.0
+    /// Bake cell footprint (points). Display scales the whole composite to the track.
+    static let playerStripBakeCellHeight: CGFloat = 54
+    static var playerStripBakeCellWidth: CGFloat { playerStripBakeCellHeight * playerStripCellAspect }
+
+    /// How many 16:9 cells fit across `trackWidth` at `stripHeight` (clamped).
+    static func playerStripFrameCount(trackWidth: CGFloat, stripHeight: CGFloat) -> Int {
+        let h = max(1, stripHeight)
+        let cellW = h * playerStripCellAspect
+        guard cellW > 1, trackWidth > 1 else { return playerStripMinFrames }
+        // Quantize width so tiny resizes don’t thrash N / cache.
+        let quantized = max(cellW, (trackWidth / 16).rounded() * 16)
+        let n = Int((quantized / cellW).rounded())
+        return min(playerStripMaxFrames, max(playerStripMinFrames, n))
+    }
+
+    static func playerStripCompositeSize(frameCount: Int) -> NSSize {
+        let n = max(1, frameCount)
+        return NSSize(
+            width: playerStripBakeCellWidth * CGFloat(n),
+            height: playerStripBakeCellHeight
+        )
+    }
+
+    static func isValidPlayerStripImage(_ image: NSImage, frameCount: Int) -> Bool {
+        let expected = playerStripCompositeSize(frameCount: frameCount)
+        return abs(image.size.width - expected.width) < 2
+            && abs(image.size.height - expected.height) < 2
+    }
+
+    static func isValidPlayerStripCellTimes(_ seconds: [Double], frameCount: Int) -> Bool {
+        guard seconds.count == frameCount else { return false }
+        return seconds.allSatisfy { $0.isFinite && $0 >= 0 }
+    }
+
+    /// Map a click in the displayed strip to a cell index (0…N-1).
+    static func playerStripCellIndex(at location: CGPoint, size: CGSize, frameCount: Int) -> Int {
+        guard size.width > 0, frameCount > 0 else { return 0 }
+        let column = Int(location.x / size.width * CGFloat(frameCount))
+        return min(frameCount - 1, max(0, column))
+    }
+
+    static func playerStripEvenSplitSeconds(index: Int, duration: Double, frameCount: Int) -> Double {
+        let n = max(1, frameCount)
+        let i = min(n - 1, max(0, index))
+        // Center of each equal-width time bucket so the scrubber playhead lands mid-cell on click.
+        return (Double(i) + 0.5) / Double(n) * max(0, duration)
+    }
+
+    /// Playhead cell that lines up with the scrubber’s linear time mapping (equal-width buckets).
+    static func playerStripPlayheadIndex(seconds: Double, duration: Double, frameCount: Int) -> Int {
+        guard frameCount > 0, duration > 0 else { return 0 }
+        let f = min(1, max(0, seconds / duration))
+        if f >= 1 { return frameCount - 1 }
+        return min(frameCount - 1, Int(f * Double(frameCount)))
     }
 
     /// True when `seconds` is a full set of per-cell sample times for the 2×3 collage.
@@ -285,12 +350,32 @@ final class ThumbnailService: @unchecked Sendable {
         return cacheDirectory.appendingPathComponent("\(hash)_storyboard_times.json")
     }
 
+    /// In-player filmstrip composite (`{hash}_playerstrip_n{N}_c2.jpg`).
+    func playerStripURL(for filePath: String, frameCount: Int) -> URL {
+        let hash = pathHashString(for: filePath)
+        return cacheDirectory.appendingPathComponent("\(hash)_playerstrip_n\(frameCount)_c2.jpg")
+    }
+
+    /// Sample times for IPF cells (`{hash}_playerstrip_n{N}_c2_times.json`).
+    func playerStripTimesURL(for filePath: String, frameCount: Int) -> URL {
+        let hash = pathHashString(for: filePath)
+        return cacheDirectory.appendingPathComponent("\(hash)_playerstrip_n\(frameCount)_c2_times.json")
+    }
+
     private func filmstripMemoryKey(for filePath: String) -> NSString {
         (filePath + Self.filmstripCachePrefix + "_e\(filmstripEpoch)") as NSString
     }
 
     private func storyboardMemoryKey(for filePath: String) -> NSString {
         (filePath + Self.storyboardCachePrefix) as NSString
+    }
+
+    private func playerStripMemoryKey(for filePath: String, frameCount: Int) -> NSString {
+        (filePath + Self.playerStripCachePrefix + "_n\(frameCount)_c2") as NSString
+    }
+
+    private func playerStripTimesCacheKey(filePath: String, frameCount: Int) -> String {
+        "\(filePath)\u{1e}\(frameCount)"
     }
 
     /// Disk path for hi-res detail still: `<hash>_detail_<longEdge>.jpg`.
@@ -812,6 +897,247 @@ final class ThumbnailService: @unchecked Sendable {
         try jpegData.write(to: cacheURL)
         memoryCache.setObject(compositeImage, forKey: memKey)
         return compositeImage
+    }
+
+    // MARK: - In-player filmstrip (1×N above scrubber)
+
+    /// Fast memory/disk load of the IPF composite for a given frame count (no generation).
+    func loadPlayerStrip(for filePath: String, frameCount: Int) -> NSImage? {
+        let memKey = playerStripMemoryKey(for: filePath, frameCount: frameCount)
+        if let cached = memoryCache.object(forKey: memKey),
+           Self.isValidPlayerStripImage(cached, frameCount: frameCount)
+        {
+            return cached
+        }
+        let url = playerStripURL(for: filePath, frameCount: frameCount)
+        guard FileManager.default.fileExists(atPath: url.path),
+              let image = NSImage(contentsOf: url),
+              Self.isValidPlayerStripImage(image, frameCount: frameCount)
+        else { return nil }
+        memoryCache.setObject(image, forKey: memKey)
+        return image
+    }
+
+    func loadPlayerStripCellTimes(for filePath: String, frameCount: Int) -> [Double]? {
+        let cacheKey = playerStripTimesCacheKey(filePath: filePath, frameCount: frameCount)
+        inflightLock.lock()
+        if let cached = playerStripCellTimesByPath[cacheKey],
+           Self.isValidPlayerStripCellTimes(cached, frameCount: frameCount)
+        {
+            inflightLock.unlock()
+            return cached
+        }
+        inflightLock.unlock()
+
+        let url = playerStripTimesURL(for: filePath, frameCount: frameCount)
+        guard let data = try? Data(contentsOf: url),
+              let times = Self.decodePlayerStripCellTimes(data, frameCount: frameCount)
+        else { return nil }
+
+        inflightLock.lock()
+        playerStripCellTimesByPath[cacheKey] = times
+        inflightLock.unlock()
+        return times
+    }
+
+    private static func decodePlayerStripCellTimes(_ data: Data, frameCount: Int) -> [Double]? {
+        struct Payload: Decodable {
+            let version: Int?
+            let seconds: [Double]
+        }
+        // v2+ = center-of-bucket sample times (v1 was (i+1)/(N+1) and misaligned the playhead).
+        guard let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              (payload.version ?? 0) >= 2,
+              isValidPlayerStripCellTimes(payload.seconds, frameCount: frameCount)
+        else { return nil }
+        return payload.seconds
+    }
+
+    private static func encodePlayerStripCellTimes(_ seconds: [Double]) throws -> Data {
+        struct Payload: Encodable {
+            let version: Int
+            let seconds: [Double]
+        }
+        return try JSONEncoder().encode(Payload(version: 2, seconds: seconds))
+    }
+
+    private func storePlayerStrip(
+        _ image: NSImage,
+        cellTimes: [Double],
+        for filePath: String,
+        frameCount: Int
+    ) throws {
+        guard Self.isValidPlayerStripImage(image, frameCount: frameCount),
+              Self.isValidPlayerStripCellTimes(cellTimes, frameCount: frameCount)
+        else {
+            throw ThumbnailError.encodingFailed
+        }
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.75])
+        else {
+            throw ThumbnailError.encodingFailed
+        }
+        try jpegData.write(to: playerStripURL(for: filePath, frameCount: frameCount))
+        try Self.encodePlayerStripCellTimes(cellTimes)
+            .write(to: playerStripTimesURL(for: filePath, frameCount: frameCount))
+        memoryCache.setObject(image, forKey: playerStripMemoryKey(for: filePath, frameCount: frameCount))
+        let cacheKey = playerStripTimesCacheKey(filePath: filePath, frameCount: frameCount)
+        inflightLock.lock()
+        playerStripCellTimesByPath[cacheKey] = cellTimes
+        inflightLock.unlock()
+    }
+
+    /// Load or build the in-player filmstrip + cell times for `frameCount` cells.
+    func generatePlayerStrip(for video: Video, frameCount: Int) async throws -> NSImage {
+        let n = min(Self.playerStripMaxFrames, max(Self.playerStripMinFrames, frameCount))
+        let memKey = playerStripMemoryKey(for: video.filePath, frameCount: n)
+        if let cached = memoryCache.object(forKey: memKey),
+           Self.isValidPlayerStripImage(cached, frameCount: n),
+           loadPlayerStripCellTimes(for: video.filePath, frameCount: n) != nil
+        {
+            return cached
+        }
+        if let image = loadPlayerStrip(for: video.filePath, frameCount: n),
+           loadPlayerStripCellTimes(for: video.filePath, frameCount: n) != nil
+        {
+            return image
+        }
+        return try await coalescedPlayerStrip(for: video, frameCount: n)
+    }
+
+    private func playerStripInflightKey(filePath: String, frameCount: Int) -> String {
+        // `c2` = center-of-bucket sample contract (invalidates in-flight / cache coalesces from v1).
+        "\(filePath)\u{1e}ps\u{1e}1x\(frameCount)\u{1e}c2"
+    }
+
+    private func coalescedPlayerStrip(for video: Video, frameCount: Int) async throws -> NSImage {
+        let key = playerStripInflightKey(filePath: video.filePath, frameCount: frameCount)
+        inflightLock.lock()
+        if let existing = inflightPlayerStrips[key] {
+            inflightLock.unlock()
+            return try await existing.value
+        }
+        let task = Task<NSImage, Error> {
+            await self.generationGate.acquire()
+            do {
+                let image = try await self.buildPlayerStrip(for: video, frameCount: frameCount)
+                await self.generationGate.release()
+                return image
+            } catch {
+                await self.generationGate.release()
+                throw error
+            }
+        }
+        inflightPlayerStrips[key] = task
+        inflightLock.unlock()
+        defer {
+            inflightLock.lock()
+            inflightPlayerStrips.removeValue(forKey: key)
+            inflightLock.unlock()
+        }
+        return try await task.value
+    }
+
+    private func buildPlayerStrip(for video: Video, frameCount: Int) async throws -> NSImage {
+        let url = video.url
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw ThumbnailError.fileNotFound
+        }
+
+        let totalFrames = frameCount
+        let result: (frames: [CGImage], times: [Double]) = try await withTimeout(seconds: 45) {
+            let asset = AVURLAsset(url: url)
+            let duration = try await asset.load(.duration)
+            let totalSeconds = CMTimeGetSeconds(duration)
+            guard totalSeconds.isFinite, totalSeconds > 0.5 else {
+                throw ThumbnailError.generationFailed
+            }
+
+            // Centers of equal-width time buckets — scrubber playhead sits mid-cell after a click.
+            let times = (0..<totalFrames).map { index in
+                Self.playerStripEvenSplitSeconds(
+                    index: index,
+                    duration: totalSeconds,
+                    frameCount: totalFrames
+                )
+            }
+            let cmTimes = times.map { CMTime(seconds: $0, preferredTimescale: 600) }
+
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 192, height: 192)
+            generator.requestedTimeToleranceBefore = CMTime(seconds: 1.5, preferredTimescale: 600)
+            generator.requestedTimeToleranceAfter = CMTime(seconds: 1.5, preferredTimescale: 600)
+
+            var frames: [CGImage] = []
+            frames.reserveCapacity(totalFrames)
+            for time in cmTimes {
+                try Task.checkCancellation()
+                if let (cgImage, _) = try? await generator.image(at: time) {
+                    frames.append(cgImage)
+                }
+            }
+            return (frames, times)
+        }
+
+        guard result.frames.count == totalFrames else {
+            throw ThumbnailError.generationFailed
+        }
+
+        let cellWidth = Self.playerStripBakeCellWidth
+        let cellHeight = Self.playerStripBakeCellHeight
+        let composite = Self.playerStripCompositeSize(frameCount: totalFrames)
+
+        let compositeImage = NSImage(size: composite)
+        compositeImage.lockFocus()
+        NSColor.black.setFill()
+        for (index, cgImage) in result.frames.enumerated() {
+            let cellX = CGFloat(index) * cellWidth
+            let cellY: CGFloat = 0
+            let frameW = CGFloat(cgImage.width)
+            let frameH = CGFloat(cgImage.height)
+            // Fill the 16:9 cell (crop/center) so display isn’t letterboxed inside each cell.
+            let scale = max(cellWidth / frameW, cellHeight / frameH)
+            let drawW = frameW * scale
+            let drawH = frameH * scale
+            let drawX = cellX + (cellWidth - drawW) / 2
+            let drawY = cellY + (cellHeight - drawH) / 2
+            NSRect(x: cellX, y: cellY, width: cellWidth, height: cellHeight).fill()
+            let frameImage = NSImage(cgImage: cgImage, size: NSSize(width: frameW, height: frameH))
+            // Clip to cell
+            NSGraphicsContext.current?.saveGraphicsState()
+            NSBezierPath(rect: NSRect(x: cellX, y: cellY, width: cellWidth, height: cellHeight)).addClip()
+            frameImage.draw(in: NSRect(x: drawX, y: drawY, width: drawW, height: drawH))
+            NSGraphicsContext.current?.restoreGraphicsState()
+        }
+        compositeImage.unlockFocus()
+
+        try Task.checkCancellation()
+        try storePlayerStrip(
+            compositeImage,
+            cellTimes: result.times,
+            for: video.filePath,
+            frameCount: totalFrames
+        )
+        return compositeImage
+    }
+
+    /// Click → sample seconds for the IPF cell under the pointer.
+    func playerStripClickSeconds(
+        at location: CGPoint,
+        size: CGSize,
+        filePath: String,
+        duration: Double,
+        frameCount: Int
+    ) -> Double {
+        let index = Self.playerStripCellIndex(at: location, size: size, frameCount: frameCount)
+        if let times = loadPlayerStripCellTimes(for: filePath, frameCount: frameCount),
+           Self.isValidPlayerStripCellTimes(times, frameCount: frameCount)
+        {
+            return times[index]
+        }
+        return Self.playerStripEvenSplitSeconds(index: index, duration: duration, frameCount: frameCount)
     }
 
     // MARK: - Storyboard (Wall 2×3 larger collage)
@@ -1428,6 +1754,7 @@ final class ThumbnailService: @unchecked Sendable {
         memoryCache.removeAllObjects()
         inflightLock.lock()
         storyboardCellTimesByPath.removeAll()
+        playerStripCellTimesByPath.removeAll()
         inflightLock.unlock()
 
         let directory = cacheDirectory
@@ -1549,6 +1876,18 @@ final class ThumbnailService: @unchecked Sendable {
                 to: storyboardTimesURL(for: pair.to),
                 fm: fm
             )
+            for n in Self.playerStripMinFrames...Self.playerStripMaxFrames {
+                moveOrReplaceCacheFile(
+                    from: playerStripURL(for: pair.from, frameCount: n),
+                    to: playerStripURL(for: pair.to, frameCount: n),
+                    fm: fm
+                )
+                moveOrReplaceCacheFile(
+                    from: playerStripTimesURL(for: pair.from, frameCount: n),
+                    to: playerStripTimesURL(for: pair.to, frameCount: n),
+                    fm: fm
+                )
+            }
             for edge in Self.detailPreviewLongEdgeChoices {
                 moveOrReplaceCacheFile(
                     from: detailPreviewURL(for: pair.from, longEdge: edge),
@@ -1570,9 +1909,19 @@ final class ThumbnailService: @unchecked Sendable {
             memoryCache.removeObject(forKey: filmstripMemoryKey(for: pair.to))
             memoryCache.removeObject(forKey: storyboardMemoryKey(for: pair.from))
             memoryCache.removeObject(forKey: storyboardMemoryKey(for: pair.to))
+            for n in Self.playerStripMinFrames...Self.playerStripMaxFrames {
+                memoryCache.removeObject(forKey: playerStripMemoryKey(for: pair.from, frameCount: n))
+                memoryCache.removeObject(forKey: playerStripMemoryKey(for: pair.to, frameCount: n))
+            }
             inflightLock.lock()
             storyboardCellTimesByPath.removeValue(forKey: pair.from)
             storyboardCellTimesByPath.removeValue(forKey: pair.to)
+            let psKeys = playerStripCellTimesByPath.keys.filter {
+                $0.hasPrefix(pair.from + "\u{1e}") || $0.hasPrefix(pair.to + "\u{1e}")
+            }
+            for key in psKeys {
+                playerStripCellTimesByPath.removeValue(forKey: key)
+            }
             inflightLock.unlock()
             memoryCache.removeObject(forKey: (pair.from + Self.detailPreviewCachePrefix) as NSString)
             memoryCache.removeObject(forKey: (pair.to + Self.detailPreviewCachePrefix) as NSString)
@@ -1596,6 +1945,14 @@ final class ThumbnailService: @unchecked Sendable {
             inflightStoryboards[newSbInflight]?.cancel()
             inflightStoryboards.removeValue(forKey: oldSbInflight)
             inflightStoryboards.removeValue(forKey: newSbInflight)
+            for n in Self.playerStripMinFrames...Self.playerStripMaxFrames {
+                let oldPsInflight = playerStripInflightKey(filePath: pair.from, frameCount: n)
+                let newPsInflight = playerStripInflightKey(filePath: pair.to, frameCount: n)
+                inflightPlayerStrips[oldPsInflight]?.cancel()
+                inflightPlayerStrips[newPsInflight]?.cancel()
+                inflightPlayerStrips.removeValue(forKey: oldPsInflight)
+                inflightPlayerStrips.removeValue(forKey: newPsInflight)
+            }
             for edge in Self.detailPreviewLongEdgeChoices {
                 let oldDK = inflightDetailPreviewKey(filePath: pair.from, longEdge: edge)
                 let newDK = inflightDetailPreviewKey(filePath: pair.to, longEdge: edge)
@@ -1647,6 +2004,14 @@ final class ThumbnailService: @unchecked Sendable {
             {
                 memoryCache.setObject(image, forKey: storyboardMemoryKey(for: pair.to))
             }
+            for n in Self.playerStripMinFrames...Self.playerStripMaxFrames {
+                if let image = NSImage(contentsOf: playerStripURL(for: pair.to, frameCount: n)),
+                   Self.isValidPlayerStripImage(image, frameCount: n),
+                   loadPlayerStripCellTimes(for: pair.to, frameCount: n) != nil
+                {
+                    memoryCache.setObject(image, forKey: playerStripMemoryKey(for: pair.to, frameCount: n))
+                }
+            }
             for edge in Self.detailPreviewLongEdgeChoices {
                 if let image = NSImage(contentsOf: detailPreviewURL(for: pair.to, longEdge: edge)) {
                     memoryCache.setObject(image, forKey: detailPreviewMemoryKey(filePath: pair.to, longEdge: edge))
@@ -1661,6 +2026,7 @@ final class ThumbnailService: @unchecked Sendable {
         memoryCache.removeAllObjects()
         inflightLock.lock()
         storyboardCellTimesByPath.removeAll()
+        playerStripCellTimesByPath.removeAll()
         inflightLock.unlock()
         let contents = try FileManager.default.contentsOfDirectory(
             at: cacheDirectory,

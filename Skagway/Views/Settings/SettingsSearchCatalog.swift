@@ -163,6 +163,12 @@ enum SettingsSearchCatalog {
             keywords: ["playback", "compact", "full screen", "size"]
         ),
         .init(
+            id: "video.playerFilmstrip",
+            title: "Show filmstrip in player",
+            category: .video,
+            keywords: ["filmstrip", "playback", "scrubber", "frames", "player"]
+        ),
+        .init(
             id: "video.resumeBanner",
             title: "Fade resume banner after delay",
             category: .video,

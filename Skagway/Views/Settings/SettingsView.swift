@@ -482,6 +482,12 @@ struct SettingsView: View {
                         Text(pref.label).tag(pref)
                     }
                 }
+                cardSeparator
+                describedToggleRow(
+                    title: "Show filmstrip in player",
+                    description: "A row of frames above the scrubber in the floating and full-screen player. Fades in and out with the transport controls. Compact uses a thinner strip. Turn off to reclaim vertical space.",
+                    isOn: $viewModel.showFilmstripInPlayer
+                )
             }
 
             sectionBlock(title: "Playback") {

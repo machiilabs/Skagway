@@ -41,6 +41,7 @@ enum PrefsKeys {
     static let excludeCorrupt = "Skagway.excludeCorrupt"
     static let confirmDeletions = "Skagway.confirmDeletions"
     static let showThumbnailInDetail = "Skagway.showThumbnailInDetail"
+    static let showFilmstripInPlayer = "Skagway.showFilmstripInPlayer"
     static let gridHoverPreviewEnabled = "Skagway.gridHoverPreviewEnabled"
     static let storyboardDensity = "Skagway.storyboardDensity"
     static let browsingLayout = "Skagway.browsingLayout"
@@ -109,6 +110,7 @@ enum PrefsKeys {
         "excludeCorrupt",
         "confirmDeletions",
         "showThumbnailInDetail",
+        "showFilmstripInPlayer",
         "browsingLayout",
         "filmstripRows",
         "filmstripColumns",

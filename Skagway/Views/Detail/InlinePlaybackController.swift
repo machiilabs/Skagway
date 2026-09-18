@@ -38,8 +38,12 @@ final class InlinePlaybackController {
     private(set) var isPlaying: Bool = false
     /// Desired playback rate (persists across pause/seek within the session). Applied on play.
     private(set) var playbackRate: Float = 1.0
-    /// Session-only “return here” after jumping to a bookmark (not a bookmark; cleared on stop).
+    /// Session-only leave point after a bookmark jump (ghost playhead + Return chip). Cleared on stop.
     private(set) var returnPointSeconds: Double?
+    /// When true, dismiss the return point once playback crosses it from earlier times (jumped backward).
+    private var returnPointClearsOnCatchUp = false
+    /// Ignore scrubber clear for the rest of this turn after a bookmark jump (diamond click can also hit the scrub gesture).
+    private var suppressReturnClearFromScrub = false
     /// Player volume 0…1 (persisted). Applied whenever an `AVPlayer` is created.
     private(set) var volume: Float
     /// When true, audio is muted; `volume` is preserved for unmute.
@@ -57,7 +61,7 @@ final class InlinePlaybackController {
 
     @ObservationIgnored private var statusTask: Task<Void, Never>?
     @ObservationIgnored private var resumeBannerFadeTask: Task<Void, Never>?
-        @ObservationIgnored private var timeObserverToken: Any?
+    @ObservationIgnored private var timeObserverToken: Any?
     @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     /// Last non-zero volume; used when unmuting after the slider hit zero.
@@ -413,10 +417,35 @@ final class InlinePlaybackController {
         guard here.isFinite, here >= 0 else { return }
         guard abs(here - destinationSeconds) >= Self.returnPointMinDeltaSeconds else { return }
         returnPointSeconds = here
+        // Catch-up dismiss only when the leave point remains ahead (jumped backward).
+        returnPointClearsOnCatchUp = here > destinationSeconds
+        // Diamond clicks can also hit the scrub DragGesture; don't let that wipe the new return point.
+        suppressReturnClearFromScrub = true
+        DispatchQueue.main.async { [weak self] in
+            self?.suppressReturnClearFromScrub = false
+        }
     }
 
     func clearReturnPoint() {
         returnPointSeconds = nil
+        returnPointClearsOnCatchUp = false
+    }
+
+    /// Scrubber seek (click/drag) dismisses the return point — unless a bookmark jump just set it.
+    func clearReturnPointFromScrub() {
+        guard !suppressReturnClearFromScrub else { return }
+        clearReturnPoint()
+    }
+
+    /// When playback crosses the leave point from earlier times, the live playhead takes over.
+    private func clearReturnPointIfPlayheadReached(from previous: Double, to current: Double) {
+        guard returnPointClearsOnCatchUp, let returnSeconds = returnPointSeconds else { return }
+        // Ignore seek discontinuities / stale observer callbacks around bookmark jumps.
+        let delta = current - previous
+        guard delta > 0, delta < 1.25 else { return }
+        let slack = 0.05
+        guard previous < returnSeconds - slack, current >= returnSeconds - slack else { return }
+        clearReturnPoint()
     }
 
     /// Seek back to the session return point (chip), then dismiss the chip.
@@ -482,7 +511,10 @@ final class InlinePlaybackController {
             guard let self else { return }
             let seconds = time.seconds
             if seconds.isFinite, seconds >= 0 {
+                let previous = self.currentTimeSeconds
                 self.currentTimeSeconds = seconds
+                // After a jump-back bookmark, dismiss ghost + Return chip once playhead catches the leave point.
+                self.clearReturnPointIfPlayheadReached(from: previous, to: seconds)
             }
             if let item = newPlayer.currentItem {
                 let d = item.duration.seconds

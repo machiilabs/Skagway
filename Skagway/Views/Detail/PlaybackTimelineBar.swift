@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Skagway-owned transport: the sole scrubber (AVPlayerView controls are `.none`).
+/// Optional in-player filmstrip sits above the scrubber and shares this view’s `controlsVisible` fade.
 struct PlaybackTimelineBar: View {
     @Bindable var viewModel: LibraryViewModel
     /// When false, the bar is faded (panel hover chrome / full-screen idle).
@@ -9,12 +10,42 @@ struct PlaybackTimelineBar: View {
 
     /// Tall hit target for the scrubber. Track sits near the *bottom* of this so chrome below stays close.
     static let scrubHitHeight: CGFloat = 28
-    /// Row under the scrubber: play / skip / speed (does not steal scrubber width).
-    static let transportControlsHeight: CGFloat = 24
-    /// Total bar height = full-width scrubber + controls underneath.
-    static let barHeight: CGFloat = scrubHitHeight + transportControlsHeight
+    /// Row under the scrubber: play / skip / speed, plus bookmark return chip under the ghost playhead.
+    static let transportControlsHeight: CGFloat = 28
+    /// IPF max height in Windowed / Full screen (native composite row is 54pt).
+    static let filmstripStripHeight: CGFloat = 54
+    /// IPF max height in Compact (protect picture budget).
+    static let filmstripStripHeightThin: CGFloat = 36
+
+    /// Scrubber + transport only (no filmstrip).
+    static var baseBarHeight: CGFloat { scrubHitHeight + transportControlsHeight }
+
+    /// Total transport chrome height for the current player prefs / mode.
+    static func barHeight(showFilmstrip: Bool, thinFilmstrip: Bool) -> CGFloat {
+        guard showFilmstrip else { return baseBarHeight }
+        return baseBarHeight + (thinFilmstrip ? filmstripStripHeightThin : filmstripStripHeight)
+    }
+
+    static func barHeight(for viewModel: LibraryViewModel) -> CGFloat {
+        barHeight(
+            showFilmstrip: viewModel.showFilmstripInPlayer,
+            thinFilmstrip: viewModel.isPlayerCompactMode
+        )
+    }
+
+    /// Max reserved height (strip on, normal thickness) — fullscreen host / static callers.
+    static var barHeight: CGFloat { baseBarHeight + filmstripStripHeight }
+
     /// Vertical center of the thin scrubber line within `scrubHitHeight` (near the bottom).
     static let trackCenterYFromBottom: CGFloat = 6
+
+    private var showFilmstrip: Bool { viewModel.showFilmstripInPlayer }
+    private var stripHeight: CGFloat {
+        viewModel.isPlayerCompactMode ? Self.filmstripStripHeightThin : Self.filmstripStripHeight
+    }
+    private var totalHeight: CGFloat {
+        Self.barHeight(showFilmstrip: showFilmstrip, thinFilmstrip: viewModel.isPlayerCompactMode)
+    }
 
     private static let previewWidth: CGFloat = 160
     /// Public so fullscreen chrome can reserve vertical room above the bar.
@@ -39,6 +70,9 @@ struct PlaybackTimelineBar: View {
     @State private var hoverBookmarkFraction: CGFloat?
     /// Track frame in the bar’s coordinate space (for preview placement above the scrubber).
     @State private var trackFrame: CGRect = .zero
+    /// Bookmark being renamed from the diamond context menu.
+    @State private var renameBookmarkTarget: VideoBookmark?
+    @State private var renameBookmarkDraft: String = ""
 
     private var playback: InlinePlaybackController { viewModel.playback }
 
@@ -50,14 +84,35 @@ struct PlaybackTimelineBar: View {
         max(playback.durationSeconds, 0)
     }
 
+    /// Fixed width for elapsed/duration columns so the filmstrip aligns with the scrubber track.
+    private static let timeColumnWidth: CGFloat = 44
+
     var body: some View {
         VStack(spacing: 0) {
+            // Filmstrip shares the scrubber track’s horizontal span (between time labels).
+            if showFilmstrip, let video = playback.currentVideo {
+                HStack(spacing: 10) {
+                    Color.clear
+                        .frame(width: Self.timeColumnWidth)
+                    InPlayerFilmstripStrip(
+                        viewModel: viewModel,
+                        video: video,
+                        stripHeight: stripHeight
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: stripHeight)
+                    Color.clear
+                        .frame(width: Self.timeColumnWidth)
+                }
+                .padding(.horizontal, 12)
+            }
+
             // Full-width scrubber — only elapsed/duration flank the track (no skip/speed here).
             HStack(spacing: 10) {
                 Text(displaySeconds.formattedDuration)
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
                     .foregroundStyle(Color.appTextSecondary)
-                    .frame(minWidth: 40, alignment: .trailing)
+                    .frame(width: Self.timeColumnWidth, alignment: .trailing)
 
                 timelineTrack
                     .frame(maxWidth: .infinity)
@@ -66,7 +121,7 @@ struct PlaybackTimelineBar: View {
                 Text(duration > 0 ? duration.formattedDuration : "–:––")
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
                     .foregroundStyle(Color.appTextSecondary)
-                    .frame(minWidth: 40, alignment: .leading)
+                    .frame(width: Self.timeColumnWidth, alignment: .leading)
             }
             .padding(.horizontal, 12)
             .frame(height: Self.scrubHitHeight)
@@ -104,30 +159,6 @@ struct PlaybackTimelineBar: View {
                     playbackSpeedMenu
 
                     volumeControl
-
-                    if let returnSeconds = playback.returnPointSeconds {
-                        Button {
-                            playback.returnToSavedPoint()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.uturn.backward")
-                                    .font(.system(size: 10, weight: .semibold))
-                                Text(returnSeconds.formattedDuration)
-                                    .font(.system(size: 11, weight: .medium).monospacedDigit())
-                            }
-                            .foregroundStyle(Color.appTextPrimary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(Color.white.opacity(0.14))
-                            )
-                            .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Return to \(returnSeconds.formattedDuration)")
-                        .accessibilityLabel("Return to \(returnSeconds.formattedDuration)")
-                    }
                 }
                 .layoutPriority(1)
                 .fixedSize(horizontal: true, vertical: false)
@@ -139,7 +170,7 @@ struct PlaybackTimelineBar: View {
         }
         // Fixed height — without this, ZStack proposes the full player size and the bar expands.
         .frame(maxWidth: .infinity)
-        .frame(height: Self.barHeight)
+        .frame(height: totalHeight)
         .coordinateSpace(name: Self.barSpaceName)
         .background(
             LinearGradient(
@@ -153,11 +184,38 @@ struct PlaybackTimelineBar: View {
         .overlay(alignment: .topLeading) {
             scrubPreviewOverlay
             bookmarkNameOverlay
+            returnPointChipOverlay
         }
         .onPreferenceChange(ScrubTrackFrameKey.self) { trackFrame = $0 }
         .opacity(controlsVisible ? 1 : 0)
         .allowsHitTesting(controlsVisible)
         .animation(.easeOut(duration: 0.2), value: controlsVisible)
+        .alert(
+            "Rename Bookmark",
+            isPresented: Binding(
+                get: { renameBookmarkTarget != nil },
+                set: { if !$0 { renameBookmarkTarget = nil } }
+            )
+        ) {
+            TextField("Name", text: $renameBookmarkDraft)
+            Button("Cancel", role: .cancel) {
+                renameBookmarkTarget = nil
+            }
+            Button("Save") {
+                commitRenameBookmark()
+            }
+        } message: {
+            Text("Enter a name for this bookmark.")
+        }
+    }
+
+    private func commitRenameBookmark() {
+        guard let bookmark = renameBookmarkTarget else { return }
+        renameBookmarkTarget = nil
+        let draft = renameBookmarkDraft
+        Task {
+            await viewModel.renameBookmark(bookmark, title: draft)
+        }
     }
 
     private var playbackSpeedMenu: some View {
@@ -241,8 +299,8 @@ struct PlaybackTimelineBar: View {
 
     @ViewBuilder
     private var scrubPreviewOverlay: some View {
-        // Hide frame preview while naming a bookmark so the two don’t stack.
-        if hoverBookmarkTitle == nil, let hoverFraction, let hoverSeconds, trackFrame.width > 1 {
+        // Bookmark title chip and scrub preview can both show — they don’t collide in practice.
+        if let hoverFraction, let hoverSeconds, trackFrame.width > 1 {
             let xInBar = trackFrame.minX + hoverFraction * trackFrame.width
             scrubPreviewCard(seconds: hoverSeconds)
                 .position(
@@ -278,6 +336,55 @@ struct PlaybackTimelineBar: View {
         }
     }
 
+    /// “Return to …” chip centered under the ghost playhead (bookmark jump origin).
+    @ViewBuilder
+    private var returnPointChipOverlay: some View {
+        if let returnSeconds = playback.returnPointSeconds,
+           duration > 0,
+           trackFrame.width > 1 {
+            let fraction = min(max(returnSeconds / duration, 0), 1)
+            let xInBar = trackFrame.minX + fraction * trackFrame.width
+            Button {
+                playback.returnToSavedPoint()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(returnSeconds.formattedDuration)
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                }
+                .foregroundStyle(Color.appTextPrimary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.white.opacity(0.18))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
+                )
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("Return to \(returnSeconds.formattedDuration)")
+            .accessibilityLabel("Return to \(returnSeconds.formattedDuration)")
+            .position(
+                x: clampedReturnChipCenterX(xInBar),
+                y: trackFrame.maxY + Self.transportControlsHeight / 2
+            )
+            .zIndex(50)
+        }
+    }
+
+    private func clampedReturnChipCenterX(_ x: CGFloat) -> CGFloat {
+        // Approximate chip half-width so it stays inside the track.
+        let half: CGFloat = 52
+        let minX = trackFrame.minX + half
+        let maxX = trackFrame.minX + trackFrame.width - half
+        return min(max(x, minX), max(minX, maxX))
+    }
+
     private var timelineTrack: some View {
         GeometryReader { geo in
             let width = max(geo.size.width, 1)
@@ -285,6 +392,11 @@ struct PlaybackTimelineBar: View {
             let playheadX = progress * width
             // Keep the thin track near the bottom of the hit area so transport/chrome sit close under it.
             let trackY = geo.size.height - Self.trackCenterYFromBottom
+            let ghostX: CGFloat? = {
+                guard let returnSeconds = playback.returnPointSeconds, duration > 0 else { return nil }
+                let fraction = min(max(returnSeconds / duration, 0), 1)
+                return fraction * width
+            }()
 
             ZStack(alignment: .leading) {
                 Rectangle()
@@ -301,6 +413,15 @@ struct PlaybackTimelineBar: View {
                     .frame(width: max(playheadX, 0), height: 4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(.bottom, Self.trackCenterYFromBottom - 2)
+
+                // Ghost playhead: leave point when jumping via bookmark (same size as live head).
+                if let ghostX {
+                    Circle()
+                        .fill(Color(nsColor: .systemGray))
+                        .frame(width: 12, height: 12)
+                        .position(x: ghostX, y: trackY)
+                        .allowsHitTesting(false)
+                }
 
                 Circle()
                     .fill(Color.white)
@@ -483,6 +604,8 @@ struct PlaybackTimelineBar: View {
                     suppressSeekCommit = false
                     wasPlayingBeforeDrag = playback.isPlaying
                     playheadBeforeScrub = playback.currentTimeSeconds
+                    // Scrubber interaction invalidates the bookmark “return to” chip.
+                    playback.clearReturnPointFromScrub()
                 }
                 guard !suppressSeekCommit else { return }
                 let fraction = min(max(value.location.x / trackWidth, 0), 1)
@@ -508,6 +631,7 @@ struct PlaybackTimelineBar: View {
                 let fraction = min(max(value.location.x / trackWidth, 0), 1)
                 let seconds = fraction * duration
                 let resume = wasPlayingBeforeDrag
+                playback.clearReturnPointFromScrub()
                 playback.seek(toSeconds: seconds, resumePlayback: resume)
             }
     }
@@ -519,7 +643,14 @@ struct PlaybackTimelineBar: View {
         let hit: CGFloat = 22
 
         BookmarkDiamondControl(
-            onActivate: { viewModel.jumpToBookmark(bookmark) }
+            onActivate: { viewModel.jumpToBookmark(bookmark) },
+            onRename: {
+                renameBookmarkDraft = bookmark.title
+                renameBookmarkTarget = bookmark
+            },
+            onDelete: {
+                Task { await viewModel.deleteBookmark(bookmark) }
+            }
         )
         .frame(width: hit, height: hit)
         .position(x: x, y: max(hit / 2, trackY - 10))
@@ -656,20 +787,28 @@ private struct ScrubHoverTracker: NSViewRepresentable {
 /// AppKit-backed diamond so clicks/cursor win over the scrubber’s tracking/gestures.
 private struct BookmarkDiamondControl: NSViewRepresentable {
     var onActivate: () -> Void
+    var onRename: () -> Void
+    var onDelete: () -> Void
 
     func makeNSView(context: Context) -> BookmarkDiamondNSView {
         let view = BookmarkDiamondNSView()
         view.onActivate = onActivate
+        view.onRename = onRename
+        view.onDelete = onDelete
         return view
     }
 
     func updateNSView(_ nsView: BookmarkDiamondNSView, context: Context) {
         nsView.onActivate = onActivate
+        nsView.onRename = onRename
+        nsView.onDelete = onDelete
     }
 }
 
 private final class BookmarkDiamondNSView: NSView {
     var onActivate: (() -> Void)?
+    var onRename: (() -> Void)?
+    var onDelete: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -688,7 +827,43 @@ private final class BookmarkDiamondNSView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // Control-click opens the context menu (macOS convention).
+        if event.modifierFlags.contains(.control) {
+            showContextMenu(with: event)
+            return
+        }
         onActivate?()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        showContextMenu(with: event)
+    }
+
+    private func showContextMenu(with event: NSEvent) {
+        let menu = NSMenu()
+        let rename = NSMenuItem(
+            title: "Rename Bookmark…",
+            action: #selector(renameBookmarkAction(_:)),
+            keyEquivalent: ""
+        )
+        rename.target = self
+        menu.addItem(rename)
+        let delete = NSMenuItem(
+            title: "Delete Bookmark",
+            action: #selector(deleteBookmarkAction(_:)),
+            keyEquivalent: ""
+        )
+        delete.target = self
+        menu.addItem(delete)
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    @objc private func renameBookmarkAction(_ sender: Any?) {
+        onRename?()
+    }
+
+    @objc private func deleteBookmarkAction(_ sender: Any?) {
+        onDelete?()
     }
 
     override func draw(_ dirtyRect: NSRect) {
