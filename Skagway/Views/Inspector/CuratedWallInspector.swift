@@ -405,11 +405,25 @@ struct CuratedWallInspector: View {
                 }
             } else {
                 inspectorModeTitleBar(isBatch: false) {
-                    Text(v.displayTitle)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Self.inspectorModeBarText)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(v.displayTitle)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Self.inspectorModeBarText)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if viewModel.selectedVideoIds.count > 1 {
+                            Button("Batch") {
+                                viewModel.activateBatchInspectIfMultiCollected(
+                                    lastTouchedId: v.id
+                                )
+                            }
+                            .font(.callout.weight(.semibold))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Self.inspectorModeBarText.opacity(0.72))
+                            .help("Inspect the collected set")
+                            .accessibilityLabel("Batch inspect collected set")
+                        }
+                    }
                 }
 
                 if v.displayTitle != v.fileName {
