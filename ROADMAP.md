@@ -34,6 +34,7 @@ Key qualities:
 - One floating player (Compact / Windowed / Full) via `InlinePlaybackController`; sidecar SRT; resume on cards; Play from Beginning
 - **Play All** (⌘⇧P) plays the **current filtered view** from the first video; auto-advance and **Loop** only while that session is active
 - Bookmarks (⌥⌘B); import play counts + resume; four-value subtitle presence
+- **In-player filmstrip** + bookmark leave-point (ghost playhead / Return) on `main` tip
 
 **Queues & files**
 - Crash-safe **re-encode** and **move** queues (abort, persist, pills)
@@ -60,6 +61,100 @@ Key qualities:
 
 Distribution stays Developer ID DMG. **No Mac App Store** — do not scope MAS/sandbox as future work.
 
+## Path to impartial 9 (product finish)
+
+Two different rulers — do not mix them:
+
+| Ruler | What it measures | Current (2026-09-18) |
+|-------|------------------|----------------------|
+| **Organizer supremacy** | Vs peer Mac *library organizers* (browse / filter / batch / Reconnect / Storyboard / playback navigation) | **~9.9 / 10** |
+| **Impartial product review** | Absolute Mac-app finish a careful reviewer would give (a11y, captions, format trust, daily polish) | **~8.2 / 10** → target **9** |
+
+IPF, Reconnect, Storyboard, and batch/inspect polish raise the supremacy ladder. They do **not** by themselves close the impartial gap. Earning **9** means a reviewer can watch, navigate, and trust the catalog without hitting VoiceOver dead ends, caption helplessness, or “will this file play?” ambiguity.
+
+### Already counted toward the impartial score (not the remaining point)
+
+- Reconnect (Evidence Destinations, Ready / Needs attention / Unmatched, Undo)
+- Storyboard as a first-class browse mode (⌘3)
+- Interaction papercut burn-down (collection/batch, Inspector pin, Storyboard clicks)
+- **In-player filmstrip + leave-point Return** — shipped on `main` (optional for 9; strengthens supremacy / playback navigation)
+
+### Required for impartial 9 (ordered)
+
+Ship **all three**. Partial credit does not get to 9.
+
+#### 1. Accessibility P0
+
+**Goal.** Core browse → inspect → play loops work with VoiceOver and Full Keyboard Access without hover-only traps.
+
+| Area | Done when |
+|------|-----------|
+| Wall / Storyboard cards | Each card has a real accessibility name (title + key facts), not icon soup |
+| Toolbar / rating | Icon-only controls have `.accessibilityLabel` (`.help` alone is insufficient) |
+| Scrubber / filmstrip | Adjustable actions for seek / strip step; captions control is reachable |
+| Settings destructive | Confirm / delete actions are keyboard-reachable (not hover-gated) |
+| Captions (a11y half) | On/off is a real control (overlaps workstream 2) |
+
+**Out of P0 for the 9 bar:** full Dynamic Type pass, AAA contrast, XCUITest a11y suite. Use `skagway-a11y-audit` for findings; P0 = Critical + blocking Serious on the audit surfaces list.
+
+**Success criterion.** A VoiceOver user can open a library, focus a clip, play it, scrub, and toggle captions without a dead end on those paths.
+
+#### 2. Captions as a first-class watch feature
+
+**Goal.** Sidecar captions are something the user *drives* while watching — not only metadata badges and an always-on auto overlay.
+
+**Already shipped (foundation, not first-class)**
+
+- Sidecar `.srt` discovery + parse + timed overlay
+- `SubtitleTrack.isEnabled` (no player UI yet)
+- Four-value Inspector presence + CC badges on cards
+- Generation stays **outside** Skagway (e.g. Submarine) — do not build ASR into Skagway for this bar
+
+| Capability | Done when |
+|------------|-----------|
+| Toggle | Captions / CC control on the player transport (Compact / Windowed / Full); keyboard shortcut |
+| Multi-sidecar | If several `basename*.srt` exist, user can pick which track (not silent English/shortest-wins only) |
+| Empty honesty | No sidecar → control disabled or explicit “None,” not a dead affordance |
+| Memory | Remember last on/off (and preferred language when chosen) for the session or prefs |
+| Manual | Documented under Playback on the machii-labs manual |
+
+**Out of scope for 9:** burned-in OCR, embedded mov_text muxing UI, caption editing, generating `.srt` inside Skagway.
+
+**Success criterion.** With a multi-language sidecar set next to a clip, a user can show/hide captions and switch tracks in under two clicks (or one shortcut + menu), in every playback mode.
+
+#### 3. Importer / format confidence
+
+**Goal.** Users trust what Skagway will catalog vs play vs refuse — fewer ugly-file surprises. Not a 2014 importer rewrite.
+
+| Capability | Done when |
+|------------|-----------|
+| Clear contract | Documented / in-app story: catalogs (indexed), plays (AVFoundation), needs helper (optional ffmpeg path), open externally |
+| Scan honesty | Unsupported or dubious files don’t silently look “fine” then fail at play with no explanation |
+| Play failure | Actionable error (codec/container hint, Open in External Player when appropriate) — not a blank panel |
+| Evidence | Short matrix or Settings/help note covering common containers as actually behaved |
+
+**Out of scope for 9:** full ffmpeg decode pipeline in-process, watch folders, auto-transcode-on-import.
+
+**Success criterion.** A new user with a mixed folder can predict which clips will play in Skagway vs need external/re-encode, and a failed play always says why and what to do next.
+
+### Explicitly not required for impartial 9
+
+- Watch folders / auto-import
+- Auto-tagging (filename or vision)
+- Pre-Tahoe OS support
+- Built-in Notes field
+- Mac App Store / sandbox
+- Infuse-level codec coverage
+- Collection icons
+
+Those may raise supremacy or GTM tracks; they are **not** the 8.2 → 9 checklist.
+
+### How we’ll know we’re at 9
+
+Re-score on the **impartial** ruler only after all three workstreams meet their success criteria above. Organizer supremacy may already be ~9.9; leave that ladder alone when judging this bar.
+
+---
+
 ## Major Themes / Phases (High Level)
 
 ### Phase 0 — Foundations (complete)
@@ -74,77 +169,19 @@ Distribution stays Developer ID DMG. **No Mac App Store** — do not scope MAS/s
 ### Phase 2 — Power User & Organization Features
 - **Done (landed before 1.0, not a 1.0 blocker):** search beyond filename; exclude folders from Scan; Bulk Rename and other multi-select batch actions
 - **Reconnect (shipped in 1.3 tip):** Evidence Destinations, Ready / Needs attention / Unmatched, Undo (evolved from Repair Links / Location Relink)
-- **Still Phase 2 (not required for 1.0):** auto-import / watch folders; auto-tagging ideas (see `AI-IMPROVEMENTS.md` — filename heuristics first)
+- **Still Phase 2 (not required for 1.0 / not on the impartial-9 bar):** auto-import / watch folders; auto-tagging ideas (see `AI-IMPROVEMENTS.md` — filename heuristics first)
 - **Notes:** do **not** add a built-in notes field. Users who want one create a custom **Text** field (multiline). That type already sorts, filters, searches, and exports.
-- **In-player filmstrip (1.x signature playback — planned):** see design + implementation plan below
+- **In-player filmstrip (shipped on `main`, 1.3 tip):** horizontal strip above the scrubber; shared `controlsVisible` fade; Settings → Show filmstrip in player. Leave-point ghost playhead + Return chip. Design notes below for history.
 
-### In-player filmstrip — design & implementation plan
+### In-player filmstrip — design notes (shipped)
 
-**Goal.** Make “see the clip as frames” continuous from browse → play: Storyboard wall and Inspector filmstrip already teach frame thinking; the floating player should show a **horizontal frame strip above the scrubber** so the playhead sits under the sample you’re in. Differentiator vs Photos / QuickTime / most organizers that only expose a thin timeline.
+**Goal.** Make “see the clip as frames” continuous from browse → play: Storyboard wall and Inspector filmstrip already teach frame thinking; the floating player shows a **horizontal frame strip above the scrubber** so the playhead sits under the sample you’re in.
 
-**Non-negotiable chrome rule.** The strip is part of the **same transport chrome overlay** as today’s scrubber (`PlaybackTimelineBar` + play/pause cluster). It must:
+**Non-negotiable overlay rule.** The strip is part of the **same transport overlay** as the scrubber (`PlaybackTimelineBar`). It shares `controlsVisible`, fades with the scrubber, and counts toward the stay-up hit band. Picture stays clean when transport idles out.
 
-- Share the existing `controlsVisible` flag (Compact / Windowed via `FloatingPlayerPanel`; Fullscreen via `FullscreenTransportChromeView`)
-- **Fade in and fade out together** with the scrubber (same opacity / hit-testing / animation — do not invent a second idle timer or a always-on strip)
-- Count as part of the transport stay-up zone (hovering the strip keeps chrome visible, same as hovering the scrubber band today)
+**Shipped shape.** Track-aligned width; N from width for ~16:9 cells; dedicated player-strip bake; click seeks to bucket center; Compact uses a thinner strip; bookmark diamonds stay on the scrubber; ghost playhead + Return under leave point after a bookmark jump.
 
-Picture area stays clean when chrome idles out; the strip never becomes a permanent letterbox under the video.
-
-**Layout**
-
-```
-┌─────────────────────────────────────────┐
-│              video picture              │
-├─────────────────────────────────────────┤  ← transport chrome (fades as one unit)
-│  [f1][f2][f3] … [fN]   ◀ playhead mark  │  ← in-player filmstrip
-│  ──────●──────────────── scrubber ────  │  ← existing precise scrubber
-│  ▶  0:12 / 3:40   bookmark ticks …      │
-└─────────────────────────────────────────┘
-```
-
-- Strip sits **directly above** the scrubber inside the bottom chrome stack (not a separate panel, not Inspector reuse)
-- Full-width of the player content area; fixed strip height (short); do not steal Compact vertical budget without a thin mode
-- Bookmark diamonds stay on the scrubber track (not duplicated on every strip cell)
-
-**Density & samples**
-
-- Fixed **N frames across** the bar (target ~8–12; tune in implementation) — scales better than a full-resolution strip for long files
-- Prefer reusing / extending existing bake paths (`ThumbnailService` filmstrip or a dedicated 1×N player-strip cache) over live AVImageGenerator on every hover
-- Playhead indicator snaps to the **nearest sample** for orientation; do not claim frame-exact coverage unless denser samples exist
-- Optional later: denser strip for short clips; thinner/hidden strip in Compact
-
-**Interaction**
-
-| Control | Role |
-|--------|------|
-| Frame strip | Coarse navigation + spatial orientation; click (and optional drag) seeks to that sample’s time and keeps playing |
-| Scrubber | Precise seek (unchanged); hover frame preview stays |
-| Strip vs hover preview | Complementary — strip = always-visible map when chrome is up; hover = continuous scrubber peek |
-
-- Do **not** replace the scrubber with the strip
-- Do **not** auto-open Inspector Filmstrip when the player strip is visible
-- Keyboard / VO: strip cells need labels + adjustability consistent with the a11y P0 timeline work
-
-**Mode defaults (v1)**
-
-| Mode | Default |
-|------|---------|
-| Windowed | On |
-| Full screen | On |
-| Compact | On but **thin** (or Settings toggle off) — Compact already shares Inspector footprint; protect picture height |
-
-Setting: **Show filmstrip in player** (default on). No second idle preference.
-
-**Implementation plan (ordered)**
-
-1. **Chrome contract first** — Extend the bottom transport stack so strip + scrubber + transport icons are one view tree driven by a single `controlsVisible`. Verify fade, hit-testing, and idle stay-up in Compact, Windowed, and Fullscreen before polishing art.
-2. **Sample source** — Add or reuse a 1×N bake keyed by file path (+ duration epoch); coalesce generation with existing thumbnail/filmstrip gates; memory + disk cache.
-3. **Strip UI** — Horizontal cells, playhead marker synced to `playback` time (nearest sample), click → `seek(toSeconds:resumePlayback: true)`.
-4. **Idle / layout QA** — Confirm strip height is included in the transport stay-up hit band; no double-fade; no always-visible strip when chrome is hidden; Compact still usable.
-5. **Settings + manual** — Pref default on; document alongside scrubber (not as a separate “mode”).
-6. **Out of v1 scope** — Waveform, per-frame exact scrub from strip alone, Storyboard wall reuse as the player strip, replacing Inspector Filmstrip.
-
-**Success criteria.** In daily use, “where am I in this clip?” is answerable at a glance whenever transport chrome is visible, with zero extra chrome timers and no regression to scrubber precision or idle fade behavior.
+**Out of v1 scope (still).** Waveform, per-frame exact scrub from strip alone, Storyboard wall reuse as the player strip, replacing Inspector Filmstrip.
 
 ### Phase 3 — AI Augmentation (exploratory)
 - See `AI-IMPROVEMENTS.md`
@@ -168,7 +205,8 @@ Setting: **Show filmstrip in player** (default on). No second idle preference.
 - When starting a large body of work, check here first.
 - Update this file when major themes shift or new phases are defined.
 - Keep detailed task lists here (under the appropriate Phase) or in GitHub issues.
+- For impartial finish work, use **Path to impartial 9** above — not Phase 2 leftovers — as the checklist.
 
 ---
 
-*Last significant update: 2026-09-18 — documented in-player filmstrip (same fade chrome as scrubber); Reconnect noted as shipped in 1.3 tip.*
+*Last significant update: 2026-09-18 — Path to impartial 9 (a11y P0, captions first-class, format confidence); IPF marked shipped.*
