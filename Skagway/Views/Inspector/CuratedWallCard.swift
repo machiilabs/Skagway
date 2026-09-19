@@ -291,18 +291,35 @@ struct CuratedWallCard: View {
                     }
                 }
             case .storyboard:
-                if let cached = thumbnailService.loadStoryboard(for: video.filePath) {
+                // First paint must not decode `{hash}_storyboard.jpg`, bake from a filmstrip,
+                // or wait on the AV gate. `.task` runs before SwiftUI commits the first frame
+                // unless we await — Grid posters are small and sync-load; collage JPEGs are not.
+                if let cached = thumbnailService.residentStoryboard(for: video.filePath) {
                     thumbnail = cached
-                } else if let poster = thumbnailService.loadThumbnail(for: video.filePath) {
-                    // Fast first paint while the 2×3 collage builds.
+                } else if let poster = thumbnailService.residentThumbnail(for: video.filePath)
+                            ?? thumbnailService.loadThumbnail(for: video.filePath) {
                     thumbnail = poster
                 }
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+
+                let path = video.filePath
+                let service = thumbnailService
+                let (collage, complete) = await Task.detached(priority: .userInitiated) {
+                    service.storyboardDisplayCache(for: path)
+                }.value
+                guard !Task.isCancelled else { return }
+                if let collage {
+                    thumbnail = collage
+                }
+                guard !complete else { return }
+
                 detailUpgradeTask = Task {
                     do {
-                        let collage = try await thumbnailService.generateStoryboard(for: video)
+                        let image = try await service.generateStoryboard(for: video)
                         guard !Task.isCancelled else { return }
                         await MainActor.run {
-                            self.thumbnail = collage
+                            self.thumbnail = image
                         }
                     } catch {
                         // Leave poster/placeholder; avoid noisy errors while scrolling.

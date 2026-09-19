@@ -438,6 +438,44 @@ final class ThumbnailService: @unchecked Sendable {
         return image
     }
 
+    /// Memory-only poster. No disk I/O — used for an instant Storyboard first paint.
+    func residentThumbnail(for filePath: String) -> NSImage? {
+        memoryCache.object(forKey: filePath as NSString)
+    }
+
+    /// Memory-only Wall collage (valid composite size). No disk I/O.
+    func residentStoryboard(for filePath: String) -> NSImage? {
+        let memKey = storyboardMemoryKey(for: filePath)
+        guard let cached = memoryCache.object(forKey: memKey), Self.isValidStoryboardImage(cached) else {
+            return nil
+        }
+        return cached
+    }
+
+    /// Valid-size collage from memory or disk. Does **not** require a times sidecar — first paint
+    /// can show a cached JPEG while `generateStoryboard` rebakes the click-to-play contract.
+    /// Incomplete (no times) images are not written into the memory cache.
+    func peekStoryboardImage(for filePath: String) -> NSImage? {
+        if let resident = residentStoryboard(for: filePath) { return resident }
+        let url = storyboardURL(for: filePath)
+        guard FileManager.default.fileExists(atPath: url.path),
+              let image = NSImage(contentsOf: url),
+              Self.isValidStoryboardImage(image)
+        else { return nil }
+        if loadStoryboardCellTimes(for: filePath) != nil {
+            memoryCache.setObject(image, forKey: storyboardMemoryKey(for: filePath))
+        }
+        return image
+    }
+
+    /// Display cache for Storyboard cards: image for first paint, plus whether click-to-play
+    /// (JPEG + times) is already complete so the card can skip `generateStoryboard`.
+    func storyboardDisplayCache(for filePath: String) -> (image: NSImage?, isComplete: Bool) {
+        let image = peekStoryboardImage(for: filePath)
+        let complete = image != nil && loadStoryboardCellTimes(for: filePath) != nil
+        return (image, complete)
+    }
+
     /// Sync load of the Wall storyboard collage (memory → disk). Never waits on AV.
     /// Rejects legacy small composites and collages without a matching cell-times sidecar so
     /// Storyboard View regenerates with the click-to-play time contract.
@@ -1146,7 +1184,23 @@ final class ThumbnailService: @unchecked Sendable {
     /// plus a sidecar of the six sample times used for those pixels (click-to-play contract).
     /// Prefers baking evenly spaced cells from an existing filmstrip when it has ≥6 frames; otherwise
     /// samples six frames evenly across the timeline (same gate/coalesce pattern as filmstrips).
+    ///
+    /// Cheap memory hits stay on the caller. Disk decode, filmstrip bake/`lockFocus`, JPEG encode,
+    /// and AV sampling hop off the main actor so Storyboard View can paint posters first.
     func generateStoryboard(for video: Video) async throws -> NSImage {
+        let memKey = storyboardMemoryKey(for: video.filePath)
+        if let cached = memoryCache.object(forKey: memKey),
+           Self.isValidStoryboardImage(cached),
+           loadStoryboardCellTimes(for: video.filePath) != nil
+        {
+            return cached
+        }
+        return try await Task.detached(priority: .utility) { [video] in
+            try await self.generateStoryboardUncached(for: video)
+        }.value
+    }
+
+    private func generateStoryboardUncached(for video: Video) async throws -> NSImage {
         let memKey = storyboardMemoryKey(for: video.filePath)
         if let cached = memoryCache.object(forKey: memKey),
            Self.isValidStoryboardImage(cached),
@@ -1164,14 +1218,8 @@ final class ThumbnailService: @unchecked Sendable {
             return image
         }
 
-        if let duration = video.duration, duration > 0,
-           let filmstrip = loadFilmstrip(for: video.filePath),
-           let baked = bakeStoryboard(fromFilmstrip: filmstrip, duration: duration)
-        {
-            try storeStoryboard(baked.image, cellTimes: baked.cellTimes, for: video.filePath)
-            return baked.image
-        }
-
+        // Cache miss: coalesce + generation gate (filmstrip bake or AV). Do not bake here
+        // on the caller's actor — that was stalling Storyboard first paint.
         return try await coalescedStoryboard(for: video)
     }
 

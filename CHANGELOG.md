@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Storyboard launch** — Opening in Storyboard View no longer waits on collage bake, `{hash}_storyboard.jpg` decode, filmstrip reuse, or the AV gate before first paint. Cards show a cached collage or the poster immediately; missing collages generate off the main actor after the first frame.
 - **Copy** — User-facing chrome uses “video / videos” (collection pill “N videos collected”, Inspector captions, Reconnect banners/sheet, File menu help, player missing-file hint).
 - **Collected-set pill** — “N clips collected” chip is black-on-orange, matching the batch Inspector title bar (filter pills unchanged).
 - **In-player filmstrip scrub** — Dragging or tracking the strip seeks linearly from pointer x (same mapping as the scrubber), not to each cell’s baked/center frame time. The scrubber hover-preview popup uses one zone covering filmstrip + scrubber.

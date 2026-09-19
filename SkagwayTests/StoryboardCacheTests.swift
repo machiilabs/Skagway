@@ -133,6 +133,55 @@ final class StoryboardCacheTests: XCTestCase {
         XCTAssertNil(service.loadStoryboard(for: path))
     }
 
+    func testPeekStoryboardShowsValidCollageWithoutTimesForFirstPaint() throws {
+        let path = "/Volumes/Media/Shows/clip-peek.mp4"
+        let collage = NSImage(size: ThumbnailService.storyboardCompositeSize)
+        collage.lockFocus()
+        NSColor.darkGray.setFill()
+        NSRect(origin: .zero, size: collage.size).fill()
+        collage.unlockFocus()
+        guard let tiff = collage.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.8])
+        else {
+            return XCTFail("Failed to encode peek collage")
+        }
+        try jpeg.write(to: service.storyboardURL(for: path))
+
+        XCTAssertNil(service.residentStoryboard(for: path))
+        XCTAssertNil(service.loadStoryboard(for: path))
+        let peeked = service.peekStoryboardImage(for: path)
+        XCTAssertNotNil(peeked)
+        XCTAssertTrue(ThumbnailService.isValidStoryboardImage(peeked!))
+        let cache = service.storyboardDisplayCache(for: path)
+        XCTAssertNotNil(cache.image)
+        XCTAssertFalse(cache.isComplete, "times sidecar missing — still generate in background")
+    }
+
+    func testStoryboardDisplayCacheCompleteWhenJPEGAndTimesExist() throws {
+        let path = "/Volumes/Media/Shows/clip-complete.mp4"
+        let collage = NSImage(size: ThumbnailService.storyboardCompositeSize)
+        collage.lockFocus()
+        NSColor.orange.setFill()
+        NSRect(origin: .zero, size: collage.size).fill()
+        collage.unlockFocus()
+        guard let tiff = collage.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.8])
+        else {
+            return XCTFail("Failed to encode complete collage")
+        }
+        try jpeg.write(to: service.storyboardURL(for: path))
+        let payload: [String: Any] = ["version": 1, "seconds": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]]
+        try JSONSerialization.data(withJSONObject: payload).write(to: service.storyboardTimesURL(for: path))
+
+        let cache = service.storyboardDisplayCache(for: path)
+        XCTAssertNotNil(cache.image)
+        XCTAssertTrue(cache.isComplete)
+        XCTAssertNotNil(service.residentStoryboard(for: path), "complete peek should warm memory")
+        XCTAssertNotNil(service.loadStoryboard(for: path))
+    }
+
     func testStoryboardClickSecondsUsesStoredCellTimesNotEvenSplit() throws {
         let path = "/Volumes/Media/Shows/clip-times.mp4"
         let cell = ThumbnailService.filmstripCellSize
