@@ -55,7 +55,7 @@ struct ActiveFilterPills: View {
     private static let batchChromeLabel = Color(red: 10 / 255, green: 15 / 255, blue: 26 / 255)
 
     private var collectedSetPill: some View {
-        let label = collectedCount == 1 ? "1 clip collected" : "\(collectedCount) clips collected"
+        let label = collectedCount == 1 ? "1 video collected" : "\(collectedCount) videos collected"
         return HStack(spacing: 4) {
             Button {
                 viewModel.revealInspectorForCollectedSet()

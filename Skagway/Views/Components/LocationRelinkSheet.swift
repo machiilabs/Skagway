@@ -62,7 +62,7 @@ struct LocationRelinkSheet: View {
 
     private var destinationsBody: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Add folders where missing clips landed. Skagway matches by filename (and soft size) only under folders you choose — nothing is rewritten until you confirm.")
+            Text("Add folders where missing videos landed. Skagway matches by filename (and soft size) only under folders you choose — nothing is rewritten until you confirm.")
                 .font(.callout)
                 .foregroundStyle(Color.appTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -102,7 +102,7 @@ struct LocationRelinkSheet: View {
                     )
                 }
             } else if destinationIndexes.isEmpty {
-                Text("No destinations yet — add at least one folder that contains moved clips.")
+                Text("No destinations yet — add at least one folder that contains moved videos.")
                     .foregroundStyle(Color.appTextSecondary)
             }
         }
@@ -209,7 +209,7 @@ struct LocationRelinkSheet: View {
             if isApplying {
                 relinkProgressSection
             } else {
-                Text("\(reconnectableCount) clip\(reconnectableCount == 1 ? "" : "s") will be reconnected.")
+                Text("\(reconnectableCount) video\(reconnectableCount == 1 ? "" : "s") will be reconnected.")
                     .font(.subheadline.weight(.medium))
             }
         }
@@ -243,7 +243,7 @@ struct LocationRelinkSheet: View {
     private var doneStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(
-                "Reconnected \(appliedCount) clip\(appliedCount == 1 ? "" : "s").",
+                "Reconnected \(appliedCount) video\(appliedCount == 1 ? "" : "s").",
                 systemImage: "checkmark.circle.fill"
             )
             .font(.title3.weight(.semibold))

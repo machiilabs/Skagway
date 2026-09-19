@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Copy** — User-facing chrome uses “video / videos” (collection pill “N videos collected”, Inspector captions, Reconnect banners/sheet, File menu help, player missing-file hint).
 - **Collected-set pill** — “N clips collected” chip is black-on-orange, matching the batch Inspector title bar (filter pills unchanged).
 - **In-player filmstrip scrub** — Dragging or tracking the strip seeks linearly from pointer x (same mapping as the scrubber), not to each cell’s baked/center frame time. The scrubber hover-preview popup uses one zone covering filmstrip + scrubber.
 - **In-player filmstrip (IPF)** — Horizontal frame strip above the scrubber in Compact / Windowed / Full screen; shares the transport chrome fade (`controlsVisible`). Strip spans the same width as the scrubber track; frame count is chosen from that width so cells stay ~16:9 (dedicated bake, not the Inspector filmstrip). Playhead highlight follows scrubber time. Settings → Video → Show filmstrip in player (default on; thinner in Compact).

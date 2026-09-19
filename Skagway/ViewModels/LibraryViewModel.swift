@@ -1064,7 +1064,7 @@ final class LibraryViewModel {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.message = "Select a folder that contains some of the missing clips"
+        panel.message = "Select a folder that contains some of the missing videos"
         panel.prompt = "Add Destination"
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         return LocationRelink.normalizeRoot(url.path)
@@ -1166,7 +1166,7 @@ final class LibraryViewModel {
             return (id, m.newPath)
         }
         guard dbMappings.count == mappings.count else {
-            reportTransientError("Couldn't reconnect — some clips are missing a library id")
+            reportTransientError("Couldn't reconnect — some videos are missing a library id")
             return 0
         }
 
@@ -1367,7 +1367,7 @@ final class LibraryViewModel {
         )
         await Task.yield()
 
-        let text = "Reconnected \(mappings.count) clip\(mappings.count == 1 ? "" : "s")"
+        let text = "Reconnected \(mappings.count) video\(mappings.count == 1 ? "" : "s")"
         scanProgress = text
         showRepairLinksBannerFromMissingClick = false
         repairLinksBannerPreferredRoot = nil
@@ -1450,7 +1450,7 @@ final class LibraryViewModel {
         locationRelinkUndo = nil
         recomputeFilteredVideos()
         await refreshMissingCount()
-        let text = "Undid reconnect (\(count) clip\(count == 1 ? "" : "s"))"
+        let text = "Undid reconnect (\(count) video\(count == 1 ? "" : "s"))"
         scanProgress = text
         Task {
             try? await Task.sleep(for: .seconds(5))

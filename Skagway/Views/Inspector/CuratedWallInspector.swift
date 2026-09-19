@@ -381,7 +381,7 @@ struct CuratedWallInspector: View {
                     .fill(isBatch ? Self.inspectorBatchBarFill : Self.inspectorSingleBarFill)
             )
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(isBatch ? "Batch inspect, \(collectedSetCount) videos" : "Single clip inspect")
+            .accessibilityLabel(isBatch ? "Batch inspect, \(collectedSetCount) videos" : "Single video inspect")
     }
 
     private func titleAndActions(for v: Video) -> some View {
@@ -1028,12 +1028,12 @@ struct CuratedWallInspector: View {
     private var tagActionTargetCaption: String {
         if viewModel.inspectorIsSetMode {
             let n = collectedSetCount
-            return n == 1 ? "Tagging collected clip" : "Tagging \(n) collected clips"
+            return n == 1 ? "Tagging collected video" : "Tagging \(n) collected videos"
         }
         if let v = video {
             return "Tagging \"\(v.displayTitle)\""
         }
-        return "Tagging selected clip"
+        return "Tagging selected video"
     }
 
     /// Snapshot inspector targets synchronously — async re-reads could retarget after focus changes.

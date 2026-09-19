@@ -144,7 +144,7 @@ enum LocationRelink {
         var sources: Set<OldRootSource>
 
         var subtitle: String {
-            var parts: [String] = ["\(videoCount) clip\(videoCount == 1 ? "" : "s")"]
+            var parts: [String] = ["\(videoCount) video\(videoCount == 1 ? "" : "s")"]
             if sources.contains(.dataSource) { parts.append("Data Source") }
             return parts.joined(separator: " · ")
         }
@@ -343,7 +343,7 @@ enum LocationRelink {
             if !fileExists(dest) {
                 kind = .stillMissing
             } else if reservedNew.contains(destNorm), destNorm.caseInsensitiveCompare(normalizeRoot(video.filePath)) != .orderedSame {
-                kind = .needsAttention(reason: "Another library clip already uses this path")
+                kind = .needsAttention(reason: "Another library video already uses this path")
                 found = fileSize(dest)
             } else {
                 found = fileSize(dest)
@@ -527,7 +527,7 @@ enum LocationRelink {
         case .parentGone(let folderName):
             return BannerCopy(
                 title: "Folder moved or missing",
-                body: "Clips that lived under “\(folderName)” can’t be found. Point Skagway at that folder’s new location.",
+                body: "Videos that lived under “\(folderName)” can’t be found. Point Skagway at that folder’s new location.",
                 cta: "Reconnect…",
                 icon: "folder.badge.questionmark"
             )
@@ -535,20 +535,20 @@ enum LocationRelink {
             let n = max(missingCount, 1)
             let body: String
             if n == 1 {
-                body = "1 clip is missing. Locate where it moved."
+                body = "1 video is missing. Locate where it moved."
             } else {
-                body = "\(n) clips are missing. Locate where they moved."
+                body = "\(n) videos are missing. Locate where they moved."
             }
             return BannerCopy(
-                title: "Some clips are missing",
+                title: "Some videos are missing",
                 body: body,
                 cta: "Reconnect…",
                 icon: "doc.badge.ellipsis"
             )
         case .scattered:
             return BannerCopy(
-                title: "Clips moved to different places",
-                body: "Missing clips don’t share one new folder. Add destinations where they landed, then review matches.",
+                title: "Videos moved to different places",
+                body: "Missing videos don’t share one new folder. Add destinations where they landed, then review matches.",
                 cta: "Reconnect…",
                 icon: "folder.badge.gearshape"
             )
@@ -558,7 +558,7 @@ enum LocationRelink {
     /// Placeholder while the full-library missing scan is still running.
     static var bannerCopyChecking: BannerCopy {
         BannerCopy(
-            title: "Some clips are missing",
+            title: "Some videos are missing",
             body: "Checking…",
             cta: "Reconnect…",
             icon: "doc.badge.ellipsis"
@@ -734,7 +734,7 @@ enum LocationRelink {
                 if reservedNew.contains(destNorm),
                    destNorm.caseInsensitiveCompare(oldNorm) != .orderedSame
                 {
-                    kind = .needsAttention(reason: "Another library clip already uses this path")
+                    kind = .needsAttention(reason: "Another library video already uses this path")
                 } else if let found, video.fileSize > 0, found != video.fileSize {
                     kind = .needsAttention(
                         reason: "File size differs (library \(video.fileSize), disk \(found))"

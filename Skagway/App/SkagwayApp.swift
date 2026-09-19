@@ -351,7 +351,7 @@ struct SkagwayApp: App {
                 .disabled(!appState.hasLibrary
                     || (appState.libraryViewModel?.videos.isEmpty ?? true)
                     || (appState.libraryViewModel?.isApplyingLocationRelink ?? false))
-                .help("Reconnect missing clips after a folder move or scattered remount")
+                .help("Reconnect missing videos after a folder move or scattered remount")
             }
             CommandGroup(replacing: .importExport) {
                 Button("Play in External Player") {

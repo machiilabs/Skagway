@@ -301,20 +301,20 @@ final class LocationRelinkTests: XCTestCase {
             XCTFail("expected parentPresent, got \(situation)")
         }
         let copy = LocationRelink.bannerCopy(for: situation)
-        XCTAssertEqual(copy.title, "Some clips are missing")
-        XCTAssertTrue(copy.body.hasPrefix("3 clips are missing"))
+        XCTAssertEqual(copy.title, "Some videos are missing")
+        XCTAssertTrue(copy.body.hasPrefix("3 videos are missing"))
         XCTAssertFalse(copy.body.contains("from this folder"))
         XCTAssertEqual(copy.cta, "Reconnect…")
         XCTAssertEqual(copy.icon, "doc.badge.ellipsis")
 
         let single = LocationRelink.bannerCopy(for: .parentPresent(missingCount: 1))
-        XCTAssertTrue(single.body.hasPrefix("1 clip is missing"))
-        XCTAssertFalse(single.body.contains("1 clips"))
+        XCTAssertTrue(single.body.hasPrefix("1 video is missing"))
+        XCTAssertFalse(single.body.contains("1 videos"))
     }
 
     func testBannerCopyCheckingPlaceholder() {
         let copy = LocationRelink.bannerCopyChecking
-        XCTAssertEqual(copy.title, "Some clips are missing")
+        XCTAssertEqual(copy.title, "Some videos are missing")
         XCTAssertEqual(copy.body, "Checking…")
         XCTAssertEqual(copy.cta, "Reconnect…")
     }
@@ -329,7 +329,7 @@ final class LocationRelinkTests: XCTestCase {
         )
         XCTAssertEqual(situation, .scattered)
         let copy = LocationRelink.bannerCopy(for: situation)
-        XCTAssertEqual(copy.title, "Clips moved to different places")
+        XCTAssertEqual(copy.title, "Videos moved to different places")
         XCTAssertEqual(copy.cta, "Reconnect…")
         XCTAssertEqual(copy.icon, "folder.badge.gearshape")
     }

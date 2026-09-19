@@ -140,7 +140,7 @@ struct OverlayInlinePlayerView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 280)
                 if missingOnDisk {
-                    Text("File missing — reconnect if you moved the folder or clips.")
+                    Text("File missing — reconnect if you moved the folder or videos.")
                         .font(.caption)
                         .foregroundStyle(Color.appTextSecondary)
                         .multilineTextAlignment(.center)
