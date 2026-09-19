@@ -49,6 +49,11 @@ struct ActiveFilterPills: View {
         }
     }
 
+    /// Same fill as `CuratedWallInspector.inspectorBatchBarFill` (fixed; not appearance-adaptive).
+    private static let batchChromeFill = Color(red: 251 / 255, green: 146 / 255, blue: 60 / 255)
+    /// Same label as `CuratedWallInspector.inspectorModeBarText`.
+    private static let batchChromeLabel = Color(red: 10 / 255, green: 15 / 255, blue: 26 / 255)
+
     private var collectedSetPill: some View {
         let label = collectedCount == 1 ? "1 clip collected" : "\(collectedCount) clips collected"
         return HStack(spacing: 4) {
@@ -64,7 +69,7 @@ struct ActiveFilterPills: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Color.appAccent)
+            .foregroundStyle(Self.batchChromeLabel)
             .help("Inspect collected set — show Inspector in batch mode")
 
             Button {
@@ -72,7 +77,7 @@ struct ActiveFilterPills: View {
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.caption2)
-                    .foregroundStyle(Color.appTextTertiary)
+                    .foregroundStyle(Self.batchChromeLabel.opacity(0.72))
             }
             .buttonStyle(.plain)
             .help("Clear collection (⌘⇧A)")
@@ -81,10 +86,7 @@ struct ActiveFilterPills: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(
-            Capsule().fill(Color.appAccent.opacity(0.18))
-        )
-        .overlay(
-            Capsule().stroke(Color.appAccent.opacity(0.45), lineWidth: 1)
+            Capsule().fill(Self.batchChromeFill)
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(label). Show Inspector for the collected set. Clear collection, ⌘⇧A.")

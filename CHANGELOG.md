@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Collected-set pill** — “N clips collected” chip is black-on-orange, matching the batch Inspector title bar (filter pills unchanged).
 - **In-player filmstrip (IPF)** — Horizontal frame strip above the scrubber in Compact / Windowed / Full screen; shares the transport chrome fade (`controlsVisible`). Strip spans the same width as the scrubber track; frame count is chosen from that width so cells stay ~16:9 (dedicated bake, not the Inspector filmstrip). Click a frame to seek; playhead highlight follows scrubber time. Settings → Video → Show filmstrip in player (default on; thinner in Compact).
 - **Scrubber bookmark hover** — Frame preview stays visible alongside the bookmark title chip (no longer suppressed).
 - **Scrubber bookmark context menu** — Right-click a diamond for Rename Bookmark… (alert with Name / Cancel / Save) or Delete Bookmark. Inspector list updates when renamed from the player.
