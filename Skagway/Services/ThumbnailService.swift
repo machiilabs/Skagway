@@ -1123,7 +1123,7 @@ final class ThumbnailService: @unchecked Sendable {
         return compositeImage
     }
 
-    /// Click → sample seconds for the IPF cell under the pointer.
+    /// Cell-center sample under a strip point (VoiceOver step / bake sidecar). Pointer scrub is linear.
     func playerStripClickSeconds(
         at location: CGPoint,
         size: CGSize,

@@ -43,6 +43,12 @@ struct PlaybackTimelineBar: View {
     private var stripHeight: CGFloat {
         viewModel.isPlayerCompactMode ? Self.filmstripStripHeightThin : Self.filmstripStripHeight
     }
+    /// Strip is reserved only while a current video is playing (same gate as the strip view).
+    private var showingStrip: Bool { showFilmstrip && playback.currentVideo != nil }
+    /// Filmstrip + scrubber hit area (one pointer zone). Transport sits below.
+    private var timelineStackHeight: CGFloat {
+        (showingStrip ? stripHeight : 0) + Self.scrubHitHeight
+    }
     private var totalHeight: CGFloat {
         Self.barHeight(showFilmstrip: showFilmstrip, thinFilmstrip: viewModel.isPlayerCompactMode)
     }
@@ -68,7 +74,7 @@ struct PlaybackTimelineBar: View {
     /// Bookmark under the pointer (same AppKit hover path as scrub preview — system tooltips lose here).
     @State private var hoverBookmarkTitle: String?
     @State private var hoverBookmarkFraction: CGFloat?
-    /// Track frame in the bar’s coordinate space (for preview placement above the scrubber).
+    /// Filmstrip+scrubber column in the bar’s coordinate space (preview x + return-chip y).
     @State private var trackFrame: CGRect = .zero
     /// Bookmark being renamed from the diamond context menu.
     @State private var renameBookmarkTarget: VideoBookmark?
@@ -89,42 +95,34 @@ struct PlaybackTimelineBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Filmstrip shares the scrubber track’s horizontal span (between time labels).
-            if showFilmstrip, let video = playback.currentVideo {
-                HStack(spacing: 10) {
-                    Color.clear
-                        .frame(width: Self.timeColumnWidth)
-                    InPlayerFilmstripStrip(
-                        viewModel: viewModel,
-                        video: video,
-                        stripHeight: stripHeight
-                    )
-                    .frame(maxWidth: .infinity)
-                    .frame(height: stripHeight)
-                    Color.clear
-                        .frame(width: Self.timeColumnWidth)
-                }
-                .padding(.horizontal, 12)
-            }
-
-            // Full-width scrubber — only elapsed/duration flank the track (no skip/speed here).
+            // Filmstrip + scrubber share width and one pointer zone (linear scrub + hover preview).
             HStack(spacing: 10) {
-                Text(displaySeconds.formattedDuration)
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
-                    .foregroundStyle(Color.appTextSecondary)
-                    .frame(width: Self.timeColumnWidth, alignment: .trailing)
+                VStack(spacing: 0) {
+                    if showingStrip {
+                        Color.clear.frame(height: stripHeight)
+                    }
+                    Text(displaySeconds.formattedDuration)
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(Color.appTextSecondary)
+                        .frame(width: Self.timeColumnWidth, height: Self.scrubHitHeight, alignment: .trailing)
+                }
+                .frame(width: Self.timeColumnWidth)
 
-                timelineTrack
-                    .frame(maxWidth: .infinity)
-                    .frame(height: Self.scrubHitHeight)
+                timelineInteractiveColumn
 
-                Text(duration > 0 ? duration.formattedDuration : "–:––")
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
-                    .foregroundStyle(Color.appTextSecondary)
-                    .frame(width: Self.timeColumnWidth, alignment: .leading)
+                VStack(spacing: 0) {
+                    if showingStrip {
+                        Color.clear.frame(height: stripHeight)
+                    }
+                    Text(duration > 0 ? duration.formattedDuration : "–:––")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(Color.appTextSecondary)
+                        .frame(width: Self.timeColumnWidth, height: Self.scrubHitHeight, alignment: .leading)
+                }
+                .frame(width: Self.timeColumnWidth)
             }
             .padding(.horizontal, 12)
-            .frame(height: Self.scrubHitHeight)
+            .frame(height: timelineStackHeight)
 
             // Play / skip / speed / volume sit *below* the track so they never compress it horizontally.
             // Leading cluster is priority; trailing flexible space clears FloatingPlayerPanel size/close
@@ -385,54 +383,32 @@ struct PlaybackTimelineBar: View {
         return min(max(x, minX), max(minX, maxX))
     }
 
-    private var timelineTrack: some View {
+    /// Filmstrip (optional) stacked on the scrubber track. One GeometryReader so pointer x
+    /// maps to time the same way on both, and hover preview is a single enter/exit zone.
+    private var timelineInteractiveColumn: some View {
         GeometryReader { geo in
             let width = max(geo.size.width, 1)
-            let progress = duration > 0 ? min(max(displaySeconds / duration, 0), 1) : 0
-            let playheadX = progress * width
-            // Keep the thin track near the bottom of the hit area so transport/chrome sit close under it.
             let trackY = geo.size.height - Self.trackCenterYFromBottom
-            let ghostX: CGFloat? = {
-                guard let returnSeconds = playback.returnPointSeconds, duration > 0 else { return nil }
-                let fraction = min(max(returnSeconds / duration, 0), 1)
-                return fraction * width
-            }()
 
-            ZStack(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.clear)
-
-                Capsule()
-                    .fill(Color.white.opacity(0.22))
-                    .frame(height: 4)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, Self.trackCenterYFromBottom - 2)
-
-                Capsule()
-                    .fill(Color.appAccent)
-                    .frame(width: max(playheadX, 0), height: 4)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .padding(.bottom, Self.trackCenterYFromBottom - 2)
-
-                // Ghost playhead: leave point when jumping via bookmark (same size as live head).
-                if let ghostX {
-                    Circle()
-                        .fill(Color(nsColor: .systemGray))
-                        .frame(width: 12, height: 12)
-                        .position(x: ghostX, y: trackY)
-                        .allowsHitTesting(false)
+            VStack(spacing: 0) {
+                if showingStrip, let video = playback.currentVideo {
+                    InPlayerFilmstripStrip(
+                        viewModel: viewModel,
+                        video: video,
+                        stripHeight: stripHeight
+                    )
+                    .frame(width: width, height: stripHeight)
+                    .allowsHitTesting(false)
                 }
 
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 12, height: 12)
-                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                    .position(x: playheadX, y: trackY)
+                trackVisuals(width: width)
+                    .frame(width: width, height: Self.scrubHitHeight)
+                    .allowsHitTesting(false)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: width, height: geo.size.height)
             .contentShape(Rectangle())
             .help("Click to seek · Double-click to bookmark at pointer")
-            // Single-click/drag seeks; double-click bookmarks at the same pointer (playhead restored).
+            // Single-click/drag seeks across strip + track; double-click bookmarks at pointer.
             .gesture(scrubGesture(trackWidth: width))
             .simultaneousGesture(
                 SpatialTapGesture(count: 2, coordinateSpace: .local)
@@ -465,6 +441,54 @@ struct PlaybackTimelineBar: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity)
+        .frame(height: timelineStackHeight)
+    }
+
+    @ViewBuilder
+    private func trackVisuals(width: CGFloat) -> some View {
+        let progress = duration > 0 ? min(max(displaySeconds / duration, 0), 1) : 0
+        let playheadX = progress * width
+        // Keep the thin track near the bottom of the hit area so transport/chrome sit close under it.
+        let trackY = Self.scrubHitHeight - Self.trackCenterYFromBottom
+        let ghostX: CGFloat? = {
+            guard let returnSeconds = playback.returnPointSeconds, duration > 0 else { return nil }
+            let fraction = min(max(returnSeconds / duration, 0), 1)
+            return fraction * width
+        }()
+
+        ZStack(alignment: .leading) {
+            Rectangle()
+                .fill(Color.clear)
+
+            Capsule()
+                .fill(Color.white.opacity(0.22))
+                .frame(height: 4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, Self.trackCenterYFromBottom - 2)
+
+            Capsule()
+                .fill(Color.appAccent)
+                .frame(width: max(playheadX, 0), height: 4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(.bottom, Self.trackCenterYFromBottom - 2)
+
+            // Ghost playhead: leave point when jumping via bookmark (same size as live head).
+            if let ghostX {
+                Circle()
+                    .fill(Color(nsColor: .systemGray))
+                    .frame(width: 12, height: 12)
+                    .position(x: ghostX, y: trackY)
+                    .allowsHitTesting(false)
+            }
+
+            Circle()
+                .fill(Color.white)
+                .frame(width: 12, height: 12)
+                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                .position(x: playheadX, y: trackY)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// Double-click where a single click would seek → bookmark at pointer, leave playhead where it was.

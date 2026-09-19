@@ -7,6 +7,9 @@ import SwiftUI
 ///
 /// Spans the **same width as the scrubber track**. Frame count N is chosen from that width so
 /// each cell stays ~16:9 (dedicated bake — not the Inspector filmstrip).
+///
+/// Pointer seek and hover preview live on `PlaybackTimelineBar` (one zone with the scrubber):
+/// x maps linearly to time. This view is display + VoiceOver step-by-frame only.
 struct InPlayerFilmstripStrip: View {
     @Bindable var viewModel: LibraryViewModel
     let video: Video
@@ -70,21 +73,10 @@ struct InPlayerFilmstripStrip: View {
                 .frame(width: width, height: stripHeight)
             }
             .frame(width: width, height: stripHeight)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onEnded { value in
-                        seek(
-                            at: value.location,
-                            size: CGSize(width: width, height: stripHeight),
-                            frameCount: frameCount
-                        )
-                    }
-            )
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Filmstrip")
             .accessibilityValue(accessibilityPlayheadLabel)
-            .accessibilityHint("Click a frame to seek")
+            .accessibilityHint("Scrub to seek, or adjust to step by frame")
             .accessibilityAdjustableAction { direction in
                 guard !cellTimes.isEmpty else { return }
                 let next: Int
@@ -120,17 +112,6 @@ struct InPlayerFilmstripStrip: View {
     private var accessibilityPlayheadLabel: String {
         guard !cellTimes.isEmpty, playheadIndex < cellTimes.count else { return "Loading" }
         return "Near \(cellTimes[playheadIndex].formattedDuration)"
-    }
-
-    private func seek(at location: CGPoint, size: CGSize, frameCount: Int) {
-        let seconds = viewModel.thumbnailService.playerStripClickSeconds(
-            at: location,
-            size: size,
-            filePath: video.filePath,
-            duration: video.duration ?? playback.durationSeconds,
-            frameCount: frameCount
-        )
-        playback.seek(toSeconds: seconds, resumePlayback: true)
     }
 
     private func scheduleLoad(frameCount n: Int) {
