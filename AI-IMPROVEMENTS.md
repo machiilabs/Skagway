@@ -31,8 +31,8 @@ AI would translate to `CollectionRule` attributes and values.
 
 ### 4. Video Notes / Descriptions
 
-There is no built-in notes field; users who want one add a custom **Text** field. AI could:
-- Suggest text for that field from filenames and metadata
+Notes / descriptions are **already won** via custom **Text** fields (users can create one named “Notes”). Do not add a built-in Notes column. AI could:
+- Suggest text for that custom field from filenames and metadata
 - Summarize content from thumbnails or keyframes
 - Use that custom text in search and collections (already supported for custom fields)
 

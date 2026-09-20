@@ -73,7 +73,7 @@
 - **Do not** style the public studio brand as “Machii” (one word) — always **Mach II**
 - **Before ship:** light USPTO / handle pass on Skagway
 
-**Distribution (locked):** Direct download via **Developer ID + notarized DMG**. **Not the Mac App Store** — no MAS/sandbox variant is planned. App is unsandboxed ([`Skagway.entitlements`](../Skagway/Skagway.entitlements)) so it can browse arbitrary folders and optionally use ffmpeg. Keep ffmpeg as the re-encode engine (no AVFoundation-only replacement as the sole path).
+**Distribution (locked, will-not-do MAS):** Direct download via **Developer ID + notarized DMG** + Sparkle. **Mac App Store is a never** — sandboxing would break arbitrary folders + optional ffmpeg. App stays unsandboxed ([`Skagway.entitlements`](../Skagway/Skagway.entitlements)). Keep ffmpeg as the re-encode engine (no AVFoundation-only replacement as the sole path).
 
 Defaults:
 - **Studio domain:** `machiilabs.com` (Cloudflare DNS/nameservers) — sole public web presence
@@ -350,11 +350,10 @@ Priority polish that makes “best” believable:
 1. **v1.0 readiness** — formal 10k+ perf pass, feature audit vs ROADMAP, security pass on filesystem/ffmpeg paths ([`ROADMAP.md`](../ROADMAP.md))
 2. **Zero papercuts** — import/scan reliability, Missing/Corrupt/Duplicates workflows, selection/playback edge cases, keyboard completeness
 3. **Auto-import from Data Sources** — watch folders stay fresh without manual Scan (roadmap gap)
-4. **Notes field** — searchable, filterable, exportable
-5. **Richer search** — beyond filename FTS5: tags, notes, custom fields, path (even before full semantic AI)
-6. **Batch power** — multi-select operations feel inevitable, not bolted on
-7. **Library/cache on encrypted volumes** — document Choose Folder… (Part D); no in-app Library Lock
-8. **User manual** — [machiilabs.com/skagway/manual](https://machiilabs.com/skagway/manual) (source: `machii-labs/src/app/skagway/manual/`). Catch up to 0.80; do not write a second guide in this repo.
+4. **Richer search** — beyond filename FTS5: tags, custom fields (including a user-created “Notes”), path (even before full semantic AI)
+5. **Batch power** — multi-select operations feel inevitable, not bolted on
+6. **Library/cache on encrypted volumes** — document Choose Folder… (Part D); no in-app Library Lock
+7. **User manual** — [machiilabs.com/skagway/manual](https://machiilabs.com/skagway/manual) (source: `machii-labs/src/app/skagway/manual/`). Catch up to 0.80; do not write a second guide in this repo.
 
 ### Track B — Pretty library look (revised 2026-07-11)
 
@@ -428,8 +427,8 @@ flowchart LR
 
 ## Out of scope for this GTM pass
 
-- Mac App Store / StoreKit  
-- Sandboxing Skagway for MAS (keeps ffmpeg + multi-drive power)  
+**Will-not-do (not this-pass deferred):** Mac App Store / StoreKit / sandboxing Skagway — never, because of the sandbox. Direct + Sparkle only.
+
 - **Any paid flip, Paddle, LicenseManager, or founding Keychain for Skagway**  
 - Heavy DRM / anti-piracy theater  
 - Subscriptions (Mach II Labs never)  

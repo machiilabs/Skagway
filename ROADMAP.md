@@ -59,7 +59,7 @@ Key qualities:
 4. **Code review** — **done** 2026-09-03. No outstanding feature branches; Bugbot on `main` (focus list) found no bugs. Use `skagway-code-review` on future branches.
 5. **Security audit** — **done** 2026-09-03. See `docs/v1.0-security-audit.md`. No medium+ issues; no default telemetry.
 
-Distribution stays Developer ID DMG. **No Mac App Store** — do not scope MAS/sandbox as future work.
+Distribution is **direct + Sparkle only** (Developer ID DMG). **Mac App Store is a never** — sandboxing would break arbitrary folders + optional ffmpeg. Do not list MAS/sandbox as future or deferred work.
 
 ## Path to impartial 9 (product finish)
 
@@ -142,12 +142,12 @@ Ship **all three**. Partial credit does not get to 9.
 - Watch folders / auto-import
 - Auto-tagging (filename or vision)
 - Pre-Tahoe OS support
-- Built-in Notes field
-- Mac App Store / sandbox
 - Infuse-level codec coverage
 - Collection icons
 
 Those may raise supremacy or GTM tracks; they are **not** the 8.2 → 9 checklist.
+
+**Will-not-do (not deferred):** Notes / descriptions are **already won** via custom **Text** fields (including a user-created “Notes”) — not a gap and not a reason to add a built-in Notes column. **Mac App Store / sandbox is a never** — distribution is direct Developer ID DMG + Sparkle only.
 
 ### How we’ll know we’re at 9
 
@@ -170,7 +170,7 @@ Re-score on the **impartial** ruler only after all three workstreams meet their 
 - **Done (landed before 1.0, not a 1.0 blocker):** search beyond filename; exclude folders from Scan; Bulk Rename and other multi-select batch actions
 - **Reconnect (shipped in 1.3 tip):** Evidence Destinations, Ready / Needs attention / Unmatched, Undo (evolved from Repair Links / Location Relink)
 - **Still Phase 2 (not required for 1.0 / not on the impartial-9 bar):** auto-import / watch folders; auto-tagging ideas (see `AI-IMPROVEMENTS.md` — filename heuristics first)
-- **Notes:** do **not** add a built-in notes field. Users who want one create a custom **Text** field (multiline). That type already sorts, filters, searches, and exports.
+- **Notes / descriptions (won via custom fields):** A user-created multiline **Text** field (named “Notes” or anything else) already sorts, filters, searches, and exports. That is strictly better than a single built-in Notes column — do **not** add one.
 - **In-player filmstrip (shipped on `main`, 1.3 tip):** horizontal strip above the scrubber; shared `controlsVisible` fade; Settings → Show filmstrip in player. Leave-point ghost playhead + Return chip. Design notes below for history.
 
 ### In-player filmstrip — design notes (shipped)
@@ -188,7 +188,7 @@ Re-score on the **impartial** ruler only after all three workstreams meet their 
 - Potential areas: semantic search, smart tagging, content-aware suggestions, duplicate detection
 
 ### Phase 4 — Distribution & Longevity
-- **Locked path:** direct download via **Developer ID + notarized DMG** (`scripts/package_dmg.sh` → `dist/Skagway.dmg`). Stay unsandboxed so arbitrary folders + optional ffmpeg work. **Not going on the Mac App Store** — do not plan a sandbox/MAS variant.
+- **Locked path (will-not-do MAS):** direct download via **Developer ID + notarized DMG** (`scripts/package_dmg.sh` → `dist/Skagway.dmg`) + Sparkle. Stay unsandboxed so arbitrary folders + optional ffmpeg work. **Mac App Store is a never** — sandboxing is incompatible; do not plan a MAS variant.
 - Host DMG on downloads.machiilabs.com; Sparkle in-app is implemented — publish `Skagway.appcast.xml` alongside `Skagway.dmg` when downloads go live (`docs/SPARKLE.md`).
 - **User manual (source of truth):** [machii-labs `/skagway/manual`](https://machiilabs.com/skagway/manual) — `machii-labs/src/app/skagway/manual/`. Repo stub `docs/USER_GUIDE.md` only points there. Completeness is a docs-readiness item, not a Skagway feature.
 
@@ -209,4 +209,4 @@ Re-score on the **impartial** ruler only after all three workstreams meet their 
 
 ---
 
-*Last significant update: 2026-09-18 — Path to impartial 9 (a11y P0, captions first-class, format confidence); IPF marked shipped.*
+*Last significant update: 2026-09-19 — Notes won via custom Text (not a gap); MAS/sandbox is a never (direct + Sparkle only), not deferred. Path to impartial 9 (2026-09-18) unchanged otherwise.*
