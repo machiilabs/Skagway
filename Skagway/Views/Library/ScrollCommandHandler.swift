@@ -131,8 +131,10 @@ struct ScrollCommandHandler: NSViewRepresentable {
         // until the user scrolls. Force a 1pt nudge-and-restore across two runloop ticks so each step posts
         // a bounds-changed notification and the grid re-instantiates its visible cells. Net visible position
         // is unchanged (the bump is sub-row, so the re-tiled region matches the target).
+        // Do **not** retile on `.pinRow` (Inspector ⌘I): that restart every visible card `.task` and
+        // re-decodes Storyboard collages already in memory.
         switch kind {
-        case .toRow, .retile, .pinRow:
+        case .toRow, .retile:
             let bump = NSPoint(x: target.x, y: target.y > minY ? target.y - 1 : target.y + 1)
             DispatchQueue.main.async { [weak scrollView, weak clip] in
                 guard let scrollView, let clip else { return }

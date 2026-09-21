@@ -267,14 +267,14 @@ struct CuratedWallCard: View {
             selectionState.isHovering = false
         }
         .task(id: "\(video.filePath)|\(video.thumbnailPath ?? "")|\(displayMode.rawValue)|\(thumbnailReloadId)") {
-            // Clear first so a recycled LazyVGrid cell never keeps a pre-remap still.
-            thumbnail = nil
             detailUpgradeTask?.cancel()
             detailUpgradeTask = nil
             switch displayMode {
             case .poster:
                 if let lo = thumbnailService.loadThumbnail(for: video.filePath) {
                     thumbnail = lo
+                } else {
+                    thumbnail = nil
                 }
                 detailUpgradeTask = Task {
                     if let hi = await thumbnailService.detailPreviewImage(for: video, longEdge: 720) {
@@ -290,6 +290,8 @@ struct CuratedWallCard: View {
                 // unless we await — Grid posters are small and sync-load; collage JPEGs are not.
                 // Cached collages must never flash the poster: memory hit paints immediately;
                 // disk hit stays empty until the JPEG is up; poster is first-bake only.
+                // Do not `thumbnail = nil` first — Inspector width reflow / pin restore must
+                // keep an already-resident collage on screen instead of re-decoding.
                 if let cached = thumbnailService.residentStoryboard(for: video.filePath) {
                     thumbnail = cached
                     return
@@ -298,6 +300,8 @@ struct CuratedWallCard: View {
                     if let poster = thumbnailService.residentThumbnail(for: video.filePath)
                         ?? thumbnailService.loadThumbnail(for: video.filePath) {
                         thumbnail = poster
+                    } else {
+                        thumbnail = nil
                     }
                 }
                 await Task.yield()

@@ -121,8 +121,9 @@ struct BrowserScrollPinController: NSViewRepresentable {
         guard let pin = pendingRestore else { return }
         onRestoreConsumed()
 
-        // Width / column layout settles over a few ticks after the split detaches or reattaches.
-        let delays: [TimeInterval] = [0.05, 0.16, 0.32]
+        // Split width settles on the next layout pass. One follow-up is enough — repeating
+        // pin restores used to re-tile the wall and restart every visible card `.task`.
+        let delays: [TimeInterval] = [0.04, 0.12]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak nsView, weak coordinator] in
                 guard let nsView, let coordinator else { return }

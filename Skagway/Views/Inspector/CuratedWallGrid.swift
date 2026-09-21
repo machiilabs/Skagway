@@ -122,6 +122,7 @@ struct CuratedWallGrid: View {
 
     /// Largest `1...maxColumns` such that flexible cells are at least `minCellWidth` wide.
     /// Invalid/zero widths keep `maxColumns` so a transient layout pass can't pin the grid at 1.
+    /// Used for ↑/↓ and Inspector scroll-pin math — not as `LazyVGrid(columns: count:)` (that remounts).
     static func columnCount(
         forContainerWidth width: CGFloat,
         maxColumns: Int = maxColumns,
@@ -135,6 +136,13 @@ struct CuratedWallGrid: View {
         return min(maxColumns, max(1, n))
     }
 
+    /// One adaptive `GridItem` so pane-width changes (⌘I) reflow without replacing the grid.
+    /// Changing `Array(repeating:count:)` from N→M tears down every visible card, restarts `.task`,
+    /// and re-decodes Storyboard collages — Hide/Show Inspector used to take several seconds.
+    static func wallGridItems(minCellWidth: CGFloat, spacing: CGFloat) -> [GridItem] {
+        [GridItem(.adaptive(minimum: minCellWidth), spacing: spacing)]
+    }
+
     private var columnCount: Int {
         Self.columnCount(
             forContainerWidth: containerWidth,
@@ -145,14 +153,18 @@ struct CuratedWallGrid: View {
         )
     }
 
+    private var wallGridItems: [GridItem] {
+        Self.wallGridItems(minCellWidth: activeMinCellWidth, spacing: columnSpacing)
+    }
+
     var body: some View {
-        // Flexible equal columns fill the width. Column count comes from the parent pane width
-        // (equality of the *integer* count is what matters — we never remount with `.id(...)`).
+        // Adaptive columns fill the width. Integer `columnCount` is only for keyboard / pin math —
+        // we never remount the wall with `.id(filteredVideosVersion)` or a changing GridItem count.
         // No GeometryReader around LazyVGrid content — preserves native scroller behaviour.
         let cols = columnCount
         ScrollView(.vertical) {
             LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: columnSpacing), count: cols),
+                    columns: wallGridItems,
                     spacing: rowSpacing
                 ) {
                     ForEach(viewModel.filteredVideos) { video in
@@ -201,7 +213,8 @@ struct CuratedWallGrid: View {
                                 ? { handleSelection(video) }
                                 : nil
                         )
-                        .id("\(video.id)|\(viewModel.filmstripRefreshId)|\(viewModel.viewMode.rawValue)|\(storyboardDensity.rawValue)")
+                        // Identity is `video.id` from ForEach — do not append filmstrip/view-mode
+                        // into `.id(...)` or Inspector width/column reflow remounts every card.
                         .contentShape(Rectangle())
                         .modifier(AlbumSelectionGestures(
                             enabled: !viewModel.isViewingAlbum && !isStoryboard,
