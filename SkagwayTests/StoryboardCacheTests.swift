@@ -266,7 +266,8 @@ final class StoryboardCacheTests: XCTestCase {
         let seekCrop = CGSize(width: 300, height: 160)
         let pointInTopVisualRow = CGPoint(x: 10, y: 90)
         XCTAssertEqual(ThumbnailService.storyboardCellIndex(at: pointInTopVisualRow, size: full), 0)
-        XCTAssertEqual(ThumbnailService.storyboardCellIndex(at: pointInTopVisualRow, size: seekCrop), 1)
+        // Midline of 160 is 80; y=90 is the second row → cell 3 (not 0).
+        XCTAssertEqual(ThumbnailService.storyboardCellIndex(at: pointInTopVisualRow, size: seekCrop), 3)
         XCTAssertEqual(
             ThumbnailService.storyboardCellIndex(at: CGPoint(x: 10, y: 150), size: full),
             3

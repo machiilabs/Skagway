@@ -129,4 +129,34 @@ final class CuratedWallGridLayoutTests: XCTestCase {
         )
         XCTAssertEqual(n, 4)
     }
+
+    /// Normal Storyboard is capped at 3 even on a wide pane (Compact is the 3↔4 density).
+    func testStoryboardNormalStaysAtMostThreeColumnsWhenWide() {
+        let wide = CuratedWallGrid.columnCount(
+            forContainerWidth: 2400,
+            maxColumns: 3,
+            minCellWidth: 440,
+            spacing: 28,
+            outerPadding: 18
+        )
+        let withInspector = CuratedWallGrid.columnCount(
+            forContainerWidth: 1200,
+            maxColumns: 3,
+            minCellWidth: 440,
+            spacing: 28,
+            outerPadding: 18
+        )
+        XCTAssertEqual(wide, 3)
+        XCTAssertLessThanOrEqual(withInspector, 3)
+        XCTAssertEqual(
+            CuratedWallGrid.wallGridItems(
+                minCellWidth: 440,
+                spacing: 28,
+                maxColumns: 3,
+                containerWidth: 2400,
+                outerPadding: 18
+            ).count,
+            1
+        )
+    }
 }

@@ -77,4 +77,16 @@ final class BrowserScrollPinVisibleRangeTests: XCTestCase {
             )
         )
     }
+
+    func testEmptyLibraryReturnsNil() {
+        XCTAssertNil(
+            BrowserScrollPinController.visibleStoryboardIndexRange(
+                visibleTop: 0,
+                visibleHeight: 800,
+                documentHeight: 10_000,
+                columnCount: 3,
+                videoCount: 0
+            )
+        )
+    }
 }

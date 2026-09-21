@@ -41,4 +41,45 @@ final class CaptionMenuCopyTests: XCTestCase {
         let name = CaptionMenuCopy.languageName(locale: Locale(identifier: "en"), extendedLanguageTag: nil)
         XCTAssertEqual(name, Locale.current.localizedString(forLanguageCode: "en"))
     }
+
+    func testStableIDIncludesIndexLanguageAndFlags() {
+        let english = CaptionMenuCopy.stableID(
+            index: 0,
+            displayName: "English",
+            languageTag: "en",
+            isSDH: false,
+            isForced: false
+        )
+        let englishSDH = CaptionMenuCopy.stableID(
+            index: 0,
+            displayName: "English",
+            languageTag: "en",
+            isSDH: true,
+            isForced: false
+        )
+        let secondTrack = CaptionMenuCopy.stableID(
+            index: 1,
+            displayName: "English",
+            languageTag: "en",
+            isSDH: false,
+            isForced: false
+        )
+        XCTAssertEqual(english, "0|en|English||")
+        XCTAssertEqual(englishSDH, "0|en|English|sdh|")
+        XCTAssertNotEqual(english, englishSDH)
+        XCTAssertNotEqual(english, secondTrack)
+    }
+
+    func testStableIDTreatsNilLanguageTagAsEmptyAndMarksForced() {
+        XCTAssertEqual(
+            CaptionMenuCopy.stableID(
+                index: 2,
+                displayName: "Captions",
+                languageTag: nil,
+                isSDH: false,
+                isForced: true
+            ),
+            "2||Captions||forced"
+        )
+    }
 }
