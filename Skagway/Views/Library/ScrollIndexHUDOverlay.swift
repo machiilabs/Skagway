@@ -51,17 +51,19 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
     final class ChipView: NSView {
         let label = NSTextField(labelWithString: "")
 
+        /// Ice fill / dark-slate text in Dark (inverted cinematic chrome). Reverse in Light.
+        /// Not collection orange; not the inspector batch bar.
+        private static let ice = NSColor(srgbRed: 244 / 255, green: 247 / 255, blue: 251 / 255, alpha: 1)
+        private static let slate = NSColor(srgbRed: 11 / 255, green: 18 / 255, blue: 32 / 255, alpha: 1)
+
         override init(frame: NSRect) {
             super.init(frame: frame)
             wantsLayer = true
             layer?.cornerRadius = 11
             layer?.masksToBounds = true
-            layer?.backgroundColor = NSColor(srgbRed: 18 / 255, green: 24 / 255, blue: 38 / 255, alpha: 0.92).cgColor
             layer?.borderWidth = 1
-            layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
 
-            label.font = .systemFont(ofSize: 11, weight: .semibold)
-            label.textColor = .white
+            label.font = .systemFont(ofSize: 12, weight: .semibold)
             label.alignment = .center
             label.lineBreakMode = .byTruncatingTail
             label.maximumNumberOfLines = 1
@@ -72,6 +74,7 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
             label.isSelectable = false
             label.setAccessibilityElement(false)
             addSubview(label)
+            applyAppearanceColors()
         }
 
         required init?(coder: NSCoder) { nil }
@@ -79,6 +82,20 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
         override var isFlipped: Bool { true }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyAppearanceColors()
+        }
+
+        func applyAppearanceColors() {
+            let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let fill = dark ? Self.ice : Self.slate
+            let text = dark ? Self.slate : Self.ice
+            layer?.backgroundColor = fill.cgColor
+            layer?.borderColor = text.withAlphaComponent(0.28).cgColor
+            label.textColor = text
+        }
 
         func setText(_ text: String) {
             label.stringValue = text

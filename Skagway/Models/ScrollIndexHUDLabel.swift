@@ -80,7 +80,7 @@ enum ScrollIndexHUDLabel {
     ) -> String {
         switch sort {
         case .title:
-            return titleLetter(video.displayTitle)
+            return titlePrefix(video.displayTitle)
         case .dateAdded:
             return dateText(video.dateAdded)
         case .creationDate:
@@ -88,7 +88,7 @@ enum ScrollIndexHUDLabel {
         case .lastPlayed:
             return video.lastPlayed.map(dateText) ?? "—"
         case .duration:
-            return durationBucket(video.duration)
+            return durationText(video.duration)
         case .rating:
             return ratingText(video.rating)
         case .fileSize:
@@ -107,21 +107,28 @@ enum ScrollIndexHUDLabel {
         }
     }
 
-    static func titleLetter(_ title: String) -> String {
+    /// First three characters of the title, uppercased. Short titles stay as-is; empty → "•".
+    static func titlePrefix(_ title: String) -> String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let ch = trimmed.first else { return "•" }
-        if ch.isLetter { return String(ch).localizedUppercase }
-        if ch.isNumber { return "0–9" }
-        return "#"
+        guard !trimmed.isEmpty else { return "•" }
+        return String(trimmed.prefix(3)).localizedUppercase
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Same buckets as Quick Filter duration presets (`< 1 min`, `1–5 min`, `5–30 min`, `> 30 min`).
-    static func durationBucket(_ duration: Double?) -> String {
+    /// `< 1 min` → `NN sec`; `1..<60 min` → `mm:ss`; `>= 60 min` → `hh:mm:ss`.
+    static func durationText(_ duration: Double?) -> String {
         guard let duration, duration >= 0 else { return "—" }
-        if duration < 60 { return "< 1 min" }
-        if duration < 5 * 60 { return "1–5 min" }
-        if duration < 30 * 60 { return "5–30 min" }
-        return "> 30 min"
+        let totalSeconds = Int(duration)
+        if totalSeconds < 60 {
+            return String(format: "%02d sec", totalSeconds)
+        }
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        if hours >= 1 {
+            return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 
     static func ratingText(_ rating: Int) -> String {

@@ -12,25 +12,27 @@ final class ScrollIndexHUDLabelTests: XCTestCase {
         XCTAssertEqual(ScrollIndexHUDLabel.index(fraction: 2, count: 8), 7)
     }
 
-    func testTitleUsesFirstLetter() {
+    func testTitleUsesFirstThreeLetters() {
         let video = TestVideo.make(path: "/Movies/alpha.mp4", title: "glacier")
         XCTAssertEqual(
             ScrollIndexHUDLabel.text(sort: .title, video: video, index: 0, count: 1),
-            "G"
+            "GLA"
         )
-        XCTAssertEqual(ScrollIndexHUDLabel.titleLetter("12 Angry Men"), "0–9")
-        XCTAssertEqual(ScrollIndexHUDLabel.titleLetter("…ellipsis"), "#")
-        XCTAssertEqual(ScrollIndexHUDLabel.titleLetter("  "), "•")
+        XCTAssertEqual(ScrollIndexHUDLabel.titlePrefix("ab"), "AB")
+        XCTAssertEqual(ScrollIndexHUDLabel.titlePrefix("12 Angry Men"), "12")
+        XCTAssertEqual(ScrollIndexHUDLabel.titlePrefix("  "), "•")
     }
 
-    func testDurationBucketsMatchQuickFilterPresets() {
-        XCTAssertEqual(ScrollIndexHUDLabel.durationBucket(30), "< 1 min")
-        XCTAssertEqual(ScrollIndexHUDLabel.durationBucket(60), "1–5 min")
-        XCTAssertEqual(ScrollIndexHUDLabel.durationBucket(4 * 60), "1–5 min")
-        XCTAssertEqual(ScrollIndexHUDLabel.durationBucket(5 * 60), "5–30 min")
-        XCTAssertEqual(ScrollIndexHUDLabel.durationBucket(29 * 60), "5–30 min")
-        XCTAssertEqual(ScrollIndexHUDLabel.durationBucket(30 * 60), "> 30 min")
-        XCTAssertEqual(ScrollIndexHUDLabel.durationBucket(nil), "—")
+    func testDurationUsesSecOrClock() {
+        XCTAssertEqual(ScrollIndexHUDLabel.durationText(7), "07 sec")
+        XCTAssertEqual(ScrollIndexHUDLabel.durationText(30), "30 sec")
+        XCTAssertEqual(ScrollIndexHUDLabel.durationText(59), "59 sec")
+        XCTAssertEqual(ScrollIndexHUDLabel.durationText(60), "01:00")
+        XCTAssertEqual(ScrollIndexHUDLabel.durationText(4 * 60 + 5), "04:05")
+        XCTAssertEqual(ScrollIndexHUDLabel.durationText(59 * 60 + 59), "59:59")
+        XCTAssertEqual(ScrollIndexHUDLabel.durationText(60 * 60), "01:00:00")
+        XCTAssertEqual(ScrollIndexHUDLabel.durationText(3723), "01:02:03")
+        XCTAssertEqual(ScrollIndexHUDLabel.durationText(nil), "—")
     }
 
     func testRatingAndAlbumAndFolder() {
