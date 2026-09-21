@@ -26,8 +26,6 @@ struct CuratedWallCard: View {
     var hoverPreviewEnabled: Bool = true
     /// Bumped after Repair Links / filmstrip regen so `.task(id:)` reloads (poster + storyboard).
     var thumbnailReloadId: Int = 0
-    /// Remount Storyboard collage seek gestures after the floating player dismisses.
-    var storyboardSeekGestureEpoch: Int = 0
     /// Accent grip drawn on the thumbnail while an album is the active filter (visual only).
     var showAlbumReorderHandle: Bool = false
     var renameFocus: FocusState<Bool>.Binding
@@ -99,26 +97,14 @@ struct CuratedWallCard: View {
                         if isStoryboard, let onStoryboardCellPlay, !isMoving, !isInlineEditing {
                             GeometryReader { geo in
                                 // Seek only above the title band; title/footer chrome selects separately.
+                                // AppKit mouseUp (not SwiftUI DragGesture) so a stationary second
+                                // click still hits after focus-ring / overlay remount.
                                 let seekHeight = max(0, geo.size.height - storyboardTitleBandHeight)
-                                let seekSize = CGSize(width: geo.size.width, height: seekHeight)
-                                Color.clear
-                                    .frame(width: seekSize.width, height: seekSize.height, alignment: .top)
-                                    .contentShape(Rectangle())
-                                    // highPriority so the card’s select tap does not win; DragGesture
-                                    // recovers more reliably than SpatialTap after overlay dismiss.
-                                    .highPriorityGesture(
-                                        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                                            .onEnded { value in
-                                                let moved = hypot(
-                                                    value.translation.width,
-                                                    value.translation.height
-                                                )
-                                                guard moved < 8 else { return }
-                                                onStoryboardCellPlay(value.startLocation, seekSize)
-                                            }
-                                    )
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                                    .id(storyboardSeekGestureEpoch)
+                                StoryboardSeekClickOverlay { location in
+                                    onStoryboardCellPlay(location, geo.size)
+                                }
+                                .frame(width: geo.size.width, height: seekHeight)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             }
                         }
                     }
@@ -334,26 +320,32 @@ struct CuratedWallCard: View {
     @ViewBuilder
     private func thumbBorder(isSelected: Bool, isFocused: Bool, isHovering: Bool) -> some View {
         let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
-        if isSelected {
-            shape.strokeBorder(Color.appAccent.opacity(0.95), lineWidth: 1.5)
-        } else if isFocused {
-            shape.strokeBorder(Color.appAccent.opacity(0.55), style: focusThumbDash)
-        } else {
-            shape.strokeBorder(Color.white.opacity(isHovering ? 0.22 : 0.10), lineWidth: 1)
+        Group {
+            if isSelected {
+                shape.strokeBorder(Color.appAccent.opacity(0.95), lineWidth: 1.5)
+            } else if isFocused {
+                shape.strokeBorder(Color.appAccent.opacity(0.55), style: focusThumbDash)
+            } else {
+                shape.strokeBorder(Color.white.opacity(isHovering ? 0.22 : 0.10), lineWidth: 1)
+            }
         }
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder
     private func cardBorder(isSelected: Bool, isFocused: Bool) -> some View {
         let shape = RoundedRectangle(cornerRadius: corner + 2, style: .continuous)
-        if isSelected {
-            shape.stroke(Color.appAccent.opacity(0.85), lineWidth: 2)
-            if isFocused {
+        Group {
+            if isSelected {
+                shape.stroke(Color.appAccent.opacity(0.85), lineWidth: 2)
+                if isFocused {
+                    shape.stroke(Color.white.opacity(0.55), style: focusDash)
+                }
+            } else if isFocused {
                 shape.stroke(Color.white.opacity(0.55), style: focusDash)
             }
-        } else if isFocused {
-            shape.stroke(Color.white.opacity(0.55), style: focusDash)
         }
+        .allowsHitTesting(false)
     }
 
     private var thumbMedia: some View {
@@ -472,6 +464,60 @@ struct CuratedWallCard: View {
                 content.aspectRatio(aspectRatio, contentMode: .fit)
             } else {
                 content.frame(height: posterHeight)
+            }
+        }
+    }
+
+    /// Left-click catcher for collage cells. `DragGesture(minimumDistance: 0)` and
+    /// `SpatialTapGesture` stay dead after `onEnded` until `mouseMoved`, so a second
+    /// click on the focused cell with a still cursor never fires. AppKit `mouseUp`
+    /// does not need a tracking area or hover to arm.
+    private struct StoryboardSeekClickOverlay: NSViewRepresentable {
+        var onClick: (CGPoint) -> Void
+
+        func makeNSView(context: Context) -> SeekClickView {
+            let view = SeekClickView()
+            view.onClick = onClick
+            return view
+        }
+
+        func updateNSView(_ nsView: SeekClickView, context: Context) {
+            nsView.onClick = onClick
+        }
+
+        final class SeekClickView: NSView {
+            var onClick: ((CGPoint) -> Void)?
+            private var mouseDownPoint: NSPoint?
+
+            override var isFlipped: Bool { true }
+
+            override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+            override func mouseDown(with event: NSEvent) {
+                mouseDownPoint = convert(event.locationInWindow, from: nil)
+            }
+
+            override func mouseUp(with event: NSEvent) {
+                defer { mouseDownPoint = nil }
+                guard let start = mouseDownPoint else { return }
+                let end = convert(event.locationInWindow, from: nil)
+                let moved = hypot(end.x - start.x, end.y - start.y)
+                guard moved < 8, bounds.contains(start) else { return }
+                onClick?(start)
+            }
+
+            /// Left button only — right-click / hover / moved fall through to SwiftUI.
+            override func hitTest(_ point: NSPoint) -> NSView? {
+                guard bounds.contains(point) else { return nil }
+                guard let event = NSApp.currentEvent else { return nil }
+                switch event.type {
+                case .leftMouseDown:
+                    return self
+                case .leftMouseDragged, .leftMouseUp:
+                    return mouseDownPoint != nil ? self : nil
+                default:
+                    return nil
+                }
             }
         }
     }

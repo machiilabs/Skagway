@@ -237,6 +237,20 @@ final class StoryboardCacheTests: XCTestCase {
         XCTAssertEqual(seconds, 10, accuracy: 0.01)
     }
 
+    func testStoryboardCellIndexUsesFullCollageSizeNotTitleCrop() {
+        // Seek overlay stops above the title band, but row math must use the full
+        // 2×3 collage so the visual midline stays the row split.
+        let full = CGSize(width: 300, height: 200)
+        let seekCrop = CGSize(width: 300, height: 160)
+        let pointInTopVisualRow = CGPoint(x: 10, y: 90)
+        XCTAssertEqual(ThumbnailService.storyboardCellIndex(at: pointInTopVisualRow, size: full), 0)
+        XCTAssertEqual(ThumbnailService.storyboardCellIndex(at: pointInTopVisualRow, size: seekCrop), 1)
+        XCTAssertEqual(
+            ThumbnailService.storyboardCellIndex(at: CGPoint(x: 10, y: 150), size: full),
+            3
+        )
+    }
+
     func testMigrateMovesStoryboardFileAndTimesSidecar() throws {
         let oldPath = "/Volumes/Media/Shows/clip.mp4"
         let newPath = "/Volumes/Media 2/Shows/clip.mp4"

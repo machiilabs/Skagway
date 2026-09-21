@@ -1,8 +1,8 @@
 import AppKit
 
-/// After a full-pane overlay (floating player) dismisses, the cursor may still sit over a
-/// SwiftUI control that never received `mouseEntered` — taps then silently no-op until the
-/// pointer moves. Synthesize a `mouseMoved` so hover and gesture hit-testing rebind.
+/// After a full-pane overlay dismisses or a Storyboard card grows a focus ring, the cursor may
+/// still sit over a SwiftUI control that never received `mouseEntered`. Synthesize `mouseMoved`
+/// so hover chrome rebinds. Collage play/seek does not depend on this — it uses AppKit mouseUp.
 enum PointerHitTesting {
     static func refreshHover(in window: NSWindow? = NSApp.keyWindow) {
         guard let window else { return }

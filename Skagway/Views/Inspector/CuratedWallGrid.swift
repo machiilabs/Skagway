@@ -175,7 +175,6 @@ struct CuratedWallGrid: View {
                                 && viewModel.gridHoverPreviewEnabled
                                 && !viewModel.isPlayingInline,
                             thumbnailReloadId: viewModel.filmstripRefreshId,
-                            storyboardSeekGestureEpoch: viewModel.browserPointerRefreshToken,
                             showAlbumReorderHandle: viewModel.isViewingAlbum,
                             renameFocus: $renameFocus,
                             onCommitRename: { commitRename(video) },
@@ -588,6 +587,10 @@ struct CuratedWallGrid: View {
         lastClickedId = video.id
         viewModel.setReviewFocus(video.id, retargetIfPlaying: false)
         selectionStore.syncFocus(to: video.id)
+        // Focus ring rebuilds tracking areas; rebind hover under a still cursor (Esc path).
+        DispatchQueue.main.async {
+            PointerHitTesting.refreshHover()
+        }
     }
 
     private func playStoryboardCell(_ video: Video, at location: CGPoint, size: CGSize) {

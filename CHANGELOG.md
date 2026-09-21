@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Fix: Storyboard second click** — Click 1 still focuses; click 2 on the same collage cell seeks and plays without moving the mouse. Collage hits use AppKit mouseUp (not `DragGesture`, which stayed dead after `onEnded` until `mouseMoved`). Focus rings no longer steal hits. The earlier Esc remount + synthetic `mouseMoved` only covered overlay dismiss and still needed the pointer to move.
 - **Captions menu** — Built-in player bottom chrome (Compact / Windowed / Full): always a menu — Off (default), Sidecar (.srt) when a sibling exists, and named in-band tracks from the AV legible group (`displayName` / locale, never “Media group 1”). Hidden when nothing is available; fill/accent when not Off. Per-play only (not persisted). Picking in-band unloads the `.srt` overlay; Sidecar selects nil for legible and enables the overlay. In-band auto-select stays off.
 - **Built-in player captions** — Stop AVPlayer from auto-selecting in-band legible tracks (speech-bubble “Yeah.” captions) when Live Captions and Accessibility → Captions (SDH) are off. Sidecar `.srt` overlay is unchanged.
 - **Docs** — Built-in Notes is not a gap (custom **Text**, including a user-created “Notes”). **Mac App Store is a never** (sandboxing; direct + Sparkle only), not deferred. Struck both from ROADMAP impartial-9 / GTM future lists.

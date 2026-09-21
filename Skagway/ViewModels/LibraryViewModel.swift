@@ -614,21 +614,12 @@ final class LibraryViewModel {
     /// After create, Inspector focuses this bookmark’s title field so it’s obvious you can rename.
     var pendingBookmarkTitleFocusId: Int64?
 
-    /// Bumped when the floating player overlay dismisses so Storyboard seek gestures remount
-    /// (stale hover/hit-testing after Esc under a stationary cursor).
-    private(set) var browserPointerRefreshToken: Int = 0
-
-    func notePlaybackOverlayDismissed() {
-        browserPointerRefreshToken &+= 1
-    }
-
     /// True while a video is playing in the resizable player. The player never reshapes the wall, so
     /// this no longer needs a layout didSet (the full-screen-exit grid repaint lives in ContentView).
     var isPlayingInline: Bool = false {
         didSet {
             if oldValue && !isPlayingInline {
                 isPlayAllSession = false
-                notePlaybackOverlayDismissed()
             }
         }
     }
