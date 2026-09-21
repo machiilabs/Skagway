@@ -45,7 +45,8 @@ struct CuratedWallCard: View {
         isStoryboard && storyboardDensity == .normal
     }
 
-    /// On-collage title band height (also the select-only hit strip over the bottom of the collage).
+    /// On-collage title fade height (visual only). Collage cells under the fade still seek/play;
+    /// select-without-play is the title *text* plus the under-thumb footer, not this band.
     private var storyboardTitleBandHeight: CGFloat {
         isNormalStoryboard ? 52 : 40
     }
@@ -94,21 +95,6 @@ struct CuratedWallCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
                     .contentShape(Rectangle())
                     .overlay {
-                        if isStoryboard, let onStoryboardCellPlay, !isMoving, !isInlineEditing {
-                            GeometryReader { geo in
-                                // Seek only above the title band; title/footer chrome selects separately.
-                                // AppKit mouseUp (not SwiftUI DragGesture) so a stationary second
-                                // click still hits after focus-ring / overlay remount.
-                                let seekHeight = max(0, geo.size.height - storyboardTitleBandHeight)
-                                StoryboardSeekClickOverlay { location in
-                                    onStoryboardCellPlay(location, geo.size)
-                                }
-                                .frame(width: geo.size.width, height: seekHeight)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            }
-                        }
-                    }
-                    .overlay {
                         // Soft vignette — cheap radial falloff (no blur filters on the hot path).
                         RadialGradient(
                             colors: [.clear, .black.opacity(isHovering ? 0.32 : 0.22)],
@@ -119,11 +105,33 @@ struct CuratedWallCard: View {
                         .allowsHitTesting(false)
                     }
                     .overlay(alignment: .bottom) {
-                        // Keep in hierarchy and fade — sudden remove felt abrupt when preview starts.
                         if !isInlineEditing {
-                            titleScrim
+                            titleScrimGradient
                                 .opacity(titleVisible ? 1 : 0)
                                 .animation(titleScrimFade, value: titleVisible)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .overlay {
+                        if isStoryboard, let onStoryboardCellPlay, !isMoving, !isInlineEditing {
+                            GeometryReader { geo in
+                                // Full collage, including cells under the title fade. AppKit mouseUp
+                                // so a still cursor still seeks; the fade itself is not a hit target.
+                                StoryboardSeekClickOverlay { location in
+                                    onStoryboardCellPlay(location, geo.size)
+                                }
+                            }
+                        }
+                    }
+                    .overlay(alignment: .bottomLeading) {
+                        if !isInlineEditing {
+                            titleLabel
+                                .fixedSize()
+                                .opacity(titleVisible ? 1 : 0)
+                                .animation(titleScrimFade, value: titleVisible)
+                                // Poster: visual only (card tap plays). Storyboard: tight select,
+                                // not the full-width fade — bottom-row frames still seek/play.
+                                .allowsHitTesting(isStoryboard && onStoryboardChromeSelect != nil)
                         }
                     }
                     .overlay(alignment: .topTrailing) {
@@ -371,32 +379,32 @@ struct CuratedWallCard: View {
             }
     }
 
-    private var titleScrim: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-                .allowsHitTesting(false)
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.55), .black.opacity(0.78)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: isStoryboard ? storyboardTitleBandHeight : 56)
-            .overlay(alignment: .bottomLeading) {
-                Text(video.displayTitle)
-                    .font(.system(size: isNormalStoryboard ? 12 : (isStoryboard ? 10 : 11), weight: .semibold))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.55), radius: 1, y: 1)
-                    .lineLimit(isStoryboard ? 1 : 2)
-                    .padding(.horizontal, isStoryboard ? 6 : 8)
-                    .padding(.bottom, isStoryboard ? (isNormalStoryboard ? 8 : 4) : 7)
-            }
+    /// Fade only — never a hit target. Bottom-row collage cells stay seek/play.
+    private var titleScrimGradient: some View {
+        LinearGradient(
+            colors: [.clear, .black.opacity(0.55), .black.opacity(0.78)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(height: isStoryboard ? storyboardTitleBandHeight : 56)
+        .frame(maxWidth: .infinity)
+        .allowsHitTesting(false)
+    }
+
+    /// Title drawn on the fade. Storyboard: intrinsic-size select-only hit (not full-width).
+    private var titleLabel: some View {
+        Text(video.displayTitle)
+            .font(.system(size: isNormalStoryboard ? 12 : (isStoryboard ? 10 : 11), weight: .semibold))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.55), radius: 1, y: 1)
+            .lineLimit(isStoryboard ? 1 : 2)
+            .padding(.horizontal, isStoryboard ? 6 : 8)
+            .padding(.bottom, isStoryboard ? (isNormalStoryboard ? 8 : 4) : 7)
             .contentShape(Rectangle())
             .modifier(StoryboardChromeTap(
                 enabled: isStoryboard && onStoryboardChromeSelect != nil,
                 onSelect: { onStoryboardChromeSelect?() }
             ))
-            .allowsHitTesting(isStoryboard && onStoryboardChromeSelect != nil)
-        }
     }
 
     private var topBadgeCluster: some View {

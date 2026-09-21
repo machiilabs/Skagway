@@ -238,8 +238,8 @@ final class StoryboardCacheTests: XCTestCase {
     }
 
     func testStoryboardCellIndexUsesFullCollageSizeNotTitleCrop() {
-        // Seek overlay stops above the title band, but row math must use the full
-        // 2×3 collage so the visual midline stays the row split.
+        // Overlay covers the full 2×3 collage (including cells under the title fade).
+        // Passing the cropped fade height would move the row split off the visual midline.
         let full = CGSize(width: 300, height: 200)
         let seekCrop = CGSize(width: 300, height: 160)
         let pointInTopVisualRow = CGPoint(x: 10, y: 90)
