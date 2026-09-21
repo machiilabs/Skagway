@@ -194,8 +194,9 @@ struct CuratedWallGrid: View {
     var body: some View {
         // Adaptive columns follow the real pane width (3→4 Compact on ⌘I hide). Integer
         // `columnCount` is only for keyboard / pin math. One GridItem keeps card identity —
-        // no `.id(filteredVideosVersion)`, no N→M remount. Animation is suppressed so the
-        // LazyVGrid cache does not interpolate every visited Storyboard card.
+        // no `.id(filteredVideosVersion)`, no N→M remount. Animation is suppressed on the
+        // grid content only — not the ScrollView — so the sort-index HUD still gets
+        // live-scroll notifications.
         // No GeometryReader around LazyVGrid content — preserves native scroller behaviour.
         let cols = columnCount
         ScrollView(.vertical) {
@@ -492,6 +493,7 @@ struct CuratedWallGrid: View {
                 }
                 .padding(outerPadding)
                 .background(ScrollCommandHandler(command: viewModel.scrollCommand, mode: .grid))
+                .transaction { $0.animation = nil }
                 .background(
                     BrowserScrollPinController(
                         store: viewModel.browserScrollPinStore,
@@ -520,9 +522,9 @@ struct CuratedWallGrid: View {
                 )
             }
             .scrollIndicators(.visible)
-            .transaction { $0.animation = nil }
             .overlay {
                 ScrollIndexHUDOverlay(viewModel: viewModel, mode: .grid)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
             }
             .background(Color(red: 3 / 255, green: 13 / 255, blue: 23 / 255))   // #030D17

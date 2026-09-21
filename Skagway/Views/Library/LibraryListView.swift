@@ -595,6 +595,7 @@ struct LibraryListView: View {
         )
         .overlay {
             ScrollIndexHUDOverlay(viewModel: viewModel, mode: .list)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
         }
         .onAppear {

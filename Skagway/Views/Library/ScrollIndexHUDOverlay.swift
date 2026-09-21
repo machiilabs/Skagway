@@ -123,6 +123,8 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
         private var hideWork: DispatchWorkItem?
         private var lastLabel = ""
         private var isShowing = false
+        private var lastClipOriginY: CGFloat?
+        private var attachAttempts = 0
 
         func tearDown() {
             hideWork?.cancel()
@@ -140,14 +142,27 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
             knobDragging = false
             isShowing = false
             lastLabel = ""
+            lastClipOriginY = nil
         }
 
         func attachIfNeeded(from view: NSView) {
-            guard let scrollView = Self.locateScrollView(from: view, mode: mode) else { return }
+            guard let scrollView = Self.locateScrollView(from: view, mode: mode) else {
+                // Inspector clip/collapse can leave the overlay unhosted for a frame.
+                guard attachAttempts < 8 else { return }
+                attachAttempts += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05 * Double(attachAttempts)) { [weak self, weak view] in
+                    guard let self, let view else { return }
+                    self.attachIfNeeded(from: view)
+                }
+                return
+            }
+            attachAttempts = 0
             if trackedScrollView === scrollView, !observers.isEmpty { return }
 
             tearDown()
+            attachAttempts = 0
             trackedScrollView = scrollView
+            lastClipOriginY = scrollView.contentView.bounds.origin.y
             let chip = ChipView(frame: .zero)
             chip.alphaValue = 0
             chip.isHidden = true
@@ -222,7 +237,12 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
         }
 
         private func handleBoundsChange() {
-            guard liveScrolling || isShowing else { return }
+            let y = trackedScrollView?.contentView.bounds.origin.y
+            if let y, let last = lastClipOriginY, abs(y - last) > 0.5 {
+                liveScrolling = true
+            }
+            if let y { lastClipOriginY = y }
+            guard liveScrolling || isShowing || isKnobTracking() else { return }
             if isKnobTracking() { liveScrolling = true }
             showAndUpdate()
             if !liveScrolling {
@@ -390,8 +410,13 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
         static func locateScrollView(from view: NSView, mode: Mode) -> NSScrollView? {
             switch mode {
             case .grid:
-                // Overlay is a sibling of the SwiftUI ScrollView — look at ancestors, then
-                // siblings. Do not DFS the whole browser pane (that would grab the filters drawer).
+                // Wall scroller is the largest document in the browser pane. After Inspector
+                // clip-collapse (1167) a sibling walk can grab the drawer or Inspector scroller.
+                if let pane = browserPane(from: view),
+                   let sv = largestVerticalScrollView(in: pane)
+                {
+                    return sv
+                }
                 if let sv = enclosingScrollView(from: view) { return sv }
                 return siblingScrollView(from: view)
             case .list:
@@ -436,6 +461,27 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
                 if let found = firstVerticalScrollView(in: sub) { return found }
             }
             return nil
+        }
+
+        private static func largestVerticalScrollView(in root: NSView) -> NSScrollView? {
+            var best: NSScrollView?
+            var bestScore: CGFloat = 0
+            func search(_ v: NSView) {
+                if let sv = v as? NSScrollView {
+                    let clip = sv.contentView.bounds
+                    if clip.width > 40, clip.height > 40 {
+                        let docH = sv.documentView?.bounds.height ?? clip.height
+                        let score = max(docH, 1) * clip.width
+                        if score > bestScore {
+                            best = sv
+                            bestScore = score
+                        }
+                    }
+                }
+                for sub in v.subviews { search(sub) }
+            }
+            search(root)
+            return best
         }
 
         /// Left split pane (browser). Stops at `NSSplitView` so Inspector scrollers are ignored.
