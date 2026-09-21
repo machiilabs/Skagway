@@ -182,6 +182,28 @@ final class StoryboardCacheTests: XCTestCase {
         XCTAssertNotNil(service.loadStoryboard(for: path))
     }
 
+    func testHasStoryboardJPEGOnDiskDoesNotDecodeOrWarmMemory() throws {
+        let path = "/Volumes/Media/Shows/clip-disk-stat.mp4"
+        XCTAssertFalse(service.hasStoryboardJPEGOnDisk(for: path))
+        XCTAssertNil(service.residentStoryboard(for: path))
+
+        let collage = NSImage(size: ThumbnailService.storyboardCompositeSize)
+        collage.lockFocus()
+        NSColor.cyan.setFill()
+        NSRect(origin: .zero, size: collage.size).fill()
+        collage.unlockFocus()
+        guard let tiff = collage.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.8])
+        else {
+            return XCTFail("Failed to encode disk-stat collage")
+        }
+        try jpeg.write(to: service.storyboardURL(for: path))
+
+        XCTAssertTrue(service.hasStoryboardJPEGOnDisk(for: path), "JPEG on disk is a cache hit without times")
+        XCTAssertNil(service.residentStoryboard(for: path), "existence check must not decode into NSCache")
+    }
+
     func testStoryboardClickSecondsUsesStoredCellTimesNotEvenSplit() throws {
         let path = "/Volumes/Media/Shows/clip-times.mp4"
         let cell = ThumbnailService.filmstripCellSize

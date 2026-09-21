@@ -452,6 +452,13 @@ final class ThumbnailService: @unchecked Sendable {
         return cached
     }
 
+    /// Cheap existence check for `{hash}_storyboard.jpg`. Does not decode and does not require the
+    /// times sidecar — Storyboard cards use this to skip the poster placeholder when a collage is
+    /// already on disk (skeleton until the JPEG is loaded off the main actor).
+    func hasStoryboardJPEGOnDisk(for filePath: String) -> Bool {
+        FileManager.default.fileExists(atPath: storyboardURL(for: filePath).path)
+    }
+
     /// Valid-size collage from memory or disk. Does **not** require a times sidecar — first paint
     /// can show a cached JPEG while `generateStoryboard` rebakes the click-to-play contract.
     /// Incomplete (no times) images are not written into the memory cache.
@@ -1186,7 +1193,8 @@ final class ThumbnailService: @unchecked Sendable {
     /// samples six frames evenly across the timeline (same gate/coalesce pattern as filmstrips).
     ///
     /// Cheap memory hits stay on the caller. Disk decode, filmstrip bake/`lockFocus`, JPEG encode,
-    /// and AV sampling hop off the main actor so Storyboard View can paint posters first.
+    /// and AV sampling hop off the main actor so Storyboard View can paint the first frame without
+    /// decoding collage JPEGs (memory collage, disk-cache skeleton, or poster only on first bake).
     func generateStoryboard(for video: Video) async throws -> NSImage {
         let memKey = storyboardMemoryKey(for: video.filePath)
         if let cached = memoryCache.object(forKey: memKey),

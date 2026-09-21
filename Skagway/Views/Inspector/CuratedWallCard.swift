@@ -288,11 +288,17 @@ struct CuratedWallCard: View {
                 // First paint must not decode `{hash}_storyboard.jpg`, bake from a filmstrip,
                 // or wait on the AV gate. `.task` runs before SwiftUI commits the first frame
                 // unless we await — Grid posters are small and sync-load; collage JPEGs are not.
+                // Cached collages must never flash the poster: memory hit paints immediately;
+                // disk hit stays empty until the JPEG is up; poster is first-bake only.
                 if let cached = thumbnailService.residentStoryboard(for: video.filePath) {
                     thumbnail = cached
-                } else if let poster = thumbnailService.residentThumbnail(for: video.filePath)
-                            ?? thumbnailService.loadThumbnail(for: video.filePath) {
-                    thumbnail = poster
+                    return
+                }
+                if !thumbnailService.hasStoryboardJPEGOnDisk(for: video.filePath) {
+                    if let poster = thumbnailService.residentThumbnail(for: video.filePath)
+                        ?? thumbnailService.loadThumbnail(for: video.filePath) {
+                        thumbnail = poster
+                    }
                 }
                 await Task.yield()
                 guard !Task.isCancelled else { return }
