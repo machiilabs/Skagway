@@ -340,6 +340,10 @@ struct CuratedWallInspector: View {
 
     private func loadHero() async {
         guard let v = video else { return }
+        // Inspector show used to re-run this after a window detach (`.task` restart). Skip
+        // AV/disk work when the still or filmstrip is already on screen.
+        if viewModel.showThumbnailInDetail, hero != nil { return }
+        if !viewModel.showThumbnailInDetail, filmstrip != nil { return }
         if let lo = thumbnailService.loadThumbnail(for: v.filePath) {
             await MainActor.run { hero = lo }
         }
