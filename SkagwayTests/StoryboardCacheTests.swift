@@ -297,4 +297,11 @@ final class StoryboardCacheTests: XCTestCase {
         let migrated = service.loadStoryboardCellTimes(for: newPath)
         XCTAssertEqual(migrated, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
     }
+
+    func testStoryboardVisibilityDefaultsToAllowBeforeWindowReported() {
+        XCTAssertTrue(service.isStoryboardPathVisible("/any/clip.mp4"))
+        service.setVisibleStoryboardPaths(["/on/screen.mp4"])
+        XCTAssertTrue(service.isStoryboardPathVisible("/on/screen.mp4"))
+        XCTAssertFalse(service.isStoryboardPathVisible("/off/screen.mp4"))
+    }
 }

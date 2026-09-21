@@ -452,6 +452,44 @@ final class ThumbnailService: @unchecked Sendable {
         return cached
     }
 
+    /// On-screen Storyboard paths (set by the wall scroll pin). `nil` = not yet reported (allow generate).
+    private var visibleStoryboardPaths: Set<String>?
+
+    func setVisibleStoryboardPaths(_ paths: Set<String>) {
+        inflightLock.lock()
+        visibleStoryboardPaths = paths
+        inflightLock.unlock()
+    }
+
+    /// False when the wall has reported a visible window and `filePath` is outside it.
+    func isStoryboardPathVisible(_ filePath: String) -> Bool {
+        inflightLock.lock()
+        defer { inflightLock.unlock() }
+        guard let visible = visibleStoryboardPaths else { return true }
+        return visible.contains(filePath)
+    }
+
+    /// Cancel coalesced Storyboard bakes that are no longer on screen (fast scrollbar rip).
+    func cancelInflightStoryboards(except keep: Set<String>) {
+        inflightLock.lock()
+        var toCancel: [Task<NSImage, Error>] = []
+        for (key, task) in inflightStoryboards {
+            let path = Self.storyboardFilePath(fromInflightKey: key)
+            if keep.contains(path) { continue }
+            toCancel.append(task)
+            inflightStoryboards.removeValue(forKey: key)
+        }
+        inflightLock.unlock()
+        toCancel.forEach { $0.cancel() }
+    }
+
+    private static func storyboardFilePath(fromInflightKey key: String) -> String {
+        if let r = key.range(of: "\u{1e}") {
+            return String(key[..<r.lowerBound])
+        }
+        return key
+    }
+
     /// Cheap existence check for `{hash}_storyboard.jpg`. Does not decode and does not require the
     /// times sidecar — Storyboard cards use this to skip the poster placeholder when a collage is
     /// already on disk (skeleton until the JPEG is loaded off the main actor).
@@ -1203,7 +1241,8 @@ final class ThumbnailService: @unchecked Sendable {
         {
             return cached
         }
-        return try await Task.detached(priority: .utility) { [video] in
+        // Child `Task` (not `detached`) so card `.task` cancellation actually stops AV/bake work.
+        return try await Task(priority: .utility) {
             try await self.generateStoryboardUncached(for: video)
         }.value
     }
@@ -1245,6 +1284,10 @@ final class ThumbnailService: @unchecked Sendable {
         }
         let task = Task<NSImage, Error> {
             await self.generationGate.acquire()
+            if Task.isCancelled {
+                await self.generationGate.release()
+                throw CancellationError()
+            }
             do {
                 let image = try await self.buildStoryboard(for: video)
                 await self.generationGate.release()

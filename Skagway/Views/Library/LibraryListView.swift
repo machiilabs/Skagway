@@ -578,9 +578,6 @@ struct LibraryListView: View {
         .background(
             BrowserScrollPinController(
                 store: viewModel.browserScrollPinStore,
-                restoreToken: viewModel.browserScrollPinRestoreToken,
-                pendingRestore: viewModel.pendingBrowserScrollPinRestore,
-                onRestoreConsumed: { viewModel.pendingBrowserScrollPinRestore = nil },
                 mode: .list,
                 anchorVideoId: viewModel.focusedVideoId
                     ?? viewModel.lastSelectedVideoId

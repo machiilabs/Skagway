@@ -491,11 +491,13 @@ final class LibraryViewModel {
     func toggleInspectorVisible() {
         // Capture viewport pin *before* width/columns change, then restore after layout so the
         // focused clip stays at the same on-screen position across show ↔ hide (no ⌘J jump).
+        // Restore is a NotificationCenter ping on the pin store — not an `@Observable` token —
+        // so CuratedWallGrid does not re-evaluate every cached Storyboard card.
         let pin = browserScrollPinStore.pin
         isInspectorVisible.toggle()
         guard let pin else { return }
-        pendingBrowserScrollPinRestore = pin
-        browserScrollPinRestoreToken &+= 1
+        browserScrollPinStore.pendingRestore = pin
+        NotificationCenter.default.post(name: .skagwayBrowserScrollPinRestore, object: nil)
     }
 
     /// Header collection pill: show Inspector at last width, in batch-inspect mode.
@@ -511,10 +513,6 @@ final class LibraryViewModel {
     /// Live viewport pin for the focused / selected clip (updated by `BrowserScrollPinController`).
     /// Not `@Observable`-tracked — mutated in place so scroll tracking does not thrash the UI.
     let browserScrollPinStore = BrowserScrollPinStore()
-
-    /// Set just before an Inspector width change; consumed by the browser scroll pin controller.
-    var pendingBrowserScrollPinRestore: BrowserScrollPinStore.Pin?
-    private(set) var browserScrollPinRestoreToken: Int = 0
 
     var ffmpegUserPath: String = "" {
         didSet { UserDefaults.standard.set(ffmpegUserPath, forKey: Self.ffmpegPathKey) }

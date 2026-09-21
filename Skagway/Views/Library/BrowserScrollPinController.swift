@@ -3,22 +3,25 @@ import SwiftUI
 
 /// Keeps a live viewport pin for the focused clip and restores it after Inspector show/hide so the
 /// clip stays in the **same on-screen slot** when the browser width (and grid columns) change.
+///
+/// Restore is driven by `Notification.Name.skagwayBrowserScrollPinRestore`, not an `@Observable`
+/// token on `LibraryViewModel` — bumping a token was forcing the Wall to re-evaluate every
+/// LazyVGrid card cached from scrolling.
 struct BrowserScrollPinController: NSViewRepresentable {
     enum Mode { case grid, list }
 
     var store: BrowserScrollPinStore
-    var restoreToken: Int
-    var pendingRestore: BrowserScrollPinStore.Pin?
-    /// Called after a restore is scheduled so the view model can clear `pendingBrowserScrollPinRestore`.
-    var onRestoreConsumed: () -> Void
     var mode: Mode
     var anchorVideoId: String?
     var anchorIndex: Int?
     var columnCount: Int
     var videoCount: Int
+    /// Wall-only: report the on-screen path window so off-screen Storyboard `.task`s do not bake.
+    var thumbnailService: ThumbnailService? = nil
+    var pathsInRange: ((Range<Int>) -> [String])? = nil
 
     final class Coordinator {
-        var lastRestoreToken: Int = 0
+        var restoreObserver: NSObjectProtocol?
         var boundsObserver: NSObjectProtocol?
         var trackedScrollView: NSScrollView?
         var mode: Mode = .grid
@@ -27,6 +30,10 @@ struct BrowserScrollPinController: NSViewRepresentable {
         var anchorIndex: Int?
         var columnCount: Int = 1
         var videoCount: Int = 0
+        var thumbnailService: ThumbnailService?
+        var pathsInRange: ((Range<Int>) -> [String])?
+        weak var hostView: NSView?
+        private var lastVisibleUpdate: TimeInterval = 0
 
         func tearDownObserver() {
             if let boundsObserver {
@@ -34,6 +41,14 @@ struct BrowserScrollPinController: NSViewRepresentable {
                 self.boundsObserver = nil
             }
             trackedScrollView = nil
+        }
+
+        func tearDownAll() {
+            tearDownObserver()
+            if let restoreObserver {
+                NotificationCenter.default.removeObserver(restoreObserver)
+                self.restoreObserver = nil
+            }
         }
 
         func capturePin() {
@@ -45,9 +60,9 @@ struct BrowserScrollPinController: NSViewRepresentable {
                 store?.pin = nil
                 return
             }
-            scrollView.layoutSubtreeIfNeeded()
+            // Do not `layoutSubtreeIfNeeded` the whole document — after a long Storyboard scroll
+            // that walks every cached LazyVGrid cell and made ⌘I hitch for seconds.
             let clip = scrollView.contentView
-            clip.layoutSubtreeIfNeeded()
 
             switch mode {
             case .list:
@@ -57,7 +72,6 @@ struct BrowserScrollPinController: NSViewRepresentable {
                     store.pin = nil
                     return
                 }
-                table.layoutSubtreeIfNeeded()
                 let rowRect = table.rect(ofRow: index)
                 guard !rowRect.isEmpty else {
                     store.pin = nil
@@ -68,7 +82,6 @@ struct BrowserScrollPinController: NSViewRepresentable {
             case .grid:
                 let cols = max(1, columnCount)
                 let totalRows = max(1, (videoCount + cols - 1) / cols)
-                let rowIndex = index / cols
                 let docHeight = scrollView.documentView?.bounds.height ?? clip.bounds.height
                 let insets = scrollView.contentInsets
                 let visibleH = max(0, clip.bounds.height - insets.top - insets.bottom)
@@ -77,11 +90,51 @@ struct BrowserScrollPinController: NSViewRepresentable {
                     return
                 }
                 let rowHeight = docHeight / CGFloat(totalRows)
+                let rowIndex = index / cols
                 let rowMid = CGFloat(rowIndex) * rowHeight + rowHeight * 0.5
-                // Match ScrollCommandHandler grid space (origin can be negative from top inset).
                 let visibleTop = clip.bounds.origin.y
                 let offset = rowMid - visibleTop
                 store.pin = .init(videoId: videoId, offsetFromVisibleTop: offset)
+            }
+            updateVisibleStoryboards(from: scrollView)
+        }
+
+        func updateVisibleStoryboards(from scrollView: NSScrollView) {
+            guard mode == .grid, let service = thumbnailService, let pathsInRange else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - lastVisibleUpdate < 0.05 { return }
+            lastVisibleUpdate = now
+
+            let cols = max(1, columnCount)
+            let totalRows = max(1, (videoCount + cols - 1) / cols)
+            let clip = scrollView.contentView
+            let docHeight = scrollView.documentView?.bounds.height ?? clip.bounds.height
+            let visibleH = max(1, clip.bounds.height)
+            guard docHeight > 1, videoCount > 0 else { return }
+            let rowHeight = docHeight / CGFloat(totalRows)
+            guard rowHeight > 1 else { return }
+            let visibleTop = clip.bounds.origin.y
+            let startRow = max(0, Int(floor(visibleTop / rowHeight)) - 1)
+            let endRow = min(totalRows, Int(ceil((visibleTop + visibleH) / rowHeight)) + 2)
+            let startIdx = startRow * cols
+            let endIdx = min(videoCount, max(startIdx, endRow * cols))
+            let paths = Set(pathsInRange(startIdx..<endIdx))
+            service.setVisibleStoryboardPaths(paths)
+            service.cancelInflightStoryboards(except: paths)
+        }
+
+        func handleRestoreRequest() {
+            guard let pin = store?.pendingRestore else { return }
+            store?.pendingRestore = nil
+            guard let hostView else { return }
+            let delays: [TimeInterval] = [0.04, 0.12]
+            for delay in delays {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self, let hostView = self.hostView else { return }
+                    BrowserScrollPinController.attachIfNeeded(from: hostView, coordinator: self)
+                    BrowserScrollPinController.applyRestore(pin: pin, from: hostView, coordinator: self)
+                    self.capturePin()
+                }
             }
         }
     }
@@ -93,48 +146,42 @@ struct BrowserScrollPinController: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
         view.setAccessibilityElement(false)
+        let coordinator = context.coordinator
+        coordinator.hostView = view
+        coordinator.restoreObserver = NotificationCenter.default.addObserver(
+            forName: .skagwayBrowserScrollPinRestore,
+            object: nil,
+            queue: .main
+        ) { [weak coordinator] _ in
+            coordinator?.handleRestoreRequest()
+        }
         return view
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.tearDownObserver()
+        coordinator.tearDownAll()
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         let coordinator = context.coordinator
+        coordinator.hostView = nsView
         coordinator.store = store
         coordinator.mode = mode
         coordinator.anchorVideoId = anchorVideoId
         coordinator.anchorIndex = anchorIndex
         coordinator.columnCount = max(1, columnCount)
         coordinator.videoCount = max(0, videoCount)
+        coordinator.thumbnailService = thumbnailService
+        coordinator.pathsInRange = pathsInRange
 
-        // Defer locate — the representable mounts before the ScrollView’s NSScrollView exists.
         DispatchQueue.main.async { [weak nsView, weak coordinator] in
             guard let nsView, let coordinator else { return }
             Self.attachIfNeeded(from: nsView, coordinator: coordinator)
             coordinator.capturePin()
         }
-
-        guard restoreToken != coordinator.lastRestoreToken else { return }
-        coordinator.lastRestoreToken = restoreToken
-        guard let pin = pendingRestore else { return }
-        onRestoreConsumed()
-
-        // Split width settles on the next layout pass. One follow-up is enough — repeating
-        // pin restores used to re-tile the wall and restart every visible card `.task`.
-        let delays: [TimeInterval] = [0.04, 0.12]
-        for delay in delays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak nsView, weak coordinator] in
-                guard let nsView, let coordinator else { return }
-                Self.attachIfNeeded(from: nsView, coordinator: coordinator)
-                Self.applyRestore(pin: pin, from: nsView, coordinator: coordinator)
-                coordinator.capturePin()
-            }
-        }
     }
 
-    private static func attachIfNeeded(from view: NSView, coordinator: Coordinator) {
+    fileprivate static func attachIfNeeded(from view: NSView, coordinator: Coordinator) {
         let mode = coordinator.mode
         guard let scrollView = locateScrollView(from: view, mode: mode) else { return }
         if coordinator.trackedScrollView === scrollView, coordinator.boundsObserver != nil { return }
@@ -152,7 +199,7 @@ struct BrowserScrollPinController: NSViewRepresentable {
         }
     }
 
-    private static func applyRestore(
+    fileprivate static func applyRestore(
         pin: BrowserScrollPinStore.Pin,
         from view: NSView,
         coordinator: Coordinator
@@ -175,8 +222,6 @@ struct BrowserScrollPinController: NSViewRepresentable {
             rowIndex = index / cols
         }
 
-        // Drive through the same path as ⌘J / Home so list vs grid geometry stays consistent.
-        // Use a one-shot command via direct apply (avoid fighting an unrelated scrollCommand token).
         ScrollCommandHandler.applyPin(
             mode: coordinator.mode == .grid ? .grid : .list,
             rowIndex: rowIndex,

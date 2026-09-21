@@ -122,7 +122,7 @@ struct CuratedWallGrid: View {
 
     /// Largest `1...maxColumns` such that flexible cells are at least `minCellWidth` wide.
     /// Invalid/zero widths keep `maxColumns` so a transient layout pass can't pin the grid at 1.
-    /// Used for ↑/↓ and Inspector scroll-pin math — not as `LazyVGrid(columns: count:)` (that remounts).
+    /// Count is fed to `LazyVGrid` but must stay stable across Inspector ⌘I (`columnLayoutWidth`).
     static func columnCount(
         forContainerWidth width: CGFloat,
         maxColumns: Int = maxColumns,
@@ -136,11 +136,22 @@ struct CuratedWallGrid: View {
         return min(maxColumns, max(1, n))
     }
 
-    /// One adaptive `GridItem` so pane-width changes (⌘I) reflow without replacing the grid.
-    /// Changing `Array(repeating:count:)` from N→M tears down every visible card, restarts `.task`,
-    /// and re-decodes Storyboard collages — Hide/Show Inspector used to take several seconds.
-    static func wallGridItems(minCellWidth: CGFloat, spacing: CGFloat) -> [GridItem] {
-        [GridItem(.adaptive(minimum: minCellWidth), spacing: spacing)]
+    /// Pane width used for Wall column math. Inspector show/hide must not change this value
+    /// (cards stretch in place). When the Inspector is hidden, subtract its last saved width.
+    static func columnLayoutWidth(
+        availableWidth: CGFloat,
+        isInspectorVisible: Bool,
+        inspectorWidth: CGFloat
+    ) -> CGFloat {
+        guard availableWidth > 1 else { return availableWidth }
+        if isInspectorVisible { return availableWidth }
+        return max(1, availableWidth - max(0, inspectorWidth))
+    }
+
+    /// Flexible equal columns. Count comes from `columnLayoutWidth` so ⌘I does not change N
+    /// (changing `count` relayouts every LazyVGrid cell cached from scrolling).
+    static func wallGridItems(columnCount: Int, spacing: CGFloat) -> [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: spacing), count: max(1, columnCount))
     }
 
     private var columnCount: Int {
@@ -154,12 +165,12 @@ struct CuratedWallGrid: View {
     }
 
     private var wallGridItems: [GridItem] {
-        Self.wallGridItems(minCellWidth: activeMinCellWidth, spacing: columnSpacing)
+        Self.wallGridItems(columnCount: columnCount, spacing: columnSpacing)
     }
 
     var body: some View {
-        // Adaptive columns fill the width. Integer `columnCount` is only for keyboard / pin math —
-        // we never remount the wall with `.id(filteredVideosVersion)` or a changing GridItem count.
+        // Integer column count is computed from inspector-compensated width (stable on ⌘I) so
+        // LazyVGrid does not relayout every card cached from scrolling. No `.id(filteredVideosVersion)`.
         // No GeometryReader around LazyVGrid content — preserves native scroller behaviour.
         let cols = columnCount
         ScrollView(.vertical) {
@@ -283,6 +294,8 @@ struct CuratedWallGrid: View {
                             }
                         }
                         .contextMenu {
+                            let menuState = selectionStore.state(for: video.id)
+                            if menuState.isHovering || menuState.isFocused || menuState.isSelected {
                             Button("Play in External Player") { play(video) }
                             Button("Show in Finder") {
                                 NSWorkspace.shared.selectFile(video.filePath, inFileViewerRootedAtPath: "")
@@ -448,6 +461,7 @@ struct CuratedWallGrid: View {
                             }
                             .disabled(isMoving)
                             .help(isMoving ? "Move in progress — file isn't safe to modify yet" : "")
+                            }
                         }
                     }
                 }
@@ -456,9 +470,6 @@ struct CuratedWallGrid: View {
                 .background(
                     BrowserScrollPinController(
                         store: viewModel.browserScrollPinStore,
-                        restoreToken: viewModel.browserScrollPinRestoreToken,
-                        pendingRestore: viewModel.pendingBrowserScrollPinRestore,
-                        onRestoreConsumed: { viewModel.pendingBrowserScrollPinRestore = nil },
                         mode: .grid,
                         anchorVideoId: viewModel.focusedVideoId
                             ?? viewModel.lastSelectedVideoId
@@ -471,7 +482,15 @@ struct CuratedWallGrid: View {
                             return viewModel.filteredVideos.firstIndex(where: { $0.id == id })
                         }(),
                         columnCount: cols,
-                        videoCount: viewModel.filteredVideos.count
+                        videoCount: viewModel.filteredVideos.count,
+                        thumbnailService: thumbnailService,
+                        pathsInRange: { range in
+                            let videos = viewModel.filteredVideos
+                            let lo = max(0, range.lowerBound)
+                            let hi = min(videos.count, range.upperBound)
+                            guard lo < hi else { return [] }
+                            return videos[lo..<hi].map(\.filePath)
+                        }
                     )
                 )
             }

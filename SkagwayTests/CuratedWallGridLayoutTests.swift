@@ -36,28 +36,58 @@ final class CuratedWallGridLayoutTests: XCTestCase {
         XCTAssertEqual(n, 4)
     }
 
-    func testInspectorWidthChangeDoesNotChangeWallGridItemCount() {
-        // ⌘I hide/show changes pane width (and integer columnCount) but must keep a single
-        // adaptive GridItem so LazyVGrid does not remount every Storyboard/Grid card.
-        let withInspector = CuratedWallGrid.columnCount(
+    func testInspectorToggleDoesNotChangeColumnLayoutWidth() {
+        let inspector: CGFloat = 380
+        let withInspector = CuratedWallGrid.columnLayoutWidth(
+            availableWidth: 900,
+            isInspectorVisible: true,
+            inspectorWidth: inspector
+        )
+        let hidden = CuratedWallGrid.columnLayoutWidth(
+            availableWidth: 900 + inspector,
+            isInspectorVisible: false,
+            inspectorWidth: inspector
+        )
+        XCTAssertEqual(withInspector, hidden)
+
+        let colsShown = CuratedWallGrid.columnCount(
+            forContainerWidth: withInspector,
+            maxColumns: 3,
+            minCellWidth: 440,
+            spacing: 28,
+            outerPadding: 18
+        )
+        let colsHidden = CuratedWallGrid.columnCount(
+            forContainerWidth: hidden,
+            maxColumns: 3,
+            minCellWidth: 440,
+            spacing: 28,
+            outerPadding: 18
+        )
+        XCTAssertEqual(colsShown, colsHidden)
+
+        XCTAssertEqual(
+            CuratedWallGrid.wallGridItems(columnCount: colsShown, spacing: 28).count,
+            colsShown
+        )
+    }
+
+    func testRawHiddenWidthWouldAddStoryboardColumns() {
+        // Sanity: without compensation, hiding the Inspector would change N (the stall).
+        let shown = CuratedWallGrid.columnCount(
             forContainerWidth: 900,
             maxColumns: 3,
             minCellWidth: 440,
             spacing: 28,
             outerPadding: 18
         )
-        let withoutInspector = CuratedWallGrid.columnCount(
-            forContainerWidth: 1400,
+        let rawHidden = CuratedWallGrid.columnCount(
+            forContainerWidth: 1280,
             maxColumns: 3,
             minCellWidth: 440,
             spacing: 28,
             outerPadding: 18
         )
-        XCTAssertNotEqual(withInspector, withoutInspector)
-
-        let itemsNarrow = CuratedWallGrid.wallGridItems(minCellWidth: 440, spacing: 28)
-        let itemsWide = CuratedWallGrid.wallGridItems(minCellWidth: 440, spacing: 28)
-        XCTAssertEqual(itemsNarrow.count, 1)
-        XCTAssertEqual(itemsWide.count, 1)
+        XCTAssertNotEqual(shown, rawHidden)
     }
 }

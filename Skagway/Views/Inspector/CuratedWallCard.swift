@@ -309,7 +309,7 @@ struct CuratedWallCard: View {
 
                 let path = video.filePath
                 let service = thumbnailService
-                let (collage, complete) = await Task.detached(priority: .userInitiated) {
+                let (collage, complete) = await Task(priority: .userInitiated) {
                     service.storyboardDisplayCache(for: path)
                 }.value
                 guard !Task.isCancelled else { return }
@@ -318,15 +318,30 @@ struct CuratedWallCard: View {
                 }
                 guard !complete else { return }
 
-                detailUpgradeTask = Task {
+                // Fast scrollbar rip instantiates many LazyVGrid cells that stay cached off-screen.
+                // Do not bake/AV-generate those; wait until the card is in the visible window again
+                // (`.task` will not restart if the view stayed in the lazy cache).
+                try? await Task.sleep(for: .milliseconds(80))
+                guard !Task.isCancelled else { return }
+
+                while !Task.isCancelled {
+                    guard service.isStoryboardPathVisible(path) else {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        continue
+                    }
+                    if let cached = service.residentStoryboard(for: path) {
+                        thumbnail = cached
+                        return
+                    }
                     do {
                         let image = try await service.generateStoryboard(for: video)
                         guard !Task.isCancelled else { return }
-                        await MainActor.run {
-                            self.thumbnail = image
-                        }
+                        thumbnail = image
+                        return
+                    } catch is CancellationError {
+                        try? await Task.sleep(for: .milliseconds(80))
                     } catch {
-                        // Leave poster/placeholder; avoid noisy errors while scrolling.
+                        return
                     }
                 }
             }
