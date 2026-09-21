@@ -10,7 +10,7 @@ import SwiftUI
 /// - `isPlayable` preflight + missing-file detection, and `AVPlayerItem.status` error surfacing
 /// - resume-position load on start **and save on stop** (`PlaybackPositionStore`)
 /// - the "Resumed at … / Start at beginning" banner (+ optional auto-fade)
-/// - sidecar `.srt` subtitle discovery and attachment
+/// - sidecar `.srt` subtitle discovery and a Captions menu (Off / Sidecar / in-band)
 /// - `recordPlay`
 /// - Space / Shift-Space (play-pause / restart) intents
 ///
@@ -48,6 +48,13 @@ final class InlinePlaybackController {
     private(set) var volume: Float
     /// When true, audio is muted; `volume` is preserved for unmute.
     private(set) var isMuted: Bool
+
+    /// Per-play captions menu selection (resets on each `start` / `stop`; not persisted).
+    private(set) var captionSelection: CaptionSelection = .off
+    /// True when a sibling `.srt` was found for the current item.
+    private(set) var hasSidecarSRT: Bool = false
+    /// Named playable options from the current item’s AV legible group.
+    private(set) var inBandCaptionOptions: [InBandCaptionOption] = []
 
     /// Skip buttons / ⌥←⌥→ while playing.
     static let skipSeconds: Double = 15
@@ -96,6 +103,7 @@ final class InlinePlaybackController {
         // inside statusTask so SPACE never blocks on directory scans / large sidecar files
         // before the floating panel can appear.
         subtitleTrack.unload()
+        resetCaptionSession()
 
         let videoURL = video.url
         let videoPath = video.filePath
@@ -132,9 +140,9 @@ final class InlinePlaybackController {
             }
 
             let newPlayer = AVPlayer(url: videoURL)
-            // In-band 608/708 / subtitle tracks are auto-selected as speech-bubble captions
-            // even when Live Captions and Accessibility → Captions (SDH) are off. Skagway's
-            // sidecar `.srt` overlay (`SubtitleTrack`) does not use this media selection.
+            // Keep auto-select off (1155): in-band 608/708 / subtitle tracks otherwise appear as
+            // speech-bubble captions even when Live Captions and Accessibility → Captions (SDH)
+            // are off. The Captions menu selects nil (Off / Sidecar) or one named option.
             newPlayer.appliesMediaSelectionCriteriaAutomatically = false
             detachTimelineObservers()
             player?.pause()
@@ -143,10 +151,10 @@ final class InlinePlaybackController {
             applyVolumeToPlayer(newPlayer)
             subtitleTrack.attach(to: newPlayer)
             attachTimelineObservers(to: newPlayer, fallbackDuration: video.duration)
-            Task { await self.selectNilLegibleMedia(on: newPlayer) }
+            Task { await self.refreshInBandCaptionOptions(on: newPlayer) }
             Task { await self.viewModel.reloadBookmarksForPlayback(video: video) }
 
-            // Start playback immediately — subtitles attach when the sidecar task finishes.
+            // Start playback immediately — sidecar cues cache in when the discovery task finishes.
             let resumeSeconds: Double? = {
                 guard seconds == 0, !ignoreResume else { return nil }
                 guard let s = PlaybackPositionStore.loadSeconds(filePath: videoPath) else { return nil }
@@ -182,12 +190,15 @@ final class InlinePlaybackController {
             }
             Task { await viewModel.recordPlay(for: video) }
 
-            // Apply cues when ready; playback is already running.
+            // Cache sidecar cues when ready; overlay stays off until the user picks Sidecar.
             if let sidecar = await sidecarTask.value, !Task.isCancelled {
                 guard player === newPlayer else { return }
+                hasSidecarSRT = true
                 _ = subtitleTrack.applyLoadedCues(sidecar.cues, sourceURL: sidecar.url)
+                subtitleTrack.isEnabled = (captionSelection == .sidecar)
                 Task { await viewModel.applySidecarSubtitlePresence(videoPath: videoPath, sidecarPresent: true) }
             } else if !Task.isCancelled {
+                hasSidecarSRT = false
                 Task { await viewModel.applySidecarSubtitlePresence(videoPath: videoPath, sidecarPresent: false) }
             }
 
@@ -205,7 +216,7 @@ final class InlinePlaybackController {
                     return
                 } else if status == .readyToPlay {
                     // Item load can expose the legible group after the initial attempt.
-                    await selectNilLegibleMedia(on: newPlayer)
+                    await refreshInBandCaptionOptions(on: newPlayer)
                     return
                 }
             }
@@ -245,6 +256,7 @@ final class InlinePlaybackController {
         durationSeconds = 0
         isPlaying = false
         currentVideo = nil
+        resetCaptionSession()
         clearReturnPoint()
         Task { await viewModel.reloadBookmarksForPlayback(video: nil) }
     }
@@ -347,6 +359,47 @@ final class InlinePlaybackController {
         return "speaker.wave.3.fill"
     }
 
+    /// Hide the Captions control when this play has neither a sidecar nor in-band options.
+    var showsCaptionsControl: Bool {
+        hasSidecarSRT || !inBandCaptionOptions.isEmpty
+    }
+
+    /// Fill/accent the captions icon when anything other than Off is selected.
+    var captionsAreActive: Bool {
+        captionSelection != .off
+    }
+
+    var captionsAccessibilityValue: String {
+        switch captionSelection {
+        case .off:
+            return "Off"
+        case .sidecar:
+            return "Sidecar"
+        case .inBand(let id):
+            return inBandCaptionOptions.first(where: { $0.id == id })?.title ?? "On"
+        }
+    }
+
+    func selectCaptionOff() {
+        captionSelection = .off
+        subtitleTrack.isEnabled = false
+        Task { await applyLegibleMediaSelection(on: player) }
+    }
+
+    func selectSidecarCaptions() {
+        guard hasSidecarSRT else { return }
+        captionSelection = .sidecar
+        subtitleTrack.isEnabled = true
+        Task { await applyLegibleMediaSelection(on: player) }
+    }
+
+    func selectInBandCaption(id: String) {
+        guard inBandCaptionOptions.contains(where: { $0.id == id }) else { return }
+        captionSelection = .inBand(id: id)
+        subtitleTrack.isEnabled = false
+        Task { await applyLegibleMediaSelection(on: player) }
+    }
+
     private static func clampedVolume(_ value: Float) -> Float {
         min(max(value, 0), 1)
     }
@@ -363,12 +416,53 @@ final class InlinePlaybackController {
         player.isMuted = isMuted || volume < 0.001
     }
 
-    /// Deselects in-band captions / SDH / forced-subtitle tracks on the current item.
-    /// Sidecar `.srt` rendering is a custom overlay and is unaffected.
-    private func selectNilLegibleMedia(on player: AVPlayer) async {
-        guard let item = player.currentItem else { return }
-        guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) else { return }
-        item.select(nil, in: group)
+    private func resetCaptionSession() {
+        captionSelection = .off
+        hasSidecarSRT = false
+        inBandCaptionOptions = []
+        subtitleTrack.isEnabled = false
+    }
+
+    /// Reloads named in-band tracks and applies the current menu selection (nil unless in-band).
+    private func refreshInBandCaptionOptions(on player: AVPlayer) async {
+        guard player === self.player, let item = player.currentItem else { return }
+        guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) else {
+            inBandCaptionOptions = []
+            return
+        }
+        inBandCaptionOptions = group.options.enumerated().compactMap { index, option in
+            guard option.isPlayable else { return nil }
+            return InBandCaptionOption(
+                id: CaptionMenuCopy.id(for: option, index: index),
+                title: CaptionMenuCopy.title(for: option),
+                option: option
+            )
+        }
+        await applyLegibleMediaSelection(on: player, group: group)
+    }
+
+    /// Off and Sidecar select **nil** in the legible group (auto-select stays off). In-band
+    /// selects that option. Sidecar overlay is a custom `SubtitleTrack`, not this selection.
+    private func applyLegibleMediaSelection(on player: AVPlayer?, group: AVMediaSelectionGroup? = nil) async {
+        guard let player, player === self.player, let item = player.currentItem else { return }
+        let resolvedGroup: AVMediaSelectionGroup
+        if let group {
+            resolvedGroup = group
+        } else if let loaded = try? await item.asset.loadMediaSelectionGroup(for: .legible) {
+            resolvedGroup = loaded
+        } else {
+            return
+        }
+        switch captionSelection {
+        case .off, .sidecar:
+            item.select(nil, in: resolvedGroup)
+        case .inBand(let id):
+            if let option = inBandCaptionOptions.first(where: { $0.id == id })?.option {
+                item.select(option, in: resolvedGroup)
+            } else {
+                item.select(nil, in: resolvedGroup)
+            }
+        }
     }
 
     static func formatPlaybackRate(_ rate: Float) -> String {

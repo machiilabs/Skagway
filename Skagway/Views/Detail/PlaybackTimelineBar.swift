@@ -157,6 +157,10 @@ struct PlaybackTimelineBar: View {
                     playbackSpeedMenu
 
                     volumeControl
+
+                    if playback.showsCaptionsControl {
+                        captionsMenu
+                    }
                 }
                 .layoutPriority(1)
                 .fixedSize(horizontal: true, vertical: false)
@@ -281,6 +285,60 @@ struct PlaybackTimelineBar: View {
         .buttonStyle(.plain)
         .foregroundStyle(Color.appTextPrimary)
         .help(playback.isMuted || playback.volume < 0.001 ? "Unmute" : "Mute")
+    }
+
+    /// Always a menu (never a tap-toggle). Hidden by the caller when nothing is available.
+    private var captionsMenu: some View {
+        Menu {
+            Button {
+                playback.selectCaptionOff()
+            } label: {
+                captionMenuRow("Off", selected: playback.captionSelection == .off)
+            }
+
+            if playback.hasSidecarSRT {
+                Button {
+                    playback.selectSidecarCaptions()
+                } label: {
+                    captionMenuRow("Sidecar (.srt)", selected: playback.captionSelection == .sidecar)
+                }
+            }
+
+            ForEach(playback.inBandCaptionOptions) { option in
+                Button {
+                    playback.selectInBandCaption(id: option.id)
+                } label: {
+                    captionMenuRow(option.title, selected: isSelectedInBand(option.id))
+                }
+            }
+        } label: {
+            Image(systemName: playback.captionsAreActive ? "captions.bubble.fill" : "captions.bubble")
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+                .foregroundStyle(playback.captionsAreActive ? Color.appAccent : Color.appTextPrimary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help("Captions")
+        .accessibilityLabel("Captions")
+        .accessibilityValue(playback.captionsAccessibilityValue)
+    }
+
+    private func isSelectedInBand(_ id: String) -> Bool {
+        if case .inBand(let selected) = playback.captionSelection {
+            return selected == id
+        }
+        return false
+    }
+
+    @ViewBuilder
+    private func captionMenuRow(_ title: String, selected: Bool) -> some View {
+        if selected {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
+        }
     }
 
     private func transportIconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {

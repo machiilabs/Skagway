@@ -18,7 +18,8 @@ final class SubtitleTrack {
     private(set) var sourceURL: URL?
 
     /// User-facing toggle. Hides the overlay when `false` without unloading cues.
-    var isEnabled: Bool = true {
+    /// Default off — the player Captions menu (Off) owns enabling the sidecar overlay.
+    var isEnabled: Bool = false {
         didSet {
             if isEnabled {
                 updateCurrentCue()

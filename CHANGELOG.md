@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Captions menu** — Built-in player bottom chrome (Compact / Windowed / Full): always a menu — Off (default), Sidecar (.srt) when a sibling exists, and named in-band tracks from the AV legible group (`displayName` / locale, never “Media group 1”). Hidden when nothing is available; fill/accent when not Off. Per-play only (not persisted). Picking in-band unloads the `.srt` overlay; Sidecar selects nil for legible and enables the overlay. In-band auto-select stays off.
 - **Built-in player captions** — Stop AVPlayer from auto-selecting in-band legible tracks (speech-bubble “Yeah.” captions) when Live Captions and Accessibility → Captions (SDH) are off. Sidecar `.srt` overlay is unchanged.
 - **Docs** — Built-in Notes is not a gap (custom **Text**, including a user-created “Notes”). **Mac App Store is a never** (sandboxing; direct + Sparkle only), not deferred. Struck both from ROADMAP impartial-9 / GTM future lists.
 - **Storyboard launch** — Opening in Storyboard View no longer waits on collage bake, `{hash}_storyboard.jpg` decode, filmstrip reuse, or the AV gate before first paint. Cards show a cached collage or the poster immediately; missing collages generate off the main actor after the first frame.
