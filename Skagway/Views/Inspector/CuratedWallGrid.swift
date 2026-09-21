@@ -463,6 +463,10 @@ struct CuratedWallGrid: View {
                 )
             }
             .scrollIndicators(.visible)
+            .overlay {
+                ScrollIndexHUDOverlay(viewModel: viewModel, mode: .grid)
+                    .allowsHitTesting(false)
+            }
             .background(Color(red: 3 / 255, green: 13 / 255, blue: 23 / 255))   // #030D17
             .onAppear {
                 selectionStore.sync(to: viewModel.selectedVideoIds)

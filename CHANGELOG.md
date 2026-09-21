@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Sort-aware scroll HUD** — While dragging the native scrollbar thumb or during a trackpad/mouse fling, a compact chip sits immediately left of the thumb in the browser pane (Grid, List, and Storyboard). Copy follows the current Sort: title letter, date, duration bucket, rating, folder, album/random position, and the other sort keys. Fades when scrolling stops. Index is an O(1) fraction lookup into `filteredVideos`.
 - **Fix: Storyboard scroll flash** — Cached collages no longer paint the poster first. A memory-cache hit shows the collage immediately; a disk-cache `{hash}_storyboard.jpg` keeps an empty cell until the JPEG decodes off the main actor; the poster is only a placeholder when there is no storyboard cache yet (first bake).
 - **Fix: Storyboard bottom-row clicks** — The title fade is visual only. Hits on the lower collage cells (including under the gradient, near the title) seek and play. Select-without-play stays on the title *text* and the under-thumb footer, not the full-width gradient.
 - **Fix: Storyboard second click** — Click 1 still focuses; click 2 on the same collage cell seeks and plays without moving the mouse. Collage hits use AppKit mouseUp (not `DragGesture`, which stayed dead after `onEnded` until `mouseMoved`). Focus rings no longer steal hits. The earlier Esc remount + synthetic `mouseMoved` only covered overlay dismiss and still needed the pointer to move.

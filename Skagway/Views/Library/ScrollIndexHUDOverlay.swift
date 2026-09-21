@@ -1,0 +1,436 @@
+import AppKit
+import SwiftUI
+
+/// Compact sort-index chip parked immediately left of the native vertical scroller thumb.
+///
+/// Native scrollbars stay in place — this overlay is hit-test transparent. Shown while the user
+/// drags the thumb or a trackpad/mouse live-scroll / fling is in progress; fades out when motion stops.
+struct ScrollIndexHUDOverlay: NSViewRepresentable {
+    enum Mode { case grid, list }
+
+    var viewModel: LibraryViewModel
+    var mode: Mode
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> HostView {
+        let view = HostView(frame: .zero)
+        view.setAccessibilityElement(false)
+        context.coordinator.host = view
+        return view
+    }
+
+    func updateNSView(_ nsView: HostView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.host = nsView
+        coordinator.mode = mode
+        coordinator.viewModel = viewModel
+        DispatchQueue.main.async { [weak nsView, weak coordinator] in
+            guard let nsView, let coordinator else { return }
+            Task { @MainActor in
+                coordinator.attachIfNeeded(from: nsView)
+            }
+        }
+    }
+
+    static func dismantleNSView(_ nsView: HostView, coordinator: Coordinator) {
+        coordinator.tearDown()
+    }
+
+    // MARK: - Host
+
+    final class HostView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override var isFlipped: Bool { true }
+    }
+
+    // MARK: - Chip
+
+    final class ChipView: NSView {
+        let label = NSTextField(labelWithString: "")
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            layer?.cornerRadius = 11
+            layer?.masksToBounds = true
+            layer?.backgroundColor = NSColor(srgbRed: 18 / 255, green: 24 / 255, blue: 38 / 255, alpha: 0.92).cgColor
+            layer?.borderWidth = 1
+            layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+
+            label.font = .systemFont(ofSize: 11, weight: .semibold)
+            label.textColor = .white
+            label.alignment = .center
+            label.lineBreakMode = .byTruncatingTail
+            label.maximumNumberOfLines = 1
+            label.drawsBackground = false
+            label.isBordered = false
+            label.isBezeled = false
+            label.isEditable = false
+            label.isSelectable = false
+            label.setAccessibilityElement(false)
+            addSubview(label)
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override var isFlipped: Bool { true }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        func setText(_ text: String) {
+            label.stringValue = text
+            let fitting = label.fittingSize
+            let width = min(220, max(36, ceil(fitting.width) + 16))
+            setFrameSize(NSSize(width: width, height: 22))
+            label.frame = bounds.insetBy(dx: 8, dy: 2)
+        }
+    }
+
+    // MARK: - Coordinator
+
+    @MainActor
+    final class Coordinator {
+        var mode: Mode = .grid
+        weak var host: HostView?
+        var viewModel: LibraryViewModel?
+
+        private var observers: [NSObjectProtocol] = []
+        private var mouseMonitor: Any?
+        private weak var trackedScrollView: NSScrollView?
+        private var chip: ChipView?
+        private var liveScrolling = false
+        private var knobDragging = false
+        private var hideWork: DispatchWorkItem?
+        private var lastLabel = ""
+        private var isShowing = false
+
+        func tearDown() {
+            hideWork?.cancel()
+            hideWork = nil
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+            observers.removeAll()
+            if let mouseMonitor {
+                NSEvent.removeMonitor(mouseMonitor)
+                self.mouseMonitor = nil
+            }
+            chip?.removeFromSuperview()
+            chip = nil
+            trackedScrollView = nil
+            liveScrolling = false
+            knobDragging = false
+            isShowing = false
+            lastLabel = ""
+        }
+
+        func attachIfNeeded(from view: NSView) {
+            guard let scrollView = Self.locateScrollView(from: view, mode: mode) else { return }
+            if trackedScrollView === scrollView, !observers.isEmpty { return }
+
+            tearDown()
+            trackedScrollView = scrollView
+            let chip = ChipView(frame: .zero)
+            chip.alphaValue = 0
+            chip.isHidden = true
+            view.addSubview(chip)
+            self.chip = chip
+
+            let clip = scrollView.contentView
+            clip.postsBoundsChangedNotifications = true
+
+            let nc = NotificationCenter.default
+            observers.append(nc.addObserver(
+                forName: NSScrollView.willStartLiveScrollNotification,
+                object: scrollView,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.liveScrolling = true
+                    self?.showAndUpdate()
+                }
+            })
+            observers.append(nc.addObserver(
+                forName: NSScrollView.didLiveScrollNotification,
+                object: scrollView,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.showAndUpdate()
+                }
+            })
+            observers.append(nc.addObserver(
+                forName: NSScrollView.didEndLiveScrollNotification,
+                object: scrollView,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.liveScrolling = false
+                    self?.scheduleHide()
+                }
+            })
+            observers.append(nc.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: clip,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.handleBoundsChange()
+                }
+            })
+
+            // Overlay scroller knob drags sometimes skip live-scroll notifications; hitPart is authoritative.
+            mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
+                Task { @MainActor in
+                    self?.handleMouse(event)
+                }
+                return event
+            }
+        }
+
+        private func handleMouse(_ event: NSEvent) {
+            guard let host, event.window === host.window else { return }
+            if event.type == .leftMouseUp {
+                guard knobDragging else { return }
+                knobDragging = false
+                liveScrolling = false
+                scheduleHide()
+                return
+            }
+            guard isKnobTracking() else { return }
+            knobDragging = true
+            liveScrolling = true
+            showAndUpdate()
+        }
+
+        private func handleBoundsChange() {
+            guard liveScrolling || isShowing else { return }
+            if isKnobTracking() { liveScrolling = true }
+            showAndUpdate()
+            if !liveScrolling {
+                scheduleHide()
+            }
+        }
+
+        private func isKnobTracking() -> Bool {
+            guard let scroller = trackedScrollView?.verticalScroller else { return false }
+            return scroller.hitPart == .knob
+        }
+
+        private func showAndUpdate() {
+            guard let host, let scrollView = trackedScrollView, let viewModel else { return }
+            let videos = viewModel.filteredVideos
+            let fraction = Self.scrollFraction(scrollView: scrollView, mode: mode)
+            guard let idx = ScrollIndexHUDLabel.index(fraction: fraction, count: videos.count) else {
+                hideImmediately()
+                return
+            }
+            let video = videos[idx]
+            let sort = ScrollIndexHUDLabel.sort(
+                isRandomOrder: viewModel.isRandomOrder,
+                isShowingAlbumOrder: viewModel.isShowingAlbumOrder,
+                hasCustomSort: viewModel.customSortFieldId != nil,
+                keyPath: viewModel.tableSortOrder.first?.keyPath
+            )
+            var customDisplay: String?
+            if sort == .custom,
+               let fieldId = viewModel.customSortFieldId,
+               let field = viewModel.customMetadataFieldDefinitions.first(where: { $0.id == fieldId })
+            {
+                customDisplay = viewModel.listCustomFieldDisplay(for: video, field: field)
+            }
+            let text = ScrollIndexHUDLabel.text(
+                sort: sort,
+                video: video,
+                index: idx,
+                count: videos.count,
+                customDisplay: customDisplay
+            )
+
+            let chip = self.chip ?? {
+                let created = ChipView(frame: .zero)
+                host.addSubview(created)
+                self.chip = created
+                return created
+            }()
+
+            if text != lastLabel {
+                lastLabel = text
+                chip.setText(text)
+            }
+            positionChip(chip, in: host, scrollView: scrollView)
+            showChip(chip)
+        }
+
+        private func positionChip(_ chip: ChipView, in host: NSView, scrollView: NSScrollView) {
+            let knob = Self.knobRect(in: host, scrollView: scrollView)
+            let gap: CGFloat = 6
+            var x = knob.minX - gap - chip.bounds.width
+            var y = knob.midY - chip.bounds.height / 2
+            let pad: CGFloat = 4
+            x = min(max(pad, x), max(pad, host.bounds.maxX - chip.bounds.width - pad))
+            y = min(max(pad, y), max(pad, host.bounds.maxY - chip.bounds.height - pad))
+            chip.setFrameOrigin(NSPoint(x: x, y: y))
+        }
+
+        private func showChip(_ chip: ChipView) {
+            hideWork?.cancel()
+            hideWork = nil
+            isShowing = true
+            chip.isHidden = false
+            chip.alphaValue = 1
+        }
+
+        private func scheduleHide() {
+            hideWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                Task { @MainActor in
+                    self?.fadeOut()
+                }
+            }
+            hideWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+        }
+
+        private func fadeOut() {
+            guard !liveScrolling, !isKnobTracking() else {
+                scheduleHide()
+                return
+            }
+            guard let chip, isShowing else { return }
+            isShowing = false
+            lastLabel = ""
+            let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            if reduceMotion {
+                chip.alphaValue = 0
+                chip.isHidden = true
+                return
+            }
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.22
+                chip.animator().alphaValue = 0
+            } completionHandler: { [weak self, weak chip] in
+                guard let self, let chip else { return }
+                if !self.isShowing {
+                    chip.isHidden = true
+                }
+            }
+        }
+
+        private func hideImmediately() {
+            hideWork?.cancel()
+            hideWork = nil
+            isShowing = false
+            lastLabel = ""
+            chip?.alphaValue = 0
+            chip?.isHidden = true
+        }
+
+        // MARK: Geometry
+
+        static func scrollFraction(scrollView: NSScrollView, mode: Mode) -> Double {
+            if let scroller = scrollView.verticalScroller {
+                let value = Double(scroller.floatValue)
+                if value.isFinite { return min(1, max(0, value)) }
+            }
+            let clip = scrollView.contentView
+            let insets = scrollView.contentInsets
+            let clipH = clip.bounds.height
+            let docHeight = scrollView.documentView?.bounds.height ?? clipH
+            let minY: CGFloat = (mode == .list) ? 0 : -insets.top
+            let maxY = max(minY, docHeight + insets.bottom - clipH)
+            let span = maxY - minY
+            guard span > 0.5 else { return 0 }
+            return min(1, max(0, Double((clip.bounds.origin.y - minY) / span)))
+        }
+
+        static func knobRect(in host: NSView, scrollView: NSScrollView) -> NSRect {
+            if let scroller = scrollView.verticalScroller, scroller.superview != nil {
+                let knob = scroller.rect(for: .knob)
+                if knob.height > 1, knob.width > 1 {
+                    return host.convert(knob, from: scroller)
+                }
+                let slot = host.convert(scroller.bounds, from: scroller)
+                let proportion = max(CGFloat(scroller.knobProportion), 0.08)
+                let knobH = max(24, slot.height * proportion)
+                let travel = max(0, slot.height - knobH)
+                let y = slot.minY + CGFloat(scroller.floatValue) * travel
+                return NSRect(x: slot.minX, y: y, width: max(slot.width, 1), height: knobH)
+            }
+            let fraction = CGFloat(scrollView.verticalScroller?.floatValue ?? 0)
+            let track = host.bounds
+            let knobH: CGFloat = 24
+            let travel = max(0, track.height - knobH)
+            return NSRect(
+                x: track.maxX - 14,
+                y: track.minY + fraction * travel,
+                width: 14,
+                height: knobH
+            )
+        }
+
+        static func locateScrollView(from view: NSView, mode: Mode) -> NSScrollView? {
+            switch mode {
+            case .grid:
+                // Overlay is a sibling of the SwiftUI ScrollView — look at ancestors, then
+                // siblings. Do not DFS the whole browser pane (that would grab the filters drawer).
+                if let sv = enclosingScrollView(from: view) { return sv }
+                return siblingScrollView(from: view)
+            case .list:
+                if let pane = browserPane(from: view),
+                   let table = ScrollCommandHandlerListTable.tableWithMostRows(in: pane)
+                {
+                    return table.enclosingScrollView
+                }
+                guard let content = view.window?.contentView else { return nil }
+                return ScrollCommandHandlerListTable.tableWithMostRows(in: content)?.enclosingScrollView
+            }
+        }
+
+        private static func enclosingScrollView(from view: NSView) -> NSScrollView? {
+            var current: NSView? = view.superview
+            while let v = current {
+                if let sv = v as? NSScrollView { return sv }
+                if v is NSSplitView { break }
+                current = v.superview
+            }
+            return nil
+        }
+
+        private static func siblingScrollView(from view: NSView) -> NSScrollView? {
+            var current: NSView? = view
+            while let v = current {
+                if v is NSSplitView { break }
+                if let parent = v.superview {
+                    if parent is NSSplitView { break }
+                    for sub in parent.subviews where sub !== v {
+                        if let sv = firstVerticalScrollView(in: sub) { return sv }
+                    }
+                }
+                current = v.superview
+            }
+            return nil
+        }
+
+        private static func firstVerticalScrollView(in root: NSView) -> NSScrollView? {
+            if let sv = root as? NSScrollView { return sv }
+            for sub in root.subviews {
+                if let found = firstVerticalScrollView(in: sub) { return found }
+            }
+            return nil
+        }
+
+        /// Left split pane (browser). Stops at `NSSplitView` so Inspector scrollers are ignored.
+        private static func browserPane(from view: NSView) -> NSView? {
+            var current: NSView? = view
+            var last = view
+            while let v = current {
+                if v is NSSplitView { return last }
+                last = v
+                current = v.superview
+            }
+            return view.superview
+        }
+    }
+}

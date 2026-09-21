@@ -596,6 +596,10 @@ struct LibraryListView: View {
                 videoCount: viewModel.filteredVideos.count
             )
         )
+        .overlay {
+            ScrollIndexHUDOverlay(viewModel: viewModel, mode: .list)
+                .allowsHitTesting(false)
+        }
         .onAppear {
             if viewModel.scrollToSelectedOnViewSwitch {
                 viewModel.scrollToSelectedOnViewSwitch = false
