@@ -36,58 +36,97 @@ final class CuratedWallGridLayoutTests: XCTestCase {
         XCTAssertEqual(n, 4)
     }
 
-    func testInspectorToggleDoesNotChangeColumnLayoutWidth() {
-        let inspector: CGFloat = 380
-        let withInspector = CuratedWallGrid.columnLayoutWidth(
-            availableWidth: 900,
-            isInspectorVisible: true,
-            inspectorWidth: inspector
+    func testCompactStoryboardGainsFourthColumnWhenInspectorHides() {
+        // Typical ~1200pt browser + ~380pt Inspector → 3 Compact cols; hide → ~1580pt → 4.
+        let shown = CuratedWallGrid.columnCount(
+            forContainerWidth: 1200,
+            maxColumns: 4,
+            minCellWidth: 360,
+            spacing: 16,
+            outerPadding: 12
         )
-        let hidden = CuratedWallGrid.columnLayoutWidth(
-            availableWidth: 900 + inspector,
-            isInspectorVisible: false,
-            inspectorWidth: inspector
+        let hidden = CuratedWallGrid.columnCount(
+            forContainerWidth: 1580,
+            maxColumns: 4,
+            minCellWidth: 360,
+            spacing: 16,
+            outerPadding: 12
         )
-        XCTAssertEqual(withInspector, hidden)
-
-        let colsShown = CuratedWallGrid.columnCount(
-            forContainerWidth: withInspector,
-            maxColumns: 3,
-            minCellWidth: 440,
-            spacing: 28,
-            outerPadding: 18
-        )
-        let colsHidden = CuratedWallGrid.columnCount(
-            forContainerWidth: hidden,
-            maxColumns: 3,
-            minCellWidth: 440,
-            spacing: 28,
-            outerPadding: 18
-        )
-        XCTAssertEqual(colsShown, colsHidden)
-
-        XCTAssertEqual(
-            CuratedWallGrid.wallGridItems(columnCount: colsShown, spacing: 28).count,
-            colsShown
-        )
+        XCTAssertEqual(shown, 3)
+        XCTAssertEqual(hidden, 4)
     }
 
-    func testRawHiddenWidthWouldAddStoryboardColumns() {
-        // Sanity: without compensation, hiding the Inspector would change N (the stall).
+    func testInspectorWidthChangeKeepsSingleAdaptiveGridItem() {
+        // ⌘I hide/show changes integer columnCount (3→4) but must keep one adaptive GridItem
+        // so LazyVGrid does not remount every Storyboard/Grid card.
         let shown = CuratedWallGrid.columnCount(
-            forContainerWidth: 900,
-            maxColumns: 3,
-            minCellWidth: 440,
-            spacing: 28,
-            outerPadding: 18
+            forContainerWidth: 1200,
+            maxColumns: 4,
+            minCellWidth: 360,
+            spacing: 16,
+            outerPadding: 12
         )
-        let rawHidden = CuratedWallGrid.columnCount(
-            forContainerWidth: 1280,
-            maxColumns: 3,
-            minCellWidth: 440,
-            spacing: 28,
-            outerPadding: 18
+        let hidden = CuratedWallGrid.columnCount(
+            forContainerWidth: 1580,
+            maxColumns: 4,
+            minCellWidth: 360,
+            spacing: 16,
+            outerPadding: 12
         )
-        XCTAssertNotEqual(shown, rawHidden)
+        XCTAssertNotEqual(shown, hidden)
+
+        let itemsNarrow = CuratedWallGrid.wallGridItems(
+            minCellWidth: 360,
+            spacing: 16,
+            maxColumns: 4,
+            containerWidth: 1200,
+            outerPadding: 12
+        )
+        let itemsWide = CuratedWallGrid.wallGridItems(
+            minCellWidth: 360,
+            spacing: 16,
+            maxColumns: 4,
+            containerWidth: 1580,
+            outerPadding: 12
+        )
+        XCTAssertEqual(itemsNarrow.count, 1)
+        XCTAssertEqual(itemsWide.count, 1)
+
+        // Typical 3→4 keeps the same adaptive minimum so GridItem identity is stable.
+        let minShown = CuratedWallGrid.adaptiveColumnMinimum(
+            containerWidth: 1200,
+            maxColumns: 4,
+            minCellWidth: 360,
+            spacing: 16,
+            outerPadding: 12
+        )
+        let minHidden = CuratedWallGrid.adaptiveColumnMinimum(
+            containerWidth: 1580,
+            maxColumns: 4,
+            minCellWidth: 360,
+            spacing: 16,
+            outerPadding: 12
+        )
+        XCTAssertEqual(minShown, 360)
+        XCTAssertEqual(minHidden, 360)
+    }
+
+    func testAdaptiveMinimumCapsUltrawideAtMaxColumns() {
+        let minimum = CuratedWallGrid.adaptiveColumnMinimum(
+            containerWidth: 2400,
+            maxColumns: 4,
+            minCellWidth: 360,
+            spacing: 16,
+            outerPadding: 12
+        )
+        XCTAssertGreaterThan(minimum, 360)
+        let n = CuratedWallGrid.columnCount(
+            forContainerWidth: 2400,
+            maxColumns: 4,
+            minCellWidth: 360,
+            spacing: 16,
+            outerPadding: 12
+        )
+        XCTAssertEqual(n, 4)
     }
 }

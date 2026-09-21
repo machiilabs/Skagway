@@ -579,11 +579,7 @@ private struct LibraryContentView: View {
                 CuratedWallGrid(
                     viewModel: vm,
                     thumbnailService: thumbService,
-                    containerWidth: CuratedWallGrid.columnLayoutWidth(
-                        availableWidth: availableWidth,
-                        isInspectorVisible: vm.isInspectorVisible,
-                        inspectorWidth: browsingSplitDetailWidth
-                    )
+                    containerWidth: availableWidth
                 )
             } else {
                 LibraryListView(

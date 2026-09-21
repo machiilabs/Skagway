@@ -122,7 +122,7 @@ struct CuratedWallGrid: View {
 
     /// Largest `1...maxColumns` such that flexible cells are at least `minCellWidth` wide.
     /// Invalid/zero widths keep `maxColumns` so a transient layout pass can't pin the grid at 1.
-    /// Count is fed to `LazyVGrid` but must stay stable across Inspector ⌘I (`columnLayoutWidth`).
+    /// Used for ↑/↓ and Inspector scroll-pin math — not as `LazyVGrid(columns: count:)` (that remounts).
     static func columnCount(
         forContainerWidth width: CGFloat,
         maxColumns: Int = maxColumns,
@@ -136,22 +136,39 @@ struct CuratedWallGrid: View {
         return min(maxColumns, max(1, n))
     }
 
-    /// Pane width used for Wall column math. Inspector show/hide must not change this value
-    /// (cards stretch in place). When the Inspector is hidden, subtract its last saved width.
-    static func columnLayoutWidth(
-        availableWidth: CGFloat,
-        isInspectorVisible: Bool,
-        inspectorWidth: CGFloat
+    /// Raise `minCellWidth` just enough that `maxColumns + 1` cannot fit. Typical ⌘I (3→4 Compact)
+    /// leaves the value at `minCellWidth`, so the single adaptive `GridItem` identity is unchanged.
+    static func adaptiveColumnMinimum(
+        containerWidth: CGFloat,
+        maxColumns: Int,
+        minCellWidth: CGFloat,
+        spacing: CGFloat,
+        outerPadding: CGFloat
     ) -> CGFloat {
-        guard availableWidth > 1 else { return availableWidth }
-        if isInspectorVisible { return availableWidth }
-        return max(1, availableWidth - max(0, inspectorWidth))
+        let inner = max(0, containerWidth - outerPadding * 2)
+        let cols = max(1, maxColumns)
+        let capFloor = (inner + spacing) / CGFloat(cols + 1) - spacing
+        return max(minCellWidth, capFloor + 1)
     }
 
-    /// Flexible equal columns. Count comes from `columnLayoutWidth` so ⌘I does not change N
-    /// (changing `count` relayouts every LazyVGrid cell cached from scrolling).
-    static func wallGridItems(columnCount: Int, spacing: CGFloat) -> [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: spacing), count: max(1, columnCount))
+    /// One adaptive `GridItem` so pane-width changes (⌘I) reflow 3→4 without replacing the grid.
+    /// Changing `Array(repeating:count:)` from N→M tears down every visible card, restarts `.task`,
+    /// and re-decodes Storyboard collages.
+    static func wallGridItems(
+        minCellWidth: CGFloat,
+        spacing: CGFloat,
+        maxColumns: Int = maxColumns,
+        containerWidth: CGFloat = 0,
+        outerPadding: CGFloat = outerPadding
+    ) -> [GridItem] {
+        let minimum = adaptiveColumnMinimum(
+            containerWidth: containerWidth,
+            maxColumns: maxColumns,
+            minCellWidth: minCellWidth,
+            spacing: spacing,
+            outerPadding: outerPadding
+        )
+        return [GridItem(.adaptive(minimum: minimum), spacing: spacing)]
     }
 
     private var columnCount: Int {
@@ -165,12 +182,20 @@ struct CuratedWallGrid: View {
     }
 
     private var wallGridItems: [GridItem] {
-        Self.wallGridItems(columnCount: columnCount, spacing: columnSpacing)
+        Self.wallGridItems(
+            minCellWidth: activeMinCellWidth,
+            spacing: columnSpacing,
+            maxColumns: activeMaxColumns,
+            containerWidth: containerWidth,
+            outerPadding: outerPadding
+        )
     }
 
     var body: some View {
-        // Integer column count is computed from inspector-compensated width (stable on ⌘I) so
-        // LazyVGrid does not relayout every card cached from scrolling. No `.id(filteredVideosVersion)`.
+        // Adaptive columns follow the real pane width (3→4 Compact on ⌘I hide). Integer
+        // `columnCount` is only for keyboard / pin math. One GridItem keeps card identity —
+        // no `.id(filteredVideosVersion)`, no N→M remount. Animation is suppressed so the
+        // LazyVGrid cache does not interpolate every visited Storyboard card.
         // No GeometryReader around LazyVGrid content — preserves native scroller behaviour.
         let cols = columnCount
         ScrollView(.vertical) {
@@ -495,6 +520,7 @@ struct CuratedWallGrid: View {
                 )
             }
             .scrollIndicators(.visible)
+            .transaction { $0.animation = nil }
             .overlay {
                 ScrollIndexHUDOverlay(viewModel: viewModel, mode: .grid)
                     .allowsHitTesting(false)
