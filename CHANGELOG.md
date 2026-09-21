@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Fix: Scroll HUD still missing (1168)** — Attach could succeed but the chip was a subview of a 0×0 `NSViewRepresentable` host (SwiftUI clips that wrapper; `.frame(maxWidth: .infinity)` only sized the SwiftUI frame). The chip is now a sibling of the wall scroller thumb on that `NSScrollView`. `sizeThatFits` fills the overlay. Locate uses the nearest wall scroller, never the Inspector pane.
 - **Fix: Scroll HUD (rolodex) missing** — Sort-index chip beside the scrollbar thumb shows again while scrolling Grid / List / Storyboard. Inspector clip-collapse could attach the overlay to the wrong scroller; live-scroll was also killed by putting `animation = nil` on the `ScrollView`. Grid reflow animation stays suppressed on the LazyVGrid only.
 - **Fix: Show Inspector blank pane (1166)** — Parking the Inspector `NSHostingView` left a blank column and skipped divider restore. Hide now clips the pane to zero width (host stays arranged at last size); show `setPosition`s the last Inspector width. No wall remount; 3↔4 Compact reflow and the 1164 range clamp stay.
 - **Fix: Show Inspector (⌘I) stall** — Hide was cheap; show took 2–3s because a detached Inspector host was cold-laid-out with every cached Storyboard card. The host stays in the split (clipped when hidden) so show does not remount it.

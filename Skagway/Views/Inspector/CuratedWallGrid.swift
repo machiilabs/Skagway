@@ -524,7 +524,6 @@ struct CuratedWallGrid: View {
             .scrollIndicators(.visible)
             .overlay {
                 ScrollIndexHUDOverlay(viewModel: viewModel, mode: .grid)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
             }
             .background(Color(red: 3 / 255, green: 13 / 255, blue: 23 / 255))   // #030D17

@@ -35,6 +35,12 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
         }
     }
 
+    /// Overlay `NSViewRepresentable` has no intrinsic size. Without this, SwiftUI keeps the
+    /// host at 0×0 (1168's `.frame(maxWidth: .infinity)` only sized the SwiftUI wrapper).
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: HostView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+    }
+
     static func dismantleNSView(_ nsView: HostView, coordinator: Coordinator) {
         coordinator.tearDown()
     }
@@ -43,7 +49,18 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
 
     final class HostView: NSView {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
-        override var isFlipped: Bool { true }
+        override var isFlipped: Bool { false }
+
+        override func viewDidMoveToSuperview() {
+            super.viewDidMoveToSuperview()
+            autoresizingMask = [.width, .height]
+            if let superview { frame = superview.bounds }
+        }
+
+        override func resize(withOldSuperviewSize oldSize: NSSize) {
+            super.resize(withOldSuperviewSize: oldSize)
+            if let superview { frame = superview.bounds }
+        }
     }
 
     // MARK: - Chip
@@ -79,7 +96,7 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
 
         required init?(coder: NSCoder) { nil }
 
-        override var isFlipped: Bool { true }
+        override var isFlipped: Bool { false }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -125,6 +142,9 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
         private var isShowing = false
         private var lastClipOriginY: CGFloat?
         private var attachAttempts = 0
+        private(set) var debugBoundsEvents = 0
+        var debugTrackedScrollView: NSScrollView? { trackedScrollView }
+        var debugChipSuperview: NSView? { chip?.superview }
 
         func tearDown() {
             hideWork?.cancel()
@@ -143,6 +163,7 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
             isShowing = false
             lastLabel = ""
             lastClipOriginY = nil
+            debugBoundsEvents = 0
         }
 
         func attachIfNeeded(from view: NSView) {
@@ -166,7 +187,13 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
             let chip = ChipView(frame: .zero)
             chip.alphaValue = 0
             chip.isHidden = true
-            view.addSubview(chip)
+            // Must live on the wall NSScrollView. The representable host is often 0×0, and
+            // SwiftUI clips that wrapper — a chip parented there is invisible (1168).
+            if let scroller = scrollView.verticalScroller {
+                scrollView.addSubview(chip, positioned: .above, relativeTo: scroller)
+            } else {
+                scrollView.addSubview(chip)
+            }
             self.chip = chip
 
             let clip = scrollView.contentView
@@ -237,6 +264,7 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
         }
 
         private func handleBoundsChange() {
+            debugBoundsEvents += 1
             let y = trackedScrollView?.contentView.bounds.origin.y
             if let y, let last = lastClipOriginY, abs(y - last) > 0.5 {
                 liveScrolling = true
@@ -287,7 +315,7 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
 
             let chip = self.chip ?? {
                 let created = ChipView(frame: .zero)
-                host.addSubview(created)
+                scrollView.addSubview(created, positioned: .above, relativeTo: scrollView.verticalScroller)
                 self.chip = created
                 return created
             }()
@@ -296,7 +324,7 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
                 lastLabel = text
                 chip.setText(text)
             }
-            positionChip(chip, in: host, scrollView: scrollView)
+            positionChip(chip, in: scrollView, scrollView: scrollView)
             showChip(chip)
         }
 
@@ -410,15 +438,14 @@ struct ScrollIndexHUDOverlay: NSViewRepresentable {
         static func locateScrollView(from view: NSView, mode: Mode) -> NSScrollView? {
             switch mode {
             case .grid:
-                // Wall scroller is the largest document in the browser pane. After Inspector
-                // clip-collapse (1167) a sibling walk can grab the drawer or Inspector scroller.
-                if let pane = browserPane(from: view),
-                   let sv = largestVerticalScrollView(in: pane)
-                {
-                    return sv
-                }
+                // Overlay is on the wall ScrollView. Nearest ancestor/sibling is the wall —
+                // never DFS the Inspector pane (cousin under NSSplitView).
                 if let sv = enclosingScrollView(from: view) { return sv }
-                return siblingScrollView(from: view)
+                if let sv = siblingScrollView(from: view) { return sv }
+                if let pane = browserPane(from: view) {
+                    return largestVerticalScrollView(in: pane)
+                }
+                return nil
             case .list:
                 if let pane = browserPane(from: view),
                    let table = ScrollCommandHandlerListTable.tableWithMostRows(in: pane)
