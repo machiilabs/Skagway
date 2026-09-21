@@ -4,6 +4,7 @@ import AppKit
 /// regardless of how the container is resized by the split view, producing a clipping effect.
 final class ClippingContainer: NSView {
     private(set) var isFrozen = false
+    private var pinConstraints: [NSLayoutConstraint] = []
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -15,13 +16,26 @@ final class ClippingContainer: NSView {
         clipsToBounds = true
     }
 
+    func addPinnedHost(_ hosted: NSView) {
+        addSubview(hosted)
+        hosted.translatesAutoresizingMaskIntoConstraints = false
+        pinConstraints = [
+            hosted.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hosted.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hosted.topAnchor.constraint(equalTo: topAnchor),
+            hosted.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ]
+        NSLayoutConstraint.activate(pinConstraints)
+    }
+
     func freeze() {
         guard !isFrozen, let hosted = subviews.first else { return }
         isFrozen = true
-        let w = hosted.frame.width
+        pinConstraints.forEach { $0.isActive = false }
+        let w = hosted.frame.width > 1 ? hosted.frame.width : bounds.width
         hosted.translatesAutoresizingMaskIntoConstraints = true
         hosted.autoresizingMask = [.height]
-        hosted.frame = NSRect(x: 0, y: 0, width: w, height: bounds.height)
+        hosted.frame = NSRect(x: 0, y: 0, width: max(w, 1), height: bounds.height)
     }
 
     /// While frozen, snap the hosted view's width to the container's current width so its content (e.g. the
@@ -39,12 +53,15 @@ final class ClippingContainer: NSView {
         guard isFrozen, let hosted = subviews.first else { return }
         isFrozen = false
         hosted.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            hosted.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hosted.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hosted.topAnchor.constraint(equalTo: topAnchor),
-            hosted.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        if pinConstraints.isEmpty {
+            pinConstraints = [
+                hosted.leadingAnchor.constraint(equalTo: leadingAnchor),
+                hosted.trailingAnchor.constraint(equalTo: trailingAnchor),
+                hosted.topAnchor.constraint(equalTo: topAnchor),
+                hosted.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ]
+        }
+        NSLayoutConstraint.activate(pinConstraints)
     }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {

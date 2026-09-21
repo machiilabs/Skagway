@@ -30,37 +30,31 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
         let contentHost = NSHostingView(rootView: content())
         let detailHost = NSHostingView(rootView: detail())
 
-        detailHost.translatesAutoresizingMaskIntoConstraints = false
-
         let contentContainer = ClippingContainer()
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
-        contentHost.translatesAutoresizingMaskIntoConstraints = false
-        contentContainer.addSubview(contentHost)
-        NSLayoutConstraint.activate([
-            contentHost.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
-            contentHost.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
-            contentHost.topAnchor.constraint(equalTo: contentContainer.topAnchor),
-            contentHost.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
-        ])
+        contentContainer.addPinnedHost(contentHost)
+
+        // Inspector lives in a clipping container that stays arranged. Hide collapses the
+        // pane to zero width (host keeps last size, clipped) — moving NSHostingView out of
+        // the split (1166 park) left a blank pane and skipped divider restore.
+        let detailContainer = ClippingContainer()
+        detailContainer.translatesAutoresizingMaskIntoConstraints = false
+        detailContainer.addPinnedHost(detailHost)
 
         splitView.addArrangedSubview(contentContainer)
         splitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
+        splitView.addArrangedSubview(detailContainer)
+        splitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
 
         context.coordinator.splitView = splitView
         context.coordinator.contentContainer = contentContainer
+        context.coordinator.detailContainer = detailContainer
         context.coordinator.detailHost = detailHost
         context.coordinator.onSizesChanged = onSizesChanged
         context.coordinator.lastContentID = contentID
         context.coordinator.lastDetailID = detailID
         context.coordinator.lastLayoutModeKey = layoutModeKey
         context.coordinator.lastDetailVisible = isDetailVisible
-
-        // Attach detail only when visible — `isHidden` alone leaves a blank reserved strip
-        // with Auto Layout hosting views (see `applyDetailVisibility`).
-        if isDetailVisible {
-            splitView.addArrangedSubview(detailHost)
-            splitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
-        }
 
         return splitView
     }
@@ -181,13 +175,9 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
     final class Coordinator: NSObject, NSSplitViewDelegate {
         weak var splitView: NSSplitView?
         fileprivate weak var contentContainer: ClippingContainer?
-        /// Strong — detail is detached from the split when hidden and must outlive removal.
+        /// Inspector `NSHostingView` — always a subview of `detailContainer`, never parked.
         fileprivate var detailHost: NSView?
-        /// Off-screen, same-window holder so Hide does not evict the Inspector hosting view.
-        /// Show was 2–3s because re-adding a detached `NSHostingView` cold-laid-out CuratedWallInspector
-        /// (GeometryReader / tags / `.task` → filmstrip) and `layoutSubtreeIfNeeded` walked that plus
-        /// every cached Storyboard card in the same turn.
-        fileprivate var parkedDetailHolder: NSView?
+        fileprivate var detailContainer: ClippingContainer?
         var onSizesChanged: ((CGFloat, CGFloat) -> Void)?
         var lastContentID: AnyHashable?
         var lastDetailID: AnyHashable?
@@ -238,7 +228,7 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
 
         func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt index: Int) -> CGFloat {
             switch index {
-            case 0: return 80
+            case 0: return lastDetailVisible == false ? 0 : 80
             default: return proposedMinimumPosition
             }
         }
@@ -246,9 +236,13 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
         func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt index: Int) -> CGFloat {
             let total = splitView.bounds.width
             switch index {
-            case 0: return total - 200
+            case 0: return lastDetailVisible == false ? total : total - 200
             default: return proposedMaximumPosition
             }
+        }
+
+        func splitView(_ splitView: NSSplitView, shouldHideDividerAt dividerIndex: Int) -> Bool {
+            lastDetailVisible == false
         }
 
         fileprivate func syncLayoutModeKey(_ key: String) {
@@ -267,9 +261,9 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
             }
         }
 
-        /// Detach the Inspector from the split when hidden (browser fills the window — `isHidden`
-        /// plus `minWidth: 300` left a blank reserved strip). Park the host in-window at last size
-        /// so Show only re-arranges a warm tree (no cold first-layout / `.task` restart).
+        /// Collapse the Inspector pane to zero width (host stays put, clipped at last size).
+        /// Show restores `detailWidth` via `setPosition`. Never move `NSHostingView` between
+        /// superviews — that left a blank pane on 1166.
         fileprivate func applyDetailVisibility(
             visible: Bool,
             contentWidth: CGFloat,
@@ -277,55 +271,47 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
             totalWidth: CGFloat,
             splitView: NSSplitView
         ) {
-            guard let detail = detailHost else { return }
-            let detailAttached = splitView.arrangedSubviews.contains(detail)
+            guard let detailContainer, splitView.arrangedSubviews.count >= 2 else { return }
 
             if !visible {
-                if detailAttached || splitView.arrangedSubviews.count >= 2 {
-                    let parkSize = parkedSize(for: detail, fallbackWidth: detailWidth, splitView: splitView)
-                    isProgrammaticResize = true
-                    detail.isHidden = false
-                    splitView.removeArrangedSubview(detail)
-                    parkDetail(detail, size: parkSize, splitView: splitView)
-                    splitView.adjustSubviews()
-                    // Browser only — do not walk a cold Inspector tree.
-                    contentContainer?.layoutSubtreeIfNeeded()
+                let browserW = splitView.arrangedSubviews[0].frame.width
+                if hasAppliedInitialBrowserWidth, abs(browserW - totalWidth) < 1.5, detailContainer.isFrozen {
                     lastAppliedContentWidthFromModel = totalWidth
-                    isProgrammaticResize = false
-                    hasAppliedInitialBrowserWidth = true
-                } else {
-                    // Already a single-pane split. Keep the host warm for the next show.
-                    if detail.superview == nil || detail.superview === parkedDetailHolder {
-                        parkDetail(
-                            detail,
-                            size: parkedSize(for: detail, fallbackWidth: detailWidth, splitView: splitView),
-                            splitView: splitView
-                        )
-                    }
-                    lastAppliedContentWidthFromModel = totalWidth
-                    hasAppliedInitialBrowserWidth = true
+                    return
                 }
+                isProgrammaticResize = true
+                if !detailContainer.isFrozen {
+                    if let host = detailHost, host.frame.width < 40 {
+                        let w = max(detailWidth, 300)
+                        host.translatesAutoresizingMaskIntoConstraints = true
+                        host.frame = NSRect(x: 0, y: 0, width: w, height: max(detailContainer.bounds.height, 1))
+                    }
+                    detailContainer.freeze()
+                }
+                splitView.setPosition(totalWidth, ofDividerAt: 0)
+                splitView.adjustSubviews()
+                contentContainer?.layoutSubtreeIfNeeded()
+                lastAppliedContentWidthFromModel = totalWidth
+                isProgrammaticResize = false
+                hasAppliedInitialBrowserWidth = true
                 return
             }
 
-            if !detailAttached {
+            let clampedDetail = min(max(detailWidth, 200), totalWidth - 80)
+            let browserW = max(80, totalWidth - clampedDetail)
+            let needsExpand = detailContainer.isFrozen
+                || !hasAppliedInitialBrowserWidth
+                || abs((lastAppliedContentWidthFromModel ?? -1) - browserW) > 0.5
+            if needsExpand {
                 isProgrammaticResize = true
-                unparkDetail(detail, onto: splitView)
-                splitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
-                let clampedDetail = min(max(detailWidth, 200), totalWidth - 80)
-                let browserW = max(80, totalWidth - clampedDetail)
-                // One divider move — no `layoutSubtreeIfNeeded` (that was the show hitch:
-                // Inspector + every cached Storyboard NSView in the same turn).
                 splitView.setPosition(browserW, ofDividerAt: 0)
+                splitView.adjustSubviews()
+                if detailContainer.isFrozen {
+                    detailContainer.unfreeze()
+                }
                 lastAppliedContentWidthFromModel = browserW
                 isProgrammaticResize = false
                 hasAppliedInitialBrowserWidth = true
-                if abs(contentWidth - browserW) > 1 || abs(detailWidth - clampedDetail) > 1 {
-                    let persist = onSizesChanged
-                    DispatchQueue.main.async {
-                        persist?(browserW, clampedDetail)
-                    }
-                }
                 return
             }
 
@@ -334,51 +320,6 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
                 totalWidth: totalWidth,
                 splitView: splitView
             )
-        }
-
-        private func parkedSize(for detail: NSView, fallbackWidth: CGFloat, splitView: NSSplitView) -> NSSize {
-            let width = detail.frame.width > 40 ? detail.frame.width : max(fallbackWidth, 300)
-            let height = detail.frame.height > 40 ? detail.frame.height : max(splitView.bounds.height, 1)
-            return NSSize(width: width, height: height)
-        }
-
-        /// Keep the Inspector `NSHostingView` in the same window at last size so SwiftUI does not
-        /// `onDisappear` / restart `.task` / cold-layout on the next Show.
-        private func parkDetail(_ detail: NSView, size: NSSize, splitView: NSSplitView) {
-            let width = max(size.width, 300)
-            let height = max(size.height, 1)
-            let holder: NSView
-            if let existing = parkedDetailHolder {
-                holder = existing
-            } else {
-                holder = NSView(frame: .zero)
-                // Must stay unhidden — `isHidden` on the parent makes NSHostingView disappear
-                // and restarts Inspector `.task` / `loadHero` on the next Show.
-                holder.setAccessibilityElement(false)
-                parkedDetailHolder = holder
-            }
-            let parent = splitView.superview ?? splitView.window?.contentView ?? splitView
-            if holder.superview !== parent {
-                holder.removeFromSuperview()
-                parent.addSubview(holder)
-            }
-            holder.frame = CGRect(x: -width - 64, y: 0, width: width, height: height)
-            if detail.superview !== holder {
-                detail.removeFromSuperview()
-                detail.translatesAutoresizingMaskIntoConstraints = true
-                detail.autoresizingMask = [.width, .height]
-                holder.addSubview(detail)
-            }
-            detail.frame = holder.bounds
-            detail.isHidden = false
-        }
-
-        private func unparkDetail(_ detail: NSView, onto splitView: NSSplitView) {
-            detail.removeFromSuperview()
-            detail.translatesAutoresizingMaskIntoConstraints = false
-            detail.isHidden = false
-            parkedDetailHolder?.removeFromSuperview()
-            splitView.addArrangedSubview(detail)
         }
 
         /// After unfreezing the browser column, apply the saved divider width once and mark the
