@@ -62,7 +62,6 @@ struct BrowserScrollPinController: NSViewRepresentable {
             }
             // Do not `layoutSubtreeIfNeeded` the whole document — after a long Storyboard scroll
             // that walks every cached LazyVGrid cell and made ⌘I hitch for seconds.
-            let clip = scrollView.contentView
 
             switch mode {
             case .list:
@@ -80,20 +79,21 @@ struct BrowserScrollPinController: NSViewRepresentable {
                 let offset = rowRect.midY - table.visibleRect.minY
                 store.pin = .init(videoId: videoId, offsetFromVisibleTop: offset)
             case .grid:
-                let cols = max(1, columnCount)
-                let totalRows = max(1, (videoCount + cols - 1) / cols)
-                let docHeight = scrollView.documentView?.bounds.height ?? clip.bounds.height
-                let insets = scrollView.contentInsets
-                let visibleH = max(0, clip.bounds.height - insets.top - insets.bottom)
-                guard visibleH > 0, docHeight > 0 else {
-                    store.pin = nil
+                // Inspector hide can briefly invert or empty the HostingScrollView clip.
+                // Keep the last good pin instead of nilling it during that transient layout.
+                guard let vis = BrowserScrollPinController.standardizedViewport(of: scrollView) else {
                     return
                 }
+                let cols = max(1, columnCount)
+                let totalRows = max(1, (videoCount + cols - 1) / cols)
+                let docHeight = (scrollView.documentView?.bounds ?? vis).standardized.height
+                let insets = scrollView.contentInsets
+                let visibleH = max(0, vis.height - insets.top - insets.bottom)
+                guard visibleH > 0, docHeight > 0, docHeight.isFinite else { return }
                 let rowHeight = docHeight / CGFloat(totalRows)
                 let rowIndex = index / cols
                 let rowMid = CGFloat(rowIndex) * rowHeight + rowHeight * 0.5
-                let visibleTop = clip.bounds.origin.y
-                let offset = rowMid - visibleTop
+                let offset = rowMid - vis.minY
                 store.pin = .init(videoId: videoId, offsetFromVisibleTop: offset)
             }
             updateVisibleStoryboards(from: scrollView)
@@ -103,22 +103,19 @@ struct BrowserScrollPinController: NSViewRepresentable {
             guard mode == .grid, let service = thumbnailService, let pathsInRange else { return }
             let now = ProcessInfo.processInfo.systemUptime
             if now - lastVisibleUpdate < 0.05 { return }
-            lastVisibleUpdate = now
 
-            let cols = max(1, columnCount)
-            let totalRows = max(1, (videoCount + cols - 1) / cols)
-            let clip = scrollView.contentView
-            let docHeight = scrollView.documentView?.bounds.height ?? clip.bounds.height
-            let visibleH = max(1, clip.bounds.height)
-            guard docHeight > 1, videoCount > 0 else { return }
-            let rowHeight = docHeight / CGFloat(totalRows)
-            guard rowHeight > 1 else { return }
-            let visibleTop = clip.bounds.origin.y
-            let startRow = max(0, Int(floor(visibleTop / rowHeight)) - 1)
-            let endRow = min(totalRows, Int(ceil((visibleTop + visibleH) / rowHeight)) + 2)
-            let startIdx = startRow * cols
-            let endIdx = min(videoCount, max(startIdx, endRow * cols))
-            let paths = Set(pathsInRange(startIdx..<endIdx))
+            guard let vis = BrowserScrollPinController.standardizedViewport(of: scrollView) else { return }
+            let docHeight = (scrollView.documentView?.bounds ?? vis).standardized.height
+            guard let range = BrowserScrollPinController.visibleStoryboardIndexRange(
+                visibleTop: vis.minY,
+                visibleHeight: vis.height,
+                documentHeight: docHeight,
+                columnCount: columnCount,
+                videoCount: videoCount
+            ) else { return }
+
+            lastVisibleUpdate = now
+            let paths = Set(pathsInRange(range))
             service.setVisibleStoryboardPaths(paths)
             service.cancelInflightStoryboards(except: paths)
         }
@@ -197,6 +194,50 @@ struct BrowserScrollPinController: NSViewRepresentable {
         ) { [weak coordinator] _ in
             coordinator?.capturePin()
         }
+    }
+
+    /// HostingScrollView can report an inverted or zero-size clip while the Inspector detaches
+    /// (`applyDetailVisibility`). `standardized` makes min <= max; non-positive size is invalid.
+    fileprivate static func standardizedViewport(of scrollView: NSScrollView) -> CGRect? {
+        let vis = scrollView.contentView.bounds.standardized
+        guard vis.width > 0, vis.height > 0,
+              vis.minX <= vis.maxX, vis.minY <= vis.maxY,
+              vis.minY.isFinite, vis.height.isFinite
+        else { return nil }
+        return vis
+    }
+
+    /// On-screen Storyboard index window. Returns nil when the viewport is empty, inverted,
+    /// or the computed bounds would not form a valid `Range` (`lowerBound <= upperBound`).
+    static func visibleStoryboardIndexRange(
+        visibleTop: CGFloat,
+        visibleHeight: CGFloat,
+        documentHeight: CGFloat,
+        columnCount: Int,
+        videoCount: Int
+    ) -> Range<Int>? {
+        let cols = max(1, columnCount)
+        let totalRows = max(1, (videoCount + cols - 1) / cols)
+        guard videoCount > 0,
+              documentHeight > 1, documentHeight.isFinite,
+              visibleHeight > 1, visibleHeight.isFinite,
+              visibleTop.isFinite
+        else { return nil }
+        let rowHeight = documentHeight / CGFloat(totalRows)
+        guard rowHeight > 1, rowHeight.isFinite else { return nil }
+
+        let rawStart = floor(visibleTop / rowHeight) - 1
+        let rawEnd = ceil((visibleTop + visibleHeight) / rowHeight) + 2
+        guard rawStart.isFinite, rawEnd.isFinite,
+              rawStart > CGFloat(Int.min), rawStart < CGFloat(Int.max),
+              rawEnd > CGFloat(Int.min), rawEnd < CGFloat(Int.max)
+        else { return nil }
+        let startRow = max(0, Int(rawStart))
+        let endRow = min(totalRows, Int(rawEnd))
+        let startIdx = min(videoCount, max(0, startRow * cols))
+        let endIdx = min(videoCount, max(startIdx, endRow * cols))
+        guard startIdx <= endIdx else { return nil }
+        return startIdx..<endIdx
     }
 
     fileprivate static func applyRestore(
