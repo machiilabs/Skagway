@@ -132,6 +132,10 @@ final class InlinePlaybackController {
             }
 
             let newPlayer = AVPlayer(url: videoURL)
+            // In-band 608/708 / subtitle tracks are auto-selected as speech-bubble captions
+            // even when Live Captions and Accessibility → Captions (SDH) are off. Skagway's
+            // sidecar `.srt` overlay (`SubtitleTrack`) does not use this media selection.
+            newPlayer.appliesMediaSelectionCriteriaAutomatically = false
             detachTimelineObservers()
             player?.pause()
             player = newPlayer
@@ -139,6 +143,7 @@ final class InlinePlaybackController {
             applyVolumeToPlayer(newPlayer)
             subtitleTrack.attach(to: newPlayer)
             attachTimelineObservers(to: newPlayer, fallbackDuration: video.duration)
+            Task { await self.selectNilLegibleMedia(on: newPlayer) }
             Task { await self.viewModel.reloadBookmarksForPlayback(video: video) }
 
             // Start playback immediately — subtitles attach when the sidecar task finishes.
@@ -199,6 +204,8 @@ final class InlinePlaybackController {
                     surfaceErrorKeepingPanel()
                     return
                 } else if status == .readyToPlay {
+                    // Item load can expose the legible group after the initial attempt.
+                    await selectNilLegibleMedia(on: newPlayer)
                     return
                 }
             }
@@ -354,6 +361,14 @@ final class InlinePlaybackController {
         guard let player else { return }
         player.volume = volume
         player.isMuted = isMuted || volume < 0.001
+    }
+
+    /// Deselects in-band captions / SDH / forced-subtitle tracks on the current item.
+    /// Sidecar `.srt` rendering is a custom overlay and is unaffected.
+    private func selectNilLegibleMedia(on player: AVPlayer) async {
+        guard let item = player.currentItem else { return }
+        guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) else { return }
+        item.select(nil, in: group)
     }
 
     static func formatPlaybackRate(_ rate: Float) -> String {
