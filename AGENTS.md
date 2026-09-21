@@ -39,8 +39,9 @@ This document defines how AI agents (Cursor, Claude, etc.) should work on the Sk
      - Stage **all** changes with `git add -A` (tracked modifications + untracked files).
      - Commit **all completed/ready work** together with the version bump and changelog consolidation. Releases must not leave completed work uncommitted.
    - **Consolidate the changelog**: Move all items from the `## Unreleased` section into a new top-level release entry (`## X.Y.Z (build NNN) - date`). Clear the Unreleased section afterward. The consolidated text must correlate with the release commit message.
-   - Always create an annotated tag and push tags (`git push origin HEAD --tags`).
-   - **After push — publish Sparkle (mandatory):** Upload `dist/Skagway.dmg` + `dist/Skagway.appcast.xml` to R2 (both together). Run `bash scripts/verify_sparkle_publish.sh dist/Skagway.appcast.xml` — must pass before announcing the release. See `docs/SPARKLE.md`.
+  - Always create an annotated tag and push tags (`git push origin HEAD --tags`).
+  - **After push — publish Sparkle (mandatory):** Upload `dist/Skagway.dmg` + `dist/Skagway.appcast.xml` to R2 (both together). Run `bash scripts/verify_sparkle_publish.sh dist/Skagway.appcast.xml` — must pass before announcing the release. See `docs/SPARKLE.md`.
+  - **12k library gate (human, before announce):** Backup with **File → Save Copy…**, recreate from **New Library…** + **Add Folder…** / scan, log timings in `docs/release-perf-log.md`. Agents do not drive the GUI and must not skip this. See `docs/human-qa-script.md` (Before every release).
 
 4. **Commit discipline**
    - For every commit: always stage **all** changes using `git add -A` (or equivalent). This includes modifications to tracked files **and** any untracked files that belong in the commit.
@@ -91,6 +92,7 @@ This document defines how AI agents (Cursor, Claude, etc.) should work on the Sk
   - This is mandatory (see Core Workflow Rules and release process).
 - **User-facing documentation**: The manual is **machii-labs** `/skagway/manual` ([live](https://machiilabs.com/skagway/manual)). `docs/USER_GUIDE.md` only points there. In-app UI, menus, Settings, and tooltips still matter for day-to-day use.
 - **Technical history / performance notes**: `GRID-PERFORMANCE.md`
+- **Release 12k perf log**: `docs/release-perf-log.md` (backup + recreate from scratch before every release)
 
 When making significant changes, update the relevant document(s).
 

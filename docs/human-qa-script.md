@@ -8,7 +8,52 @@ This is the full product surface from first launch through 1.3.0, inventoried fr
 
 **Stop the freeze** if any §16 (1.3.0 / 1166–1169) step fails. Elsewhere, note the step number and continue unless the app crashes.
 
+**Before every release:** run **Before every release** below (backup + recreate the ~12k library, log timings). That gate is mandatory; the rest of this script is the functional walk.
+
 No telemetry, no automated GUI driving.
+
+---
+
+## Before every release (~12k backup + recreate)
+
+Human-only. Do this on the **release build** before you announce. Record numbers in [`docs/release-perf-log.md`](release-perf-log.md). Counts, seconds, and feel only — no paths, titles, or wall screenshots.
+
+**Expect:** toolbar **~12,000** (baseline was **12,174**). Same media folders as last release. Agents must not skip this or drive the GUI.
+
+1. Open the large library you use for 12k testing.  
+   **See:** header count in the 12k range (All Videos, no search). Write that number down as **backup count**.
+
+2. **File → Save Copy…**  
+   **See:** save panel titled **Save Copy**; message about one `.machii` (WAL/SHM do not need copying). Save somewhere safe. Skagway **stays** on the original library. The copy keeps the **original cache pointer**.
+
+3. Confirm the copy exists on disk. Do **not** open it for the rebuild.  
+   **See:** a `.machii` next to your chosen name. Keep it until the new library matches count and you have logged timings.
+
+4. **File → New Library…**  
+   **See:** save panel **New Library**; “thumbnail cache defaults to a Skagway-cache folder beside the file.” Create it. Empty library: drop zone **Drag videos here** / **Add Files…**.
+
+5. **File → Add Folder…** (⇧⌘O) — add the **same** source folders as the backup library (Settings → Data Sources on the old library if you need to recall which).  
+   **See:** folder picker; scan starts; **activity strip** shows import. Start the stopwatch when you confirm the first folder.
+
+6. Wait until the header count **stops changing** and scan is idle.  
+   **See:** count within a few of **backup count** (disk may have gained/lost files). Log **R1** = seconds to stable count. App stays clickable (no multi-minute beachball). Crash or a huge shortfall vs backup = **fail**.
+
+7. When the first screen of Grid posters is usable (placeholders OK), log **R2**.  
+   **See:** wall is browsable; backfill may still run.
+
+8. Quit, then open the **new** library (dock or **File → Open Recent**). Log **R3**.  
+   **See:** usable Grid within the cold-start bar (~8 s pass, >15 s fail).
+
+9. On that rebuilt library, run A–M from the [0.80.0 bar](release-perf-log.md) (and **N**: Storyboard scroll + Compact ⌘I hide/show).  
+   **See:** same pass/fail rules as the log. Compare seconds to the previous release row. Sort (L) was the watch item (~2–2.5 s in 0.80.0).
+
+10. **File → Open Library…** the **Save Copy** once.  
+    **See:** backup opens; count still matches what you saved. Then switch back to the rebuilt library (or the copy) for daily work.
+
+11. Append a dated **X.Y.Z (build NNN)** section to [`docs/release-perf-log.md`](release-perf-log.md) and commit it with the release.  
+    **See:** rebuild clocks + A–N filled; verdict PASS/FAIL; “vs last release” called out if anything got worse.
+
+If this pass fails, **do not announce** the release.
 
 ---
 
