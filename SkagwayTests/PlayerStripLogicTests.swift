@@ -22,6 +22,28 @@ final class PlayerStripLogicTests: XCTestCase {
         )
     }
 
+    func testPredictedFrameCountUsesPlayerChrome() {
+        // 800pt windowed panel: media 20 + bar 24 + time columns 88 → track 668.
+        let windowed = PlaybackTimelineBar.predictedPlayerStripFrameCount(
+            contentWidth: 800,
+            fullScreen: false,
+            thinFilmstrip: false
+        )
+        XCTAssertEqual(
+            windowed,
+            ThumbnailService.playerStripFrameCount(trackWidth: 668, stripHeight: 54)
+        )
+        let full = PlaybackTimelineBar.predictedPlayerStripFrameCount(
+            contentWidth: 1440,
+            fullScreen: true,
+            thinFilmstrip: false
+        )
+        XCTAssertEqual(
+            full,
+            ThumbnailService.playerStripFrameCount(trackWidth: 1328, stripHeight: 54)
+        )
+    }
+
     func testCellIndexClampsToStrip() {
         let size = CGSize(width: 240, height: 36)
         XCTAssertEqual(

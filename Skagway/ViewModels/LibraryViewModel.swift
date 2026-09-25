@@ -4319,6 +4319,72 @@ final class LibraryViewModel {
         sidebarFilter = .lastAdded
         updateLibraryCounts()
         recomputeFilteredVideos()
+        warmScrubberFilmstripForFirstInView()
+    }
+
+    /// In-flight scrubber-strip bake for the first row of the current view.
+    private var playerStripWarmup: Task<Void, Never>?
+
+    /// Last Added is what people open after a scan, and they play in the current sort.
+    /// Bake video #1’s in-player strip now, at the size the player will actually open,
+    /// so Play does not sit on a blank strip.
+    private func warmScrubberFilmstripForFirstInView() {
+        guard showFilmstripInPlayer else { return }
+        guard let video = filteredVideos.first else { return }
+        let frameCount = predictedPlayerStripFrameCount()
+        let service = thumbnailService
+        playerStripWarmup?.cancel()
+        playerStripWarmup = Task {
+            _ = try? await service.generatePlayerStrip(for: video, frameCount: frameCount)
+        }
+    }
+
+    /// Player opens at its last size (or the start preference). That width picks N.
+    private func predictedPlayerStripFrameCount() -> Int {
+        let fullScreen: Bool
+        let thin: Bool
+        let width: CGFloat
+        switch playerStartPreference {
+        case .fullScreen:
+            fullScreen = true
+            thin = isPlayerCompactMode
+            width = NSScreen.main?.frame.width ?? playerFloatingSize.width
+        case .compact:
+            if isInspectorVisible {
+                fullScreen = false
+                thin = true
+                width = predictedCompactPlayerWidth()
+            } else {
+                fullScreen = false
+                thin = false
+                width = playerFloatingSize.width
+            }
+        case .lastSize:
+            if playerLastWasFullScreen {
+                fullScreen = true
+                thin = isPlayerCompactMode
+                width = NSScreen.main?.frame.width ?? playerFloatingSize.width
+            } else if isPlayerCompactMode {
+                fullScreen = false
+                thin = true
+                width = predictedCompactPlayerWidth()
+            } else {
+                fullScreen = false
+                thin = false
+                width = playerFloatingSize.width
+            }
+        }
+        return PlaybackTimelineBar.predictedPlayerStripFrameCount(
+            contentWidth: width,
+            fullScreen: fullScreen,
+            thinFilmstrip: thin
+        )
+    }
+
+    /// Matches `FloatingPlayerPanel` compact footprint: inspector width minus its inset.
+    private func predictedCompactPlayerWidth() -> CGFloat {
+        let detail = CGFloat(browsingLayout.detailColumnWidth(for: viewMode))
+        return max(240, detail - 24)
     }
 
     func importNew() async {

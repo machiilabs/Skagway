@@ -33,6 +33,26 @@ struct PlaybackTimelineBar: View {
         )
     }
 
+    /// Width of the scrubber track inside a player of `contentWidth`.
+    /// Windowed and compact panels inset the media 10pt per side; full screen does not.
+    /// The bar then insets 12pt per side and reserves a time column on each end.
+    static func playerStripTrackWidth(contentWidth: CGFloat, fullScreen: Bool) -> CGFloat {
+        let mediaInset: CGFloat = fullScreen ? 0 : 20
+        let barInset: CGFloat = 24
+        return max(1, contentWidth - mediaInset - barInset - timeColumnWidth * 2)
+    }
+
+    /// Frame count the in-player strip will request at this player size.
+    static func predictedPlayerStripFrameCount(
+        contentWidth: CGFloat,
+        fullScreen: Bool,
+        thinFilmstrip: Bool
+    ) -> Int {
+        let track = playerStripTrackWidth(contentWidth: contentWidth, fullScreen: fullScreen)
+        let height = thinFilmstrip ? filmstripStripHeightThin : filmstripStripHeight
+        return ThumbnailService.playerStripFrameCount(trackWidth: track, stripHeight: height)
+    }
+
     /// Max reserved height (strip on, normal thickness) — fullscreen host / static callers.
     static var barHeight: CGFloat { baseBarHeight + filmstripStripHeight }
 
