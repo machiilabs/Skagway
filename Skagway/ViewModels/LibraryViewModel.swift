@@ -561,6 +561,9 @@ final class LibraryViewModel {
         didSet {
             if let focusedVideoId {
                 noteMissingClipFocusIfNeeded(path: focusedVideoId)
+                if focusedVideoId != oldValue {
+                    notePlayerStripSelection(focusedVideoId)
+                }
             }
         }
     }
@@ -2732,6 +2735,16 @@ final class LibraryViewModel {
     var showFilmstripInPlayer: Bool = true {
         didSet {
             UserDefaults.standard.set(showFilmstripInPlayer, forKey: Self.showFilmstripInPlayerKey)
+            guard oldValue != showFilmstripInPlayer else { return }
+            if showFilmstripInPlayer {
+                if let focusedVideoId {
+                    notePlayerStripSelection(focusedVideoId)
+                } else if let first = filteredVideos.first?.filePath {
+                    notePlayerStripSelection(first)
+                }
+            } else {
+                playerStripWarmupQueue.removeAll()
+            }
         }
     }
 
@@ -4322,20 +4335,68 @@ final class LibraryViewModel {
         warmScrubberFilmstripForFirstInView()
     }
 
-    /// In-flight scrubber-strip bake for the first row of the current view.
-    private var playerStripWarmup: Task<Void, Never>?
+    /// Paths waiting for a scrubber-strip bake. The front is next; selection moves there.
+    @ObservationIgnored private var playerStripWarmupQueue = PlayerStripWarmupQueue()
+    /// Serial drain. One bake at a time so arrowing does not flood the generation gate.
+    @ObservationIgnored private var playerStripWarmupTask: Task<Void, Never>?
+    /// Path whose bake is already inside `generatePlayerStrip`. Not cancelled when selection moves.
+    @ObservationIgnored private var playerStripWarmupInFlightPath: String?
 
-    /// Last Added is what people open after a scan, and they play in the current sort.
-    /// Bake video #1’s in-player strip now, at the size the player will actually open,
-    /// so Play does not sit on a blank strip.
+    /// Last Added opens on the current sort. Start video #1, with any current selection in front of it.
     private func warmScrubberFilmstripForFirstInView() {
         guard showFilmstripInPlayer else { return }
-        guard let video = filteredVideos.first else { return }
-        let frameCount = predictedPlayerStripFrameCount()
-        let service = thumbnailService
-        playerStripWarmup?.cancel()
-        playerStripWarmup = Task {
-            _ = try? await service.generatePlayerStrip(for: video, frameCount: frameCount)
+        playerStripWarmupQueue.removeAll()
+        if let first = filteredVideos.first?.filePath {
+            enqueuePlayerStripWarmup(first)
+        }
+        if let focusedVideoId {
+            enqueuePlayerStripWarmup(focusedVideoId)
+        }
+        startPlayerStripWarmupIfNeeded()
+    }
+
+    /// Grid, list, and keyboard focus all assign `focusedVideoId`. That clip becomes next.
+    private func notePlayerStripSelection(_ path: String) {
+        guard showFilmstripInPlayer else { return }
+        enqueuePlayerStripWarmup(path)
+        startPlayerStripWarmupIfNeeded()
+    }
+
+    /// Insert `path` at the front unless that bake is already running.
+    private func enqueuePlayerStripWarmup(_ path: String) {
+        if path == playerStripWarmupInFlightPath {
+            playerStripWarmupQueue.remove(path)
+            return
+        }
+        playerStripWarmupQueue.prioritize(path)
+    }
+
+    private func startPlayerStripWarmupIfNeeded() {
+        guard playerStripWarmupTask == nil else { return }
+        guard showFilmstripInPlayer, !playerStripWarmupQueue.isEmpty else { return }
+        playerStripWarmupTask = Task { await self.drainPlayerStripWarmupQueue() }
+    }
+
+    private func drainPlayerStripWarmupQueue() async {
+        defer {
+            playerStripWarmupTask = nil
+            playerStripWarmupInFlightPath = nil
+            if showFilmstripInPlayer, !playerStripWarmupQueue.isEmpty {
+                startPlayerStripWarmupIfNeeded()
+            }
+        }
+        while !Task.isCancelled, showFilmstripInPlayer {
+            guard let path = playerStripWarmupQueue.popNext() else { return }
+            guard let video = video(forPath: path) else { continue }
+            let frameCount = predictedPlayerStripFrameCount()
+            if thumbnailService.loadPlayerStrip(for: path, frameCount: frameCount) != nil,
+               thumbnailService.loadPlayerStripCellTimes(for: path, frameCount: frameCount) != nil
+            {
+                continue
+            }
+            playerStripWarmupInFlightPath = path
+            _ = try? await thumbnailService.generatePlayerStrip(for: video, frameCount: frameCount)
+            playerStripWarmupInFlightPath = nil
         }
     }
 

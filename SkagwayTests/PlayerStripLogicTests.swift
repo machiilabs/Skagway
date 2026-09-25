@@ -22,6 +22,23 @@ final class PlayerStripLogicTests: XCTestCase {
         )
     }
 
+    func testWarmupQueuePutsSelectionAtFrontAndCapsTheTail() {
+        var queue = PlayerStripWarmupQueue()
+        queue.prioritize("a")
+        queue.prioritize("b")
+        queue.prioritize("a")
+        XCTAssertEqual(queue.paths, ["a", "b"])
+
+        queue.removeAll()
+        for index in 1...9 {
+            queue.prioritize("v\(index)")
+        }
+        XCTAssertEqual(queue.paths.count, PlayerStripWarmupQueue.capacity)
+        XCTAssertEqual(queue.paths.first, "v9")
+        XCTAssertFalse(queue.paths.contains("v1"))
+        XCTAssertEqual(queue.popNext(), "v9")
+    }
+
     func testPredictedFrameCountUsesPlayerChrome() {
         // 800pt windowed panel: media 20 + bar 24 + time columns 88 → track 668.
         let windowed = PlaybackTimelineBar.predictedPlayerStripFrameCount(
