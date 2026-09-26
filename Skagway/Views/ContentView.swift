@@ -227,7 +227,7 @@ private struct LibraryContentView: View {
             .filter { $0.valueType != .text }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
-        return HStack(spacing: 4) {
+        return HStack(spacing: 0) {
             Menu {
                 if vm.isViewingAlbum {
                     Button {
@@ -267,16 +267,29 @@ private struct LibraryContentView: View {
                     }
                 }
             } label: {
-                Text("Sort: \(sortLabel)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.appTextSecondary)
+                HStack(spacing: 5) {
+                    Text("Sort: \(sortLabel)")
+                        .font(.callout)
+                        .foregroundStyle(Color.appTextPrimary)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color.appTextSecondary)
+                }
+                .padding(.horizontal, AppSpacing.sm)
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .help("Sort the library")
 
             // Ascending/descending has no meaning for a shuffled order or album playlist order.
             if !vm.isRandomOrder && !vm.isShowingAlbumOrder {
+                Rectangle()
+                    .fill(Color.appTextSecondary.opacity(0.35))
+                    .frame(width: 1, height: 14)
                 Button {
                     if isCustomSort, let fieldId = vm.customSortFieldId {
                         vm.selectCustomSort(fieldId: fieldId, ascending: !isAscending)
@@ -286,13 +299,16 @@ private struct LibraryContentView: View {
                     }
                 } label: {
                     Image(systemName: isAscending ? "arrow.up" : "arrow.down")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color.appTextSecondary)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.appTextPrimary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(isAscending ? "Ascending — click for descending" : "Descending — click for ascending")
             }
         }
+        .modifier(SegmentedBarChrome())
     }
 
     private var curatedHeaderBar: some View {
@@ -359,51 +375,22 @@ private struct LibraryContentView: View {
 
             Divider().frame(height: 16)
 
-            AppSegmentedControl(
-                selection: Binding(
-                    get: { vm.viewMode },
-                    set: { newValue in
-                        vm.scrollToSelectedOnViewSwitch = true
-                        vm.viewMode = newValue
-                        vm.savePreferences()
-                    }
-                ),
-                items: [ViewMode.grid, .list, .storyboard],
-                tooltip: { mode in
-                    switch mode {
-                    case .grid: "Grid view (⌘1)"
-                    case .list: "List view (⌘2)"
-                    case .storyboard: "Storyboard view (⌘3)"
-                    }
+            LibraryViewModeSwitch(
+                viewMode: vm.viewMode,
+                storyboardDensity: vm.storyboardDensity,
+                onSelectMode: { mode in
+                    vm.scrollToSelectedOnViewSwitch = true
+                    vm.viewMode = mode
+                    vm.savePreferences()
+                },
+                onSelectDensity: { density in
+                    vm.storyboardDensity = density
+                    guard vm.viewMode != .storyboard else { return }
+                    vm.scrollToSelectedOnViewSwitch = true
+                    vm.viewMode = .storyboard
+                    vm.savePreferences()
                 }
-            ) { mode in
-                switch mode {
-                case .list: Label("List", systemImage: "list.bullet")
-                case .grid: Label("Grid", systemImage: "square.grid.2x2")
-                case .storyboard: Label("Storyboard", systemImage: "square.grid.3x2")
-                }
-            }
-            .controlSize(.small)
-
-            if vm.viewMode == .storyboard {
-                AppSegmentedControl(
-                    selection: Binding(
-                        get: { vm.storyboardDensity },
-                        set: { vm.storyboardDensity = $0 }
-                    ),
-                    items: StoryboardDensity.allCases,
-                    tooltip: { density in
-                        switch density {
-                        case .normal: "Normal storyboard — fewer columns, more space"
-                        case .compact: "Compact storyboard — more columns, tighter gaps"
-                        }
-                    }
-                ) { density in
-                    Text(density.label)
-                }
-                .controlSize(.small)
-                .help("Storyboard density")
-            }
+            )
 
             sortCluster
 
