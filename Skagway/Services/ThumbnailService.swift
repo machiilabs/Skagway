@@ -842,6 +842,76 @@ final class ThumbnailService: @unchecked Sendable {
         return try await runFilmstripBuildWithGate(for: video, rows: rows, columns: columns)
     }
 
+    /// Drop cached inspector filmstrip, storyboard, and every scrubber-strip size for this clip,
+    /// then build the current filmstrip grid, the storyboard, and the scrubber strip at `playerFrameCount`.
+    /// The poster and detail stills stay.
+    func regenerateDerivedAssets(
+        for video: Video,
+        filmstripRows: Int,
+        filmstripColumns: Int,
+        playerFrameCount: Int
+    ) async {
+        discardDerivedAssets(for: video.filePath)
+        _ = try? await generateFilmstrip(for: video, rows: filmstripRows, columns: filmstripColumns)
+        _ = try? await generateStoryboard(for: video)
+        _ = try? await generatePlayerStrip(for: video, frameCount: playerFrameCount)
+    }
+
+    /// True for `{hash}_filmstrip…`, `{hash}_storyboard…`, and `{hash}_playerstrip…` cache files.
+    /// Poster `{hash}.jpg` and `{hash}_detail_…` stills are left alone.
+    static func isDerivedAssetCacheFile(name: String, pathHash: String) -> Bool {
+        let prefix = pathHash + "_"
+        guard name.hasPrefix(prefix) else { return false }
+        let rest = name.dropFirst(prefix.count)
+        return rest.hasPrefix("filmstrip")
+            || rest.hasPrefix("storyboard")
+            || rest.hasPrefix("playerstrip")
+    }
+
+    private func discardDerivedAssets(for filePath: String) {
+        cancelInflightFilmstrips(for: filePath)
+        cancelInflightStoryboard(for: filePath)
+        cancelInflightPlayerStrips(for: filePath)
+
+        let hash = pathHashString(for: filePath)
+        let fm = FileManager.default
+        if let urls = try? fm.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil) {
+            for url in urls where Self.isDerivedAssetCacheFile(name: url.lastPathComponent, pathHash: hash) {
+                try? fm.removeItem(at: url)
+            }
+        }
+
+        memoryCache.removeObject(forKey: filmstripMemoryKey(for: filePath))
+        memoryCache.removeObject(forKey: storyboardMemoryKey(for: filePath))
+        for n in Self.playerStripMinFrames...Self.playerStripMaxFrames {
+            memoryCache.removeObject(forKey: playerStripMemoryKey(for: filePath, frameCount: n))
+        }
+        inflightLock.lock()
+        storyboardCellTimesByPath.removeValue(forKey: filePath)
+        let timesPrefix = filePath + "\u{1e}"
+        playerStripCellTimesByPath = playerStripCellTimesByPath.filter { !$0.key.hasPrefix(timesPrefix) }
+        inflightLock.unlock()
+    }
+
+    private func cancelInflightStoryboard(for filePath: String) {
+        let key = storyboardInflightKey(filePath: filePath)
+        inflightLock.lock()
+        let task = inflightStoryboards.removeValue(forKey: key)
+        inflightLock.unlock()
+        task?.cancel()
+    }
+
+    private func cancelInflightPlayerStrips(for filePath: String) {
+        let prefix = "\(filePath)\u{1e}ps\u{1e}"
+        inflightLock.lock()
+        let keys = inflightPlayerStrips.keys.filter { $0.hasPrefix(prefix) }
+        let tasks = keys.compactMap { inflightPlayerStrips.removeValue(forKey: $0) }
+        inflightLock.unlock()
+        for task in tasks {
+            task.cancel()
+        }
+    }
+
     /// Drop any in-flight filmstrip builds for this path so a slower older layout cannot
     /// overwrite a newer `regenerateFilmstrip` / different-size generation.
     private func cancelInflightFilmstrips(for filePath: String) {

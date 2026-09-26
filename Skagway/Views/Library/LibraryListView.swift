@@ -779,6 +779,12 @@ struct LibraryListView: View {
                 }
                 .disabled(isMoving)
                 .help(isMoving ? "Move in progress — file isn't safe to modify yet" : "Choose an image to use as the poster thumbnail")
+                Button("Regenerate Assets") {
+                    let selected = viewModel.filteredVideos.filter { ids.contains($0.id) }
+                    Task { await viewModel.regenerateDerivedAssets(for: selected) }
+                }
+                .disabled(isMoving)
+                .help(isMoving ? "Move in progress — file isn't safe to modify yet" : "Rebuild the inspector filmstrip, storyboard, and scrubber strip")
                 Button("Regenerate Thumbnail") {
                     let selected = viewModel.filteredVideos.filter { ids.contains($0.id) }
                     for v in selected {

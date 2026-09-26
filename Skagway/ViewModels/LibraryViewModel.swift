@@ -589,6 +589,10 @@ final class LibraryViewModel {
         return focusedVideoId ?? lastSelectedVideoId ?? selectedVideoIds.first
     }
     var filmstripRefreshId: Int = 0
+    /// Bumped after Regenerate Assets so the open player reloads its scrubber strip.
+    var playerStripRefreshId: Int = 0
+    /// Paths included in the latest `playerStripRefreshId` bump.
+    var playerStripRefreshPaths: Set<String> = []
 
     /// The single shared inline-playback engine. One player instance backs the resizable player
     /// surface (in-window panel and the borderless full-screen window).
@@ -6207,6 +6211,34 @@ final class LibraryViewModel {
             byRating: libraryCounts.byRating
         )
         recomputeFilteredVideos()
+    }
+
+    /// Context menu: drop this clip’s filmstrip, storyboard, and scrubber strips, then build them again.
+    /// The poster is unchanged. The scrubber strip uses the player size it will open at.
+    func regenerateDerivedAssets(for videos: [Video]) async {
+        guard !videos.isEmpty else { return }
+        let rows = defaultFilmstripRows
+        let cols = defaultFilmstripColumns
+        let frameCount = predictedPlayerStripFrameCount()
+        let preserveScanProgress = isScanning
+        if !preserveScanProgress {
+            scanProgress = "Rebuilding assets…"
+        }
+        for video in videos {
+            playerStripWarmupQueue.remove(video.filePath)
+            await thumbnailService.regenerateDerivedAssets(
+                for: video,
+                filmstripRows: rows,
+                filmstripColumns: cols,
+                playerFrameCount: frameCount
+            )
+        }
+        if !preserveScanProgress, scanProgress == "Rebuilding assets…" {
+            scanProgress = ""
+        }
+        playerStripRefreshPaths = Set(videos.map(\.filePath))
+        playerStripRefreshId &+= 1
+        filmstripRefreshId &+= 1
     }
 
     func clearFilmstripCacheAndMarkApplied() async {

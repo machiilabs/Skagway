@@ -22,6 +22,18 @@ final class PlayerStripLogicTests: XCTestCase {
         )
     }
 
+    func testDerivedAssetCacheFileMatcherLeavesPosterAndDetailStills() {
+        let hash = "abc123"
+        XCTAssertTrue(ThumbnailService.isDerivedAssetCacheFile(name: "\(hash)_filmstrip_e6.jpg", pathHash: hash))
+        XCTAssertTrue(ThumbnailService.isDerivedAssetCacheFile(name: "\(hash)_storyboard.jpg", pathHash: hash))
+        XCTAssertTrue(ThumbnailService.isDerivedAssetCacheFile(name: "\(hash)_storyboard_times.json", pathHash: hash))
+        XCTAssertTrue(ThumbnailService.isDerivedAssetCacheFile(name: "\(hash)_playerstrip_n13_c2.jpg", pathHash: hash))
+        XCTAssertTrue(ThumbnailService.isDerivedAssetCacheFile(name: "\(hash)_playerstrip_n13_c2_times.json", pathHash: hash))
+        XCTAssertFalse(ThumbnailService.isDerivedAssetCacheFile(name: "\(hash).jpg", pathHash: hash))
+        XCTAssertFalse(ThumbnailService.isDerivedAssetCacheFile(name: "\(hash)_detail_720.jpg", pathHash: hash))
+        XCTAssertFalse(ThumbnailService.isDerivedAssetCacheFile(name: "other_playerstrip_n13_c2.jpg", pathHash: hash))
+    }
+
     func testWarmupQueuePutsSelectionAtFrontAndCapsTheTail() {
         var queue = PlayerStripWarmupQueue()
         queue.prioritize("a")

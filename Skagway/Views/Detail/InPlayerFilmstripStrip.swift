@@ -103,6 +103,12 @@ struct InPlayerFilmstripStrip: View {
             cellTimes = []
             scheduleLoad(frameCount: frameCount)
         }
+        .onChange(of: viewModel.playerStripRefreshId) { _, _ in
+            guard viewModel.playerStripRefreshPaths.contains(video.filePath) else { return }
+            stripImage = nil
+            cellTimes = []
+            scheduleLoad(frameCount: frameCount)
+        }
         .onDisappear {
             loadTask?.cancel()
             loadTask = nil
