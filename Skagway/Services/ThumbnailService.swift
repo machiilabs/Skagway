@@ -216,6 +216,21 @@ final class ThumbnailService: @unchecked Sendable {
         return min(hi, max(pictureStart, seconds))
     }
 
+    /// True when a saved strip had to pull a sample back because the pictures end before the file does.
+    /// A second of slack ignores the tiny inset used to stay off the exact last frame.
+    static func playerStripPicturesEndEarly(
+        cellTimes: [Double],
+        duration: Double,
+        frameCount: Int
+    ) -> Bool {
+        guard frameCount > 0, cellTimes.count == frameCount, duration.isFinite, duration > 0 else { return false }
+        for index in 0..<frameCount {
+            let ideal = playerStripEvenSplitSeconds(index: index, duration: duration, frameCount: frameCount)
+            if ideal - cellTimes[index] > 1 { return true }
+        }
+        return false
+    }
+
     /// Video-track pictures, when the container duration is longer than the frames.
     private static func pictureBounds(of asset: AVAsset) async -> (start: Double, end: Double)? {
         guard let track = try? await asset.loadTracks(withMediaType: .video).first,

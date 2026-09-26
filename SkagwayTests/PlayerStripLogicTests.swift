@@ -117,6 +117,21 @@ final class PlayerStripLogicTests: XCTestCase {
         )
     }
 
+    func testPicturesEndEarlyWhenASampleWasPulledBack() {
+        let duration = 3306.0
+        let frameCount = 13
+        var times = (0..<frameCount).map {
+            ThumbnailService.playerStripEvenSplitSeconds(index: $0, duration: duration, frameCount: frameCount)
+        }
+        XCTAssertFalse(
+            ThumbnailService.playerStripPicturesEndEarly(cellTimes: times, duration: duration, frameCount: frameCount)
+        )
+        times[frameCount - 1] = ThumbnailService.clampSampleSeconds(times[frameCount - 1], pictureStart: 0, pictureEnd: 3055.65)
+        XCTAssertTrue(
+            ThumbnailService.playerStripPicturesEndEarly(cellTimes: times, duration: duration, frameCount: frameCount)
+        )
+    }
+
     func testEvenSplitUsesBucketCenters() {
         XCTAssertEqual(
             ThumbnailService.playerStripEvenSplitSeconds(index: 0, duration: 60, frameCount: 6),

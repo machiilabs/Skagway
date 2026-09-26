@@ -71,10 +71,24 @@ struct InPlayerFilmstripStrip: View {
                     }
                 }
                 .frame(width: width, height: stripHeight)
+
+                if picturesEndEarly {
+                    Text("Pictures end before the file does.")
+                        .font(.system(size: stripHeight < 48 ? 10 : 11, weight: .medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Capsule(style: .continuous).fill(Color.black.opacity(0.62)))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                        .padding(.bottom, 3)
+                        .allowsHitTesting(false)
+                }
             }
             .frame(width: width, height: stripHeight)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Filmstrip")
+            .accessibilityLabel(picturesEndEarly ? "Filmstrip. Pictures end before the file does." : "Filmstrip")
             .accessibilityValue(accessibilityPlayheadLabel)
             .accessibilityHint("Scrub to seek, or adjust to step by frame")
             .accessibilityAdjustableAction { direction in
@@ -113,6 +127,16 @@ struct InPlayerFilmstripStrip: View {
             loadTask?.cancel()
             loadTask = nil
         }
+    }
+
+    private var picturesEndEarly: Bool {
+        guard stripImage != nil else { return false }
+        let duration = max(playback.durationSeconds, video.duration ?? 0)
+        return ThumbnailService.playerStripPicturesEndEarly(
+            cellTimes: cellTimes,
+            duration: duration,
+            frameCount: frameCount
+        )
     }
 
     private var accessibilityPlayheadLabel: String {
