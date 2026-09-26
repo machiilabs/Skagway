@@ -47,19 +47,13 @@ struct CuratedWallCard: View {
 
     /// On-collage title fade height (visual only). Collage cells under the fade still seek/play;
     /// select-without-play is the title *text* plus the under-thumb footer, not this band.
-    private var storyboardTitleBandHeight: CGFloat {
-        isNormalStoryboard ? 52 : 40
-    }
-    /// Under-thumb date/rating strip — intentionally fat so select isn’t a hairline.
-    private var storyboardFooterMinHeight: CGFloat {
-        isNormalStoryboard ? 40 : 28
-    }
-    private var storyboardCardPadding: CGFloat {
-        isNormalStoryboard ? 10 : 6
-    }
-    private var storyboardFooterVSpacing: CGFloat {
-        isNormalStoryboard ? 4 : 2
-    }
+    /// Shared with Compact. A taller Normal footer or fatter padding inset the collage and
+    /// open a bigger gap between rows without adding a column, so Normal looked smaller.
+    private var storyboardTitleBandHeight: CGFloat { 40 }
+    /// Under-thumb date/rating strip — tall enough that select isn’t a hairline.
+    private var storyboardFooterMinHeight: CGFloat { 28 }
+    private var storyboardCardPadding: CGFloat { 6 }
+    private var storyboardFooterVSpacing: CGFloat { 2 }
 
     @State private var thumbnail: NSImage?
     @State private var isHovering = false

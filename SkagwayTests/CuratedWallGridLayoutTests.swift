@@ -134,29 +134,82 @@ final class CuratedWallGridLayoutTests: XCTestCase {
     func testStoryboardNormalStaysAtMostThreeColumnsWhenWide() {
         let wide = CuratedWallGrid.columnCount(
             forContainerWidth: 2400,
-            maxColumns: 3,
-            minCellWidth: 440,
-            spacing: 28,
-            outerPadding: 18
+            maxColumns: CuratedWallGrid.storyboardNormalMaxColumns,
+            minCellWidth: CuratedWallGrid.storyboardNormalMinCellWidth,
+            spacing: CuratedWallGrid.storyboardColumnSpacing,
+            outerPadding: CuratedWallGrid.storyboardOuterPadding
         )
         let withInspector = CuratedWallGrid.columnCount(
             forContainerWidth: 1200,
-            maxColumns: 3,
-            minCellWidth: 440,
-            spacing: 28,
-            outerPadding: 18
+            maxColumns: CuratedWallGrid.storyboardNormalMaxColumns,
+            minCellWidth: CuratedWallGrid.storyboardNormalMinCellWidth,
+            spacing: CuratedWallGrid.storyboardColumnSpacing,
+            outerPadding: CuratedWallGrid.storyboardOuterPadding
         )
         XCTAssertEqual(wide, 3)
         XCTAssertLessThanOrEqual(withInspector, 3)
         XCTAssertEqual(
             CuratedWallGrid.wallGridItems(
-                minCellWidth: 440,
-                spacing: 28,
-                maxColumns: 3,
+                minCellWidth: CuratedWallGrid.storyboardNormalMinCellWidth,
+                spacing: CuratedWallGrid.storyboardColumnSpacing,
+                maxColumns: CuratedWallGrid.storyboardNormalMaxColumns,
                 containerWidth: 2400,
-                outerPadding: 18
+                outerPadding: CuratedWallGrid.storyboardOuterPadding
             ).count,
             1
         )
+    }
+
+    /// Same column count must not make Normal pictures narrower than Compact.
+    /// Compact is smaller only when it fits more columns.
+    func testNormalStoryboardCardsAreNotNarrowerThanCompactWhenColumnCountsMatch() {
+        let spacing = CuratedWallGrid.storyboardColumnSpacing
+        let padding = CuratedWallGrid.storyboardOuterPadding
+        var sawMatchingColumns = false
+        var width: CGFloat = 480
+        while width <= 2600 {
+            let normalColumns = CuratedWallGrid.columnCount(
+                forContainerWidth: width,
+                maxColumns: CuratedWallGrid.storyboardNormalMaxColumns,
+                minCellWidth: CuratedWallGrid.storyboardNormalMinCellWidth,
+                spacing: spacing,
+                outerPadding: padding
+            )
+            let compactColumns = CuratedWallGrid.columnCount(
+                forContainerWidth: width,
+                maxColumns: CuratedWallGrid.storyboardCompactMaxColumns,
+                minCellWidth: CuratedWallGrid.storyboardCompactMinCellWidth,
+                spacing: spacing,
+                outerPadding: padding
+            )
+            if normalColumns == compactColumns {
+                sawMatchingColumns = true
+                let normalCell = CuratedWallGrid.flexibleCellWidth(
+                    containerWidth: width,
+                    columns: normalColumns,
+                    spacing: spacing,
+                    outerPadding: padding
+                )
+                let compactCell = CuratedWallGrid.flexibleCellWidth(
+                    containerWidth: width,
+                    columns: compactColumns,
+                    spacing: spacing,
+                    outerPadding: padding
+                )
+                XCTAssertGreaterThanOrEqual(
+                    normalCell,
+                    compactCell - 0.5,
+                    "Normal cell narrower than Compact at width \(width) with \(normalColumns) columns"
+                )
+            } else {
+                XCTAssertLessThan(
+                    normalColumns,
+                    compactColumns,
+                    "Normal should not pack more columns than Compact at width \(width)"
+                )
+            }
+            width += 20
+        }
+        XCTAssertTrue(sawMatchingColumns)
     }
 }

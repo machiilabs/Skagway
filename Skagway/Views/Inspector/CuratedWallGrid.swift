@@ -82,43 +82,29 @@ struct CuratedWallGrid: View {
     private static let spacing: CGFloat = 22
     private static let outerPadding: CGFloat = 18
 
-    /// Storyboard packing knobs — Normal is the roomier default; Compact is tighter.
+    /// Storyboard packing. Normal and Compact share gaps and padding. They differ only by
+    /// column cap and minimum card width, so a Normal picture is never smaller than a Compact
+    /// one at the same column count. Compact is smaller only when it fits an extra column.
+    static let storyboardNormalMaxColumns = 3
+    static let storyboardCompactMaxColumns = 4
+    static let storyboardNormalMinCellWidth: CGFloat = 440
+    static let storyboardCompactMinCellWidth: CGFloat = 360
+    static let storyboardColumnSpacing: CGFloat = 16
+    static let storyboardRowSpacing: CGFloat = 12
+    static let storyboardOuterPadding: CGFloat = 12
+
     private var storyboardMaxColumns: Int {
-        switch storyboardDensity {
-        case .compact: return 4
-        case .normal: return 3
-        }
+        storyboardDensity == .compact ? Self.storyboardCompactMaxColumns : Self.storyboardNormalMaxColumns
     }
     private var storyboardMinCellWidth: CGFloat {
-        switch storyboardDensity {
-        case .compact: return 360
-        case .normal: return 440
-        }
-    }
-    private var storyboardColumnSpacing: CGFloat {
-        switch storyboardDensity {
-        case .compact: return 16
-        case .normal: return 28
-        }
-    }
-    private var storyboardRowSpacing: CGFloat {
-        switch storyboardDensity {
-        case .compact: return 12
-        case .normal: return 22
-        }
-    }
-    private var storyboardOuterPadding: CGFloat {
-        switch storyboardDensity {
-        case .compact: return 12
-        case .normal: return 18
-        }
+        storyboardDensity == .compact ? Self.storyboardCompactMinCellWidth : Self.storyboardNormalMinCellWidth
     }
 
     private var activeMaxColumns: Int { isStoryboard ? storyboardMaxColumns : Self.maxColumns }
     private var activeMinCellWidth: CGFloat { isStoryboard ? storyboardMinCellWidth : Self.minCellWidth }
-    private var columnSpacing: CGFloat { isStoryboard ? storyboardColumnSpacing : Self.spacing }
-    private var rowSpacing: CGFloat { isStoryboard ? storyboardRowSpacing : Self.spacing }
-    private var outerPadding: CGFloat { isStoryboard ? storyboardOuterPadding : Self.outerPadding }
+    private var columnSpacing: CGFloat { isStoryboard ? Self.storyboardColumnSpacing : Self.spacing }
+    private var rowSpacing: CGFloat { isStoryboard ? Self.storyboardRowSpacing : Self.spacing }
+    private var outerPadding: CGFloat { isStoryboard ? Self.storyboardOuterPadding : Self.outerPadding }
 
     /// Largest `1...maxColumns` such that flexible cells are at least `minCellWidth` wide.
     /// Invalid/zero widths keep `maxColumns` so a transient layout pass can't pin the grid at 1.
@@ -134,6 +120,18 @@ struct CuratedWallGrid: View {
         let inner = max(0, width - outerPadding * 2)
         let n = Int((inner + spacing) / (minCellWidth + spacing))
         return min(maxColumns, max(1, n))
+    }
+
+    /// Width of one flexible cell once `columns` are fitted across `containerWidth`.
+    static func flexibleCellWidth(
+        containerWidth: CGFloat,
+        columns: Int,
+        spacing: CGFloat,
+        outerPadding: CGFloat
+    ) -> CGFloat {
+        let cols = CGFloat(max(1, columns))
+        let inner = max(0, containerWidth - outerPadding * 2)
+        return (inner - spacing * (cols - 1)) / cols
     }
 
     /// Raise `minCellWidth` just enough that `maxColumns + 1` cannot fit. Typical ⌘I (3→4 Compact)

@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Storyboard density no longer shrinks Normal below Compact** — Normal and Compact use the same gaps and card padding. Normal pictures stay at least as large. Compact is smaller only when the pane fits more columns.
 - **Sort stays next to the view switcher** — Storyboard is a split button. The label opens Storyboard in the last Normal or Compact density; the arrow picks the density and also switches to Storyboard. Sort sits immediately to the right, in a matching bar with a chevron, and no longer moves when the view changes.
 - **Fix: in-player filmstrip dropped when the file is longer than its pictures** — A container duration past the video track (an audio tail) made the last scrubber-strip sample miss. One miss threw away the whole strip, so the bar stayed blank for the rest of playback. Samples now stay inside the video track. When that happens, the strip still shows, and a warning mark at the bottom-right of the repeated frame shows “File is longer than video content” on hover. That line sits in the scrubber chrome, so it fades with the rest of the bar and does not interrupt playback.
 - **Regenerate Assets** — Right-click a clip and choose Regenerate Assets to rebuild its inspector filmstrip, storyboard, and scrubber strip (every saved scrubber width, then the current player size). The poster stays. The open player reloads the strip when that clip is the one playing.
