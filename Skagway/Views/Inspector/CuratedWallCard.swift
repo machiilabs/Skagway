@@ -14,8 +14,6 @@ struct CuratedWallCard: View {
     let thumbnailService: ThumbnailService
     /// Wall media: poster still vs 2×3 storyboard collage.
     var displayMode: WallCardMediaMode = .poster
-    /// Storyboard packing density (ignored for poster cards).
-    var storyboardDensity: StoryboardDensity = .normal
     /// True while this video has an active (queued or in-flight) cross-volume move — shows a
     /// spinner badge over the thumbnail so the "frozen" state is visible without right-clicking.
     var isMoving: Bool = false
@@ -41,9 +39,6 @@ struct CuratedWallCard: View {
 
     private var isInlineEditing: Bool { isRenaming || isEditingTitle }
     private var isStoryboard: Bool { displayMode == .storyboard }
-    private var isNormalStoryboard: Bool {
-        isStoryboard && storyboardDensity == .normal
-    }
 
     /// On-collage title fade height (visual only). Collage cells under the fade still seek/play;
     /// select-without-play is the title *text* plus the under-thumb footer, not this band.
@@ -201,7 +196,7 @@ struct CuratedWallCard: View {
 
                 HStack(spacing: 6) {
                     Text(video.dateAdded.formatted(date: .abbreviated, time: .omitted))
-                        .font(.system(size: isNormalStoryboard ? 11 : 9))
+                        .font(.system(size: isStoryboard ? 11 : 9))
                         .foregroundStyle(Color.appTextTertiary)
 
                     Spacer(minLength: 0)
@@ -210,7 +205,7 @@ struct CuratedWallCard: View {
                         HStack(spacing: 1) {
                             ForEach(0..<video.rating, id: \.self) { _ in
                                 Image(systemName: "star.fill")
-                                    .font(.system(size: isNormalStoryboard ? 10 : 8))
+                                    .font(.system(size: isStoryboard ? 10 : 8))
                                     .foregroundStyle(.yellow)
                             }
                         }
@@ -413,12 +408,12 @@ struct CuratedWallCard: View {
     /// Title drawn on the fade. Storyboard: intrinsic-size select-only hit (not full-width).
     private var titleLabel: some View {
         Text(video.displayTitle)
-            .font(.system(size: isNormalStoryboard ? 12 : (isStoryboard ? 10 : 11), weight: .semibold))
+            .font(.system(size: isStoryboard ? 12 : 11, weight: .semibold))
             .foregroundStyle(.white)
             .shadow(color: .black.opacity(0.55), radius: 1, y: 1)
             .lineLimit(isStoryboard ? 1 : 2)
             .padding(.horizontal, isStoryboard ? 6 : 8)
-            .padding(.bottom, isStoryboard ? (isNormalStoryboard ? 8 : 4) : 7)
+            .padding(.bottom, isStoryboard ? 8 : 7)
             .contentShape(Rectangle())
             .modifier(StoryboardChromeTap(
                 enabled: isStoryboard && onStoryboardChromeSelect != nil,

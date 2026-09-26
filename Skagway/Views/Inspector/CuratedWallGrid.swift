@@ -215,7 +215,6 @@ struct CuratedWallGrid: View {
                             titleEditText: isEditingTitleRow ? $viewModel.titleEditText : .constant(""),
                             thumbnailService: thumbnailService,
                             displayMode: isStoryboard ? WallCardMediaMode.storyboard : .poster,
-                            storyboardDensity: isStoryboard ? storyboardDensity : .normal,
                             isMoving: isMoving,
                             resumeFraction: resumeFraction(for: video),
                             hoverPreviewEnabled: !isStoryboard
