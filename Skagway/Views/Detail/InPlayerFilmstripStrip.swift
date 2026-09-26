@@ -19,7 +19,8 @@ struct InPlayerFilmstripStrip: View {
     @State private var cellTimes: [Double] = []
     @State private var frameCount: Int = ThumbnailService.playerStripMinFrames
     @State private var loadTask: Task<Void, Never>?
-    @State private var pictureEndNotePresented = false
+    @State private var pictureEndHover = false
+    @State private var pictureEndHoverToken = 0
 
     private var playback: InlinePlaybackController { viewModel.playback }
 
@@ -117,7 +118,7 @@ struct InPlayerFilmstripStrip: View {
         }
         .frame(height: stripHeight)
         .onChange(of: video.filePath) { _, _ in
-            pictureEndNotePresented = false
+            pictureEndHover = false
             stripImage = nil
             cellTimes = []
             scheduleLoad(frameCount: frameCount)
@@ -147,25 +148,57 @@ struct InPlayerFilmstripStrip: View {
 
     static let pictureEndMessage = "File is longer than video content"
 
+    /// Hover-only. The line is a child of the scrubber, so it fades with that chrome.
+    /// Clicks on the mark and the line are swallowed, so playback keeps going.
     private func pictureEndWarning(side: CGFloat) -> some View {
-        Button {
-            pictureEndNotePresented = true
-        } label: {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: side * 0.72, weight: .bold))
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.black, Color.yellow)
-                .frame(width: side, height: side)
-                .background(Circle().fill(Color.black.opacity(0.72)))
+        Image(systemName: "exclamationmark.triangle.fill")
+            .font(.system(size: side * 0.72, weight: .bold))
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(.black, Color.yellow)
+            .frame(width: side, height: side)
+            .background(Circle().fill(Color.black.opacity(0.72)))
+            .contentShape(Circle())
+            .onHover { setPictureEndHover($0) }
+            .highPriorityGesture(pictureEndSwallow)
+            .accessibilityLabel(Self.pictureEndMessage)
+            .overlay(alignment: .bottomTrailing) {
+                if pictureEndHover {
+                    Text(Self.pictureEndMessage)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.black.opacity(0.75), in: Capsule())
+                        .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
+                        .fixedSize()
+                        .offset(y: -(side + 4))
+                        .onHover { setPictureEndHover($0) }
+                        .highPriorityGesture(pictureEndSwallow)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.15), value: pictureEndHover)
+    }
+
+    /// Eats the scrubber’s click-to-seek so pointing at the note does not move the playhead.
+    private var pictureEndSwallow: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { _ in }
+            .onEnded { _ in }
+    }
+
+    private func setPictureEndHover(_ inside: Bool) {
+        pictureEndHoverToken += 1
+        if inside {
+            pictureEndHover = true
+            return
         }
-        .buttonStyle(.plain)
-        .help(Self.pictureEndMessage)
-        .accessibilityLabel(Self.pictureEndMessage)
-        .popover(isPresented: $pictureEndNotePresented, arrowEdge: .bottom) {
-            Text(Self.pictureEndMessage)
-                .font(.system(size: 12, weight: .medium))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+        let token = pictureEndHoverToken
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard token == pictureEndHoverToken else { return }
+            pictureEndHover = false
         }
     }
 
