@@ -99,8 +99,6 @@ struct PlaybackTimelineBar: View {
     /// Bookmark being renamed from the diamond context menu.
     @State private var renameBookmarkTarget: VideoBookmark?
     @State private var renameBookmarkDraft: String = ""
-    /// Cell that repeats an earlier picture. Nil hides the warning mark.
-    @State private var earlyFrame: PlayerStripEarlyFrame?
 
     private var playback: InlinePlaybackController { viewModel.playback }
 
@@ -478,7 +476,6 @@ struct PlaybackTimelineBar: View {
                         stripHeight: stripHeight
                     )
                     .frame(width: width, height: stripHeight)
-                    .allowsHitTesting(false)
                 }
 
                 trackVisuals(width: width)
@@ -513,25 +510,6 @@ struct PlaybackTimelineBar: View {
                     key: ScrubTrackFrameKey.self,
                     value: geo.frame(in: .named(Self.barSpaceName))
                 )
-            }
-            .onPreferenceChange(PlayerStripEarlyFrameKey.self) { earlyFrame = $0 }
-            // Warning sits on the repeated frame and accepts hover/click. The strip itself
-            // stays click-through so the rest of the band still scrubs.
-            .overlay {
-                if showingStrip, let earlyFrame {
-                    let hit: CGFloat = stripHeight < 48 ? 14 : 16
-                    let cellWidth = width / CGFloat(max(earlyFrame.frameCount, 1))
-                    let x = min(
-                        width - hit / 2 - 1,
-                        max(hit / 2 + 1, cellWidth * CGFloat(earlyFrame.index + 1) - 2 - hit / 2)
-                    )
-                    PlayerStripEarlyFrameWarning()
-                        .frame(width: hit, height: hit)
-                        .contentShape(Rectangle())
-                        .help(PlayerStripEarlyFrame.message)
-                        .accessibilityLabel(PlayerStripEarlyFrame.message)
-                        .position(x: x, y: stripHeight - 2 - hit / 2)
-                }
             }
             // Bookmarks above scrub gestures so diamond clicks win over seek.
             .overlay {

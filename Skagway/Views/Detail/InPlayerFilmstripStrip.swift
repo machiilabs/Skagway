@@ -19,6 +19,7 @@ struct InPlayerFilmstripStrip: View {
     @State private var cellTimes: [Double] = []
     @State private var frameCount: Int = ThumbnailService.playerStripMinFrames
     @State private var loadTask: Task<Void, Never>?
+    @State private var pictureEndNotePresented = false
 
     private var playback: InlinePlaybackController { viewModel.playback }
 
@@ -76,8 +77,22 @@ struct InPlayerFilmstripStrip: View {
                 .allowsHitTesting(false)
             }
             .frame(width: width, height: stripHeight)
+            .allowsHitTesting(false)
+            .overlay(alignment: .topLeading) {
+                if let earlyIndex = earlyCellIndex {
+                    let cellWidth = width / CGFloat(max(frameCount, 1))
+                    let side: CGFloat = stripHeight < 48 ? 14 : 18
+                    let centerX = min(
+                        width - side / 2 - 1,
+                        cellWidth * CGFloat(earlyIndex + 1) - 2 - side / 2
+                    )
+                    let centerY = stripHeight - 2 - side / 2
+                    pictureEndWarning(side: side)
+                        .offset(x: centerX - side / 2, y: centerY - side / 2)
+                }
+            }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(earlyFrame == nil ? "Filmstrip" : "Filmstrip. \(PlayerStripEarlyFrame.message)")
+            .accessibilityLabel(earlyCellIndex == nil ? "Filmstrip" : "Filmstrip. \(Self.pictureEndMessage)")
             .accessibilityValue(accessibilityPlayheadLabel)
             .accessibilityHint("Scrub to seek, or adjust to step by frame")
             .accessibilityAdjustableAction { direction in
@@ -101,8 +116,8 @@ struct InPlayerFilmstripStrip: View {
             }
         }
         .frame(height: stripHeight)
-        .preference(key: PlayerStripEarlyFrameKey.self, value: earlyFrame)
         .onChange(of: video.filePath) { _, _ in
+            pictureEndNotePresented = false
             stripImage = nil
             cellTimes = []
             scheduleLoad(frameCount: frameCount)
@@ -119,16 +134,39 @@ struct InPlayerFilmstripStrip: View {
         }
     }
 
-    /// Set once a real strip is up and a cell had to repeat an earlier picture.
-    private var earlyFrame: PlayerStripEarlyFrame? {
+    /// Last cell that repeats an earlier picture. Nil until that strip image is on screen.
+    private var earlyCellIndex: Int? {
         guard stripImage != nil else { return nil }
         let duration = max(playback.durationSeconds, video.duration ?? 0)
-        guard let index = ThumbnailService.playerStripEarlyCellIndex(
+        return ThumbnailService.playerStripEarlyCellIndex(
             cellTimes: cellTimes,
             duration: duration,
             frameCount: frameCount
-        ) else { return nil }
-        return PlayerStripEarlyFrame(index: index, frameCount: frameCount)
+        )
+    }
+
+    static let pictureEndMessage = "File is longer than video content"
+
+    private func pictureEndWarning(side: CGFloat) -> some View {
+        Button {
+            pictureEndNotePresented = true
+        } label: {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: side * 0.72, weight: .bold))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.black, Color.yellow)
+                .frame(width: side, height: side)
+                .background(Circle().fill(Color.black.opacity(0.72)))
+        }
+        .buttonStyle(.plain)
+        .help(Self.pictureEndMessage)
+        .accessibilityLabel(Self.pictureEndMessage)
+        .popover(isPresented: $pictureEndNotePresented, arrowEdge: .bottom) {
+            Text(Self.pictureEndMessage)
+                .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+        }
     }
 
     private var accessibilityPlayheadLabel: String {
@@ -168,131 +206,5 @@ struct InPlayerFilmstripStrip: View {
         } catch {
             // Leave placeholder; scrubber still works.
         }
-    }
-}
-
-/// Which cell had to repeat an earlier picture. The timeline bar draws the warning on it.
-struct PlayerStripEarlyFrame: Equatable {
-    static let message = "File is longer than video content"
-    var index: Int
-    var frameCount: Int
-}
-
-struct PlayerStripEarlyFrameKey: PreferenceKey {
-    static var defaultValue: PlayerStripEarlyFrame? = nil
-    static func reduce(value: inout PlayerStripEarlyFrame?, nextValue: () -> PlayerStripEarlyFrame?) {
-        // Last writer wins, including nil, so the mark clears when the next clip is fine.
-        value = nextValue()
-    }
-}
-
-/// Warning mark for the repeated frame. Hover shows the system tooltip; click shows the same line.
-/// AppKit so the click wins over the scrubber drag, the way bookmark diamonds do.
-struct PlayerStripEarlyFrameWarning: NSViewRepresentable {
-    func makeNSView(context: Context) -> PlayerStripEarlyFrameWarningView {
-        PlayerStripEarlyFrameWarningView()
-    }
-
-    func updateNSView(_ nsView: PlayerStripEarlyFrameWarningView, context: Context) {
-        nsView.toolTip = PlayerStripEarlyFrame.message
-    }
-}
-
-final class PlayerStripEarlyFrameWarningView: NSView, NSPopoverDelegate {
-    private var popover: NSPopover?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        toolTip = PlayerStripEarlyFrame.message
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override var isFlipped: Bool { true }
-
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        if let popover, popover.isShown {
-            popover.performClose(nil)
-            return
-        }
-        showExplanation()
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        showExplanation()
-        return true
-    }
-
-    func popoverDidClose(_ notification: Notification) {
-        popover = nil
-    }
-
-    private func showExplanation() {
-        let text = PlayerStripEarlyFrame.message
-        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        let label = NSTextField(labelWithString: text)
-        label.font = font
-        label.textColor = .labelColor
-        let textSize = (text as NSString).size(withAttributes: [.font: font])
-        let width = ceil(textSize.width) + 20
-        let height = ceil(textSize.height) + 14
-        label.frame = NSRect(x: 10, y: 7, width: ceil(textSize.width), height: ceil(textSize.height))
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-        container.addSubview(label)
-        let controller = NSViewController()
-        controller.view = container
-        let pop = NSPopover()
-        pop.behavior = .transient
-        pop.animates = false
-        pop.contentSize = NSSize(width: width, height: height)
-        pop.contentViewController = controller
-        pop.delegate = self
-        pop.show(relativeTo: bounds, of: self, preferredEdge: .maxY)
-        popover = pop
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let base = NSImage(
-            systemSymbolName: "exclamationmark.triangle.fill",
-            accessibilityDescription: PlayerStripEarlyFrame.message
-        ) else { return }
-        let side = min(bounds.width, bounds.height)
-        let config = NSImage.SymbolConfiguration(pointSize: side * 0.78, weight: .bold)
-        guard let symbol = base.withSymbolConfiguration(config) else { return }
-        let rect = NSRect(
-            x: bounds.midX - side / 2,
-            y: bounds.midY - side / 2,
-            width: side,
-            height: side
-        )
-        let tinted = NSImage(size: symbol.size, flipped: isFlipped) { dst in
-            symbol.draw(in: dst)
-            NSColor.systemYellow.set()
-            dst.fill(using: .sourceAtop)
-            return true
-        }
-        NSGraphicsContext.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.9)
-        shadow.shadowBlurRadius = 1.5
-        shadow.shadowOffset = .zero
-        shadow.set()
-        tinted.draw(
-            in: rect,
-            from: .zero,
-            operation: .sourceOver,
-            fraction: 1,
-            respectFlipped: true,
-            hints: nil
-        )
-        NSGraphicsContext.restoreGraphicsState()
     }
 }
