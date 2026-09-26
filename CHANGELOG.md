@@ -31,6 +31,7 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- **Fix: in-player filmstrip dropped when the file is longer than its pictures** — A container duration past the video track (an audio tail) made the last scrubber-strip sample miss. One miss threw away the whole strip, so the bar stayed blank for the rest of playback. Samples now stay inside the video track.
 - **Regenerate Assets** — Right-click a clip and choose Regenerate Assets to rebuild its inspector filmstrip, storyboard, and scrubber strip (every saved scrubber width, then the current player size). The poster stays. The open player reloads the strip when that clip is the one playing.
 - **Scrubber filmstrip warmup** — After a scan, Skagway bakes the in-player scrubber strip for the first clip in the current sort, at the player size it will actually open. Selecting another clip moves that clip to the front of a short queue (the bake already running finishes first). The strip stays blank until its own bake is ready.
 - **Fix: Scroll HUD still missing (1168)** — Attach could succeed but the chip was a subview of a 0×0 `NSViewRepresentable` host (SwiftUI clips that wrapper; `.frame(maxWidth: .infinity)` only sized the SwiftUI frame). The chip is now a sibling of the wall scroller thumb on that `NSScrollView`. `sizeThatFits` fills the overlay. Locate uses the nearest wall scroller, never the Inspector pane.

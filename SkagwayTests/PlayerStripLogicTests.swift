@@ -101,6 +101,22 @@ final class PlayerStripLogicTests: XCTestCase {
         )
     }
 
+    func testSampleClampPullsTheLastFrameBackInsideThePictures() {
+        // Antique Cabinets: container 55:06, pictures end at 50:56. A 13-frame strip’s last
+        // bucket sits past the pictures and used to fail the whole bake.
+        let ideal = ThumbnailService.playerStripEvenSplitSeconds(index: 12, duration: 3306, frameCount: 13)
+        XCTAssertGreaterThan(ideal, 3055.65)
+        let clamped = ThumbnailService.clampSampleSeconds(ideal, pictureStart: 0, pictureEnd: 3055.65)
+        XCTAssertLessThan(clamped, 3055.65)
+        XCTAssertGreaterThan(clamped, 3055.5)
+        let early = ThumbnailService.playerStripEvenSplitSeconds(index: 0, duration: 3306, frameCount: 13)
+        XCTAssertEqual(
+            ThumbnailService.clampSampleSeconds(early, pictureStart: 0, pictureEnd: 3055.65),
+            early,
+            accuracy: 0.001
+        )
+    }
+
     func testEvenSplitUsesBucketCenters() {
         XCTAssertEqual(
             ThumbnailService.playerStripEvenSplitSeconds(index: 0, duration: 60, frameCount: 6),

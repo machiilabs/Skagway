@@ -206,6 +206,27 @@ final class ThumbnailService: @unchecked Sendable {
         return (Double(i) + 0.5) / Double(n) * max(0, duration)
     }
 
+    /// Keep a sample inside the video pictures. The container duration can run past the video track
+    /// (an audio tail). A seek in that gap returns no frame, and the strip is dropped unless every
+    /// frame comes back.
+    static func clampSampleSeconds(_ seconds: Double, pictureStart: Double, pictureEnd: Double) -> Double {
+        guard pictureStart.isFinite, pictureEnd.isFinite, pictureEnd > pictureStart else { return seconds }
+        let inset = min(0.05, (pictureEnd - pictureStart) * 0.001)
+        let hi = max(pictureStart, pictureEnd - inset)
+        return min(hi, max(pictureStart, seconds))
+    }
+
+    /// Video-track pictures, when the container duration is longer than the frames.
+    private static func pictureBounds(of asset: AVAsset) async -> (start: Double, end: Double)? {
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let range = try? await track.load(.timeRange)
+        else { return nil }
+        let start = CMTimeGetSeconds(range.start)
+        let end = CMTimeGetSeconds(range.end)
+        guard start.isFinite, end.isFinite, end > start + 0.05 else { return nil }
+        return (start, end)
+    }
+
     /// Playhead cell that lines up with the scrubber’s linear time mapping (equal-width buckets).
     static func playerStripPlayheadIndex(seconds: Double, duration: Double, frameCount: Int) -> Int {
         guard frameCount > 0, duration > 0 else { return 0 }
@@ -988,8 +1009,15 @@ final class ThumbnailService: @unchecked Sendable {
                 throw ThumbnailError.generationFailed
             }
 
+            let picture = await Self.pictureBounds(of: asset)
             let fractions = (1...totalFrames).map { Double($0) / Double(totalFrames + 1) }
-            let times = fractions.map { CMTime(seconds: totalSeconds * $0, preferredTimescale: 600) }
+            let times = fractions.map { fraction in
+                let seconds = totalSeconds * fraction
+                let clamped = picture.map {
+                    Self.clampSampleSeconds(seconds, pictureStart: $0.start, pictureEnd: $0.end)
+                } ?? seconds
+                return CMTime(seconds: clamped, preferredTimescale: 600)
+            }
 
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
@@ -1208,12 +1236,16 @@ final class ThumbnailService: @unchecked Sendable {
             }
 
             // Centers of equal-width time buckets — scrubber playhead sits mid-cell after a click.
+            // Clamp into the video track so a long audio tail cannot drop the whole strip.
+            let picture = await Self.pictureBounds(of: asset)
             let times = (0..<totalFrames).map { index in
-                Self.playerStripEvenSplitSeconds(
+                let ideal = Self.playerStripEvenSplitSeconds(
                     index: index,
                     duration: totalSeconds,
                     frameCount: totalFrames
                 )
+                guard let picture else { return ideal }
+                return Self.clampSampleSeconds(ideal, pictureStart: picture.start, pictureEnd: picture.end)
             }
             let cmTimes = times.map { CMTime(seconds: $0, preferredTimescale: 600) }
 
@@ -1461,8 +1493,15 @@ final class ThumbnailService: @unchecked Sendable {
                 throw ThumbnailError.generationFailed
             }
 
+            let picture = await Self.pictureBounds(of: asset)
             let fractions = (1...totalFrames).map { Double($0) / Double(totalFrames + 1) }
-            let times = fractions.map { CMTime(seconds: totalSeconds * $0, preferredTimescale: 600) }
+            let times = fractions.map { fraction in
+                let seconds = totalSeconds * fraction
+                let clamped = picture.map {
+                    Self.clampSampleSeconds(seconds, pictureStart: $0.start, pictureEnd: $0.end)
+                } ?? seconds
+                return CMTime(seconds: clamped, preferredTimescale: 600)
+            }
 
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
