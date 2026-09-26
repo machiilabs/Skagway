@@ -216,19 +216,29 @@ final class ThumbnailService: @unchecked Sendable {
         return min(hi, max(pictureStart, seconds))
     }
 
-    /// True when a saved strip had to pull a sample back because the pictures end before the file does.
+    /// Last cell whose sample was pulled back because the pictures end before the file does.
     /// A second of slack ignores the tiny inset used to stay off the exact last frame.
+    /// The warning mark sits on this cell — the far right one when several were pulled.
+    static func playerStripEarlyCellIndex(
+        cellTimes: [Double],
+        duration: Double,
+        frameCount: Int
+    ) -> Int? {
+        guard frameCount > 0, cellTimes.count == frameCount, duration.isFinite, duration > 0 else { return nil }
+        var early: Int?
+        for index in 0..<frameCount {
+            let ideal = playerStripEvenSplitSeconds(index: index, duration: duration, frameCount: frameCount)
+            if ideal - cellTimes[index] > 1 { early = index }
+        }
+        return early
+    }
+
     static func playerStripPicturesEndEarly(
         cellTimes: [Double],
         duration: Double,
         frameCount: Int
     ) -> Bool {
-        guard frameCount > 0, cellTimes.count == frameCount, duration.isFinite, duration > 0 else { return false }
-        for index in 0..<frameCount {
-            let ideal = playerStripEvenSplitSeconds(index: index, duration: duration, frameCount: frameCount)
-            if ideal - cellTimes[index] > 1 { return true }
-        }
-        return false
+        playerStripEarlyCellIndex(cellTimes: cellTimes, duration: duration, frameCount: frameCount) != nil
     }
 
     /// Video-track pictures, when the container duration is longer than the frames.

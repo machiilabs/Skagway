@@ -126,9 +126,16 @@ final class PlayerStripLogicTests: XCTestCase {
         XCTAssertFalse(
             ThumbnailService.playerStripPicturesEndEarly(cellTimes: times, duration: duration, frameCount: frameCount)
         )
+        XCTAssertNil(
+            ThumbnailService.playerStripEarlyCellIndex(cellTimes: times, duration: duration, frameCount: frameCount)
+        )
         times[frameCount - 1] = ThumbnailService.clampSampleSeconds(times[frameCount - 1], pictureStart: 0, pictureEnd: 3055.65)
         XCTAssertTrue(
             ThumbnailService.playerStripPicturesEndEarly(cellTimes: times, duration: duration, frameCount: frameCount)
+        )
+        XCTAssertEqual(
+            ThumbnailService.playerStripEarlyCellIndex(cellTimes: times, duration: duration, frameCount: frameCount),
+            12
         )
     }
 
