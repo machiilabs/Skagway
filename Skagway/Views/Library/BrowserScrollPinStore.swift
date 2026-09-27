@@ -20,4 +20,8 @@ final class BrowserScrollPinStore {
     var pin: Pin?
     /// Set just before Inspector width change; consumed by `BrowserScrollPinController`.
     var pendingRestore: Pin?
+    /// Index (in `filteredVideos`) of the video in the middle of the browser viewport.
+    var visibleCenterIndex: Int = 0
+    /// `ProcessInfo.systemUptime` of the last browser scroll. Idle fill pauses while this is recent.
+    var lastScrollUptime: TimeInterval = 0
 }

@@ -51,7 +51,30 @@ struct BrowserScrollPinController: NSViewRepresentable {
             }
         }
 
+        func captureVisibleCenter() {
+            guard let store, let scrollView = trackedScrollView else { return }
+            switch mode {
+            case .list:
+                guard let table = ScrollCommandHandlerListTable.find(under: scrollView) else { return }
+                let rows = table.rows(in: table.visibleRect)
+                guard rows.length > 0 else { return }
+                store.visibleCenterIndex = rows.location + rows.length / 2
+            case .grid:
+                guard let vis = BrowserScrollPinController.standardizedViewport(of: scrollView) else { return }
+                let docHeight = (scrollView.documentView?.bounds ?? vis).standardized.height
+                guard let range = BrowserScrollPinController.visibleStoryboardIndexRange(
+                    visibleTop: vis.minY,
+                    visibleHeight: vis.height,
+                    documentHeight: docHeight,
+                    columnCount: columnCount,
+                    videoCount: videoCount
+                ) else { return }
+                store.visibleCenterIndex = (range.lowerBound + range.upperBound) / 2
+            }
+        }
+
         func capturePin() {
+            captureVisibleCenter()
             guard let store,
                   let videoId = anchorVideoId,
                   let index = anchorIndex,
@@ -192,6 +215,7 @@ struct BrowserScrollPinController: NSViewRepresentable {
             object: clip,
             queue: .main
         ) { [weak coordinator] _ in
+            coordinator?.store?.lastScrollUptime = ProcessInfo.processInfo.systemUptime
             coordinator?.capturePin()
         }
     }

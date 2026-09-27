@@ -23,6 +23,8 @@ private actor ThumbnailGenerationGate {
     private let maxConcurrent: Int
     private var running = 0
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    /// Idle fill. Starts only when nothing else holds or waits for a slot, so on-screen work goes first.
+    private var backgroundWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(maxConcurrent: Int) {
         self.maxConcurrent = max(1, maxConcurrent)
@@ -37,10 +39,22 @@ private actor ThumbnailGenerationGate {
         running += 1
     }
 
+    func acquireBackground() async {
+        if running == 0, waiters.isEmpty {
+            running += 1
+            return
+        }
+        await withCheckedContinuation { backgroundWaiters.append($0) }
+        running += 1
+    }
+
     func release() {
         running -= 1
         if !waiters.isEmpty {
             let cont = waiters.removeFirst()
+            cont.resume()
+        } else if running == 0, !backgroundWaiters.isEmpty {
+            let cont = backgroundWaiters.removeFirst()
             cont.resume()
         }
     }
@@ -112,6 +126,8 @@ final class ThumbnailService: @unchecked Sendable {
     private var inflightStoryboards: [String: Task<NSImage, Error>] = [:]
     private var inflightPlayerStrips: [String: Task<NSImage, Error>] = [:]
     private var inflightDetailPreviews: [String: Task<URL, Error>] = [:]
+    /// In-flight Storyboard keys started by idle fill. Scroll-driven cancellation leaves these alone.
+    private var backgroundStoryboardKeys: Set<String> = []
     /// Per-file sample times (seconds) for the six storyboard collage cells — kept in sync with bake/build.
     private var storyboardCellTimesByPath: [String: [Double]] = [:]
     /// Per-file sample times for the in-player filmstrip (1×N).
@@ -123,6 +139,23 @@ final class ThumbnailService: @unchecked Sendable {
         inflightLock.lock()
         defer { inflightLock.unlock() }
         return !inflightThumbnails.isEmpty
+    }
+
+    /// True inside idle fill. Work waits for an empty generation gate and writes to disk only:
+    /// thousands of background images must not evict what is on screen (`countLimit`).
+    @TaskLocal static var isBackgroundFill = false
+
+    private func rememberInMemory(_ image: NSImage, forKey key: NSString) {
+        guard !Self.isBackgroundFill else { return }
+        memoryCache.setObject(image, forKey: key)
+    }
+
+    private func acquireGenerationSlot() async {
+        if Self.isBackgroundFill {
+            await generationGate.acquireBackground()
+        } else {
+            await generationGate.acquire()
+        }
     }
 
     private static let filmstripCachePrefix = "_filmstrip"
@@ -467,7 +500,7 @@ final class ThumbnailService: @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: url.path),
               let image = NSImage(contentsOf: url)
         else { return nil }
-        memoryCache.setObject(image, forKey: key)
+        rememberInMemory(image, forKey: key)
         return image
     }
 
@@ -480,7 +513,7 @@ final class ThumbnailService: @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: url.path),
               let image = NSImage(contentsOf: url)
         else { return nil }
-        memoryCache.setObject(image, forKey: memKey)
+        rememberInMemory(image, forKey: memKey)
         return image
     }
 
@@ -521,7 +554,7 @@ final class ThumbnailService: @unchecked Sendable {
         var toCancel: [Task<NSImage, Error>] = []
         for (key, task) in inflightStoryboards {
             let path = Self.storyboardFilePath(fromInflightKey: key)
-            if keep.contains(path) { continue }
+            if keep.contains(path) || backgroundStoryboardKeys.contains(key) { continue }
             toCancel.append(task)
             inflightStoryboards.removeValue(forKey: key)
         }
@@ -554,7 +587,7 @@ final class ThumbnailService: @unchecked Sendable {
               Self.isValidStoryboardImage(image)
         else { return nil }
         if loadStoryboardCellTimes(for: filePath) != nil {
-            memoryCache.setObject(image, forKey: storyboardMemoryKey(for: filePath))
+            rememberInMemory(image, forKey: storyboardMemoryKey(for: filePath))
         }
         return image
     }
@@ -585,7 +618,7 @@ final class ThumbnailService: @unchecked Sendable {
               let image = NSImage(contentsOf: url),
               Self.isValidStoryboardImage(image)
         else { return nil }
-        memoryCache.setObject(image, forKey: memKey)
+        rememberInMemory(image, forKey: memKey)
         return image
     }
 
@@ -644,10 +677,55 @@ final class ThumbnailService: @unchecked Sendable {
             guard FileManager.default.fileExists(atPath: url.path),
                   let image = NSImage(contentsOf: url)
             else { continue }
-            memoryCache.setObject(image, forKey: memKey)
+            rememberInMemory(image, forKey: memKey)
             return image
         }
         return nil
+    }
+
+    // MARK: - Idle wall fill
+
+    /// Long edge of the Grid card still (`CuratedWallCard` poster mode).
+    static let wallGridPreviewLongEdge = 720
+
+    /// Disk-only check (no image decode) for what a wall view shows for this file.
+    func hasWallAsset(_ kind: WallAssetKind, for filePath: String) -> Bool {
+        let fm = FileManager.default
+        switch kind {
+        case .poster:
+            return fm.fileExists(atPath: thumbnailURL(for: filePath).path)
+        case .gridPreview:
+            return fm.fileExists(atPath: thumbnailURL(for: filePath).path)
+                && fm.fileExists(atPath: detailPreviewURL(
+                    for: filePath,
+                    longEdge: Self.wallGridPreviewLongEdge
+                ).path)
+        case .storyboard:
+            return hasStoryboardJPEGOnDisk(for: filePath) && loadStoryboardCellTimes(for: filePath) != nil
+        }
+    }
+
+    /// Builds the missing wall image in the background lane. Returns the poster URL when a poster was made.
+    func fillWallAsset(_ kind: WallAssetKind, for video: Video) async throws -> URL? {
+        try await Self.$isBackgroundFill.withValue(true) {
+            let fm = FileManager.default
+            var poster: URL?
+            if kind != .storyboard, !fm.fileExists(atPath: thumbnailURL(for: video.filePath).path) {
+                poster = try await generateThumbnail(for: video)
+            }
+            switch kind {
+            case .poster:
+                break
+            case .gridPreview:
+                let edge = Self.wallGridPreviewLongEdge
+                if !fm.fileExists(atPath: detailPreviewURL(for: video.filePath, longEdge: edge).path) {
+                    _ = try await generateDetailPreview(for: video, longEdge: edge)
+                }
+            case .storyboard:
+                _ = try await generateStoryboard(for: video)
+            }
+            return poster
+        }
     }
 
     // MARK: - Generation (async; can run concurrently for different files)
@@ -657,7 +735,7 @@ final class ThumbnailService: @unchecked Sendable {
 
         if FileManager.default.fileExists(atPath: cacheURL.path) {
             if let image = NSImage(contentsOf: cacheURL) {
-                memoryCache.setObject(image, forKey: video.filePath as NSString)
+                rememberInMemory(image, forKey: video.filePath as NSString)
             }
             return cacheURL
         }
@@ -673,7 +751,7 @@ final class ThumbnailService: @unchecked Sendable {
             return try await existing.value
         }
         let task = Task<URL, Error> {
-            await self.generationGate.acquire()
+            await self.acquireGenerationSlot()
             do {
                 let url = try await self.generateThumbnailWork(for: video)
                 await self.generationGate.release()
@@ -697,7 +775,7 @@ final class ThumbnailService: @unchecked Sendable {
         let cacheURL = thumbnailURL(for: video.filePath)
         if FileManager.default.fileExists(atPath: cacheURL.path) {
             if let image = NSImage(contentsOf: cacheURL) {
-                memoryCache.setObject(image, forKey: video.filePath as NSString)
+                rememberInMemory(image, forKey: video.filePath as NSString)
             }
             return cacheURL
         }
@@ -734,7 +812,7 @@ final class ThumbnailService: @unchecked Sendable {
         }
 
         try jpegData.write(to: cacheURL)
-        memoryCache.setObject(nsImage, forKey: video.filePath as NSString)
+        rememberInMemory(nsImage, forKey: video.filePath as NSString)
         return cacheURL
     }
 
@@ -756,7 +834,7 @@ final class ThumbnailService: @unchecked Sendable {
 
         if FileManager.default.fileExists(atPath: cacheURL.path) {
             if let image = NSImage(contentsOf: cacheURL) {
-                memoryCache.setObject(image, forKey: memKey)
+                rememberInMemory(image, forKey: memKey)
             }
             return cacheURL
         }
@@ -765,7 +843,7 @@ final class ThumbnailService: @unchecked Sendable {
             let legacyURL = legacyDetailPreviewURL(for: video.filePath)
             if FileManager.default.fileExists(atPath: legacyURL.path) {
                 if let image = NSImage(contentsOf: legacyURL) {
-                    memoryCache.setObject(image, forKey: memKey)
+                    rememberInMemory(image, forKey: memKey)
                 }
                 return legacyURL
             }
@@ -782,7 +860,7 @@ final class ThumbnailService: @unchecked Sendable {
             return try await existing.value
         }
         let task = Task<URL, Error> {
-            await self.generationGate.acquire()
+            await self.acquireGenerationSlot()
             do {
                 let url = try await self.generateDetailPreviewWork(for: video, longEdge: longEdge)
                 await self.generationGate.release()
@@ -808,7 +886,7 @@ final class ThumbnailService: @unchecked Sendable {
         let memKey = detailPreviewMemoryKey(filePath: video.filePath, longEdge: edge)
         if FileManager.default.fileExists(atPath: cacheURL.path) {
             if let image = NSImage(contentsOf: cacheURL) {
-                memoryCache.setObject(image, forKey: memKey)
+                rememberInMemory(image, forKey: memKey)
             }
             return cacheURL
         }
@@ -817,7 +895,7 @@ final class ThumbnailService: @unchecked Sendable {
             let legacyURL = legacyDetailPreviewURL(for: video.filePath)
             if FileManager.default.fileExists(atPath: legacyURL.path) {
                 if let image = NSImage(contentsOf: legacyURL) {
-                    memoryCache.setObject(image, forKey: memKey)
+                    rememberInMemory(image, forKey: memKey)
                 }
                 return legacyURL
             }
@@ -856,7 +934,7 @@ final class ThumbnailService: @unchecked Sendable {
         }
 
         try jpegData.write(to: cacheURL)
-        memoryCache.setObject(nsImage, forKey: memKey)
+        rememberInMemory(nsImage, forKey: memKey)
         return cacheURL
     }
 
@@ -872,7 +950,7 @@ final class ThumbnailService: @unchecked Sendable {
         if FileManager.default.fileExists(atPath: cacheURL.path),
            let image = NSImage(contentsOf: cacheURL)
         {
-            memoryCache.setObject(image, forKey: memKey)
+            rememberInMemory(image, forKey: memKey)
             return image
         }
 
@@ -983,7 +1061,7 @@ final class ThumbnailService: @unchecked Sendable {
             return try await existing.value
         }
         let task = Task<NSImage, Error> {
-            await self.generationGate.acquire()
+            await self.acquireGenerationSlot()
             do {
                 let image = try await self.buildFilmstrip(for: video, rows: rows, columns: columns)
                 await self.generationGate.release()
@@ -1004,7 +1082,7 @@ final class ThumbnailService: @unchecked Sendable {
     }
 
     private func runFilmstripBuildWithGate(for video: Video, rows: Int, columns: Int) async throws -> NSImage {
-        await generationGate.acquire()
+        await acquireGenerationSlot()
         do {
             let image = try await buildFilmstrip(for: video, rows: rows, columns: columns)
             await generationGate.release()
@@ -1101,7 +1179,7 @@ final class ThumbnailService: @unchecked Sendable {
 
         try Task.checkCancellation()
         try jpegData.write(to: cacheURL)
-        memoryCache.setObject(compositeImage, forKey: memKey)
+        rememberInMemory(compositeImage, forKey: memKey)
         return compositeImage
     }
 
@@ -1120,7 +1198,7 @@ final class ThumbnailService: @unchecked Sendable {
               let image = NSImage(contentsOf: url),
               Self.isValidPlayerStripImage(image, frameCount: frameCount)
         else { return nil }
-        memoryCache.setObject(image, forKey: memKey)
+        rememberInMemory(image, forKey: memKey)
         return image
     }
 
@@ -1187,7 +1265,7 @@ final class ThumbnailService: @unchecked Sendable {
         try jpegData.write(to: playerStripURL(for: filePath, frameCount: frameCount))
         try Self.encodePlayerStripCellTimes(cellTimes)
             .write(to: playerStripTimesURL(for: filePath, frameCount: frameCount))
-        memoryCache.setObject(image, forKey: playerStripMemoryKey(for: filePath, frameCount: frameCount))
+        rememberInMemory(image, forKey: playerStripMemoryKey(for: filePath, frameCount: frameCount))
         let cacheKey = playerStripTimesCacheKey(filePath: filePath, frameCount: frameCount)
         inflightLock.lock()
         playerStripCellTimesByPath[cacheKey] = cellTimes
@@ -1225,7 +1303,7 @@ final class ThumbnailService: @unchecked Sendable {
             return try await existing.value
         }
         let task = Task<NSImage, Error> {
-            await self.generationGate.acquire()
+            await self.acquireGenerationSlot()
             do {
                 let image = try await self.buildPlayerStrip(for: video, frameCount: frameCount)
                 await self.generationGate.release()
@@ -1388,7 +1466,7 @@ final class ThumbnailService: @unchecked Sendable {
            Self.isValidStoryboardImage(image),
            loadStoryboardCellTimes(for: video.filePath) != nil
         {
-            memoryCache.setObject(image, forKey: memKey)
+            rememberInMemory(image, forKey: memKey)
             return image
         }
 
@@ -1410,7 +1488,7 @@ final class ThumbnailService: @unchecked Sendable {
             return try await existing.value
         }
         let task = Task<NSImage, Error> {
-            await self.generationGate.acquire()
+            await self.acquireGenerationSlot()
             if Task.isCancelled {
                 await self.generationGate.release()
                 throw CancellationError()
@@ -1425,10 +1503,14 @@ final class ThumbnailService: @unchecked Sendable {
             }
         }
         inflightStoryboards[key] = task
+        if Self.isBackgroundFill {
+            backgroundStoryboardKeys.insert(key)
+        }
         inflightLock.unlock()
         defer {
             inflightLock.lock()
             inflightStoryboards.removeValue(forKey: key)
+            backgroundStoryboardKeys.remove(key)
             inflightLock.unlock()
         }
         return try await task.value
@@ -1607,7 +1689,7 @@ final class ThumbnailService: @unchecked Sendable {
         try Task.checkCancellation()
         try jpegData.write(to: cacheURL)
         try timesData.write(to: timesURL, options: .atomic)
-        memoryCache.setObject(image, forKey: memKey)
+        rememberInMemory(image, forKey: memKey)
         inflightLock.lock()
         storyboardCellTimesByPath[filePath] = cellTimes
         inflightLock.unlock()
@@ -1622,7 +1704,7 @@ final class ThumbnailService: @unchecked Sendable {
     /// Used by the "Regenerate Thumbnail" context-menu action when the auto-picked frame (10% in,
     /// capped at 30s) looks bad — e.g. a black frame, title card, or blurry transition.
     func regenerateThumbnail(for video: Video) async throws -> URL {
-        await generationGate.acquire()
+        await acquireGenerationSlot()
         do {
             let url = try await performRegenerateThumbnail(for: video)
             await generationGate.release()
@@ -1667,7 +1749,7 @@ final class ThumbnailService: @unchecked Sendable {
     /// precedent in `InlinePlaybackController.start(video:at:)` for filmstrip-click seeks. The "pro"
     /// precise-control counterpart to "Regenerate Thumbnail".
     func captureCurrentFrameAsThumbnail(for video: Video, atSeconds seconds: Double) async throws -> URL {
-        await generationGate.acquire()
+        await acquireGenerationSlot()
         do {
             let url = try await performCaptureCurrentFrame(for: video, atSeconds: seconds)
             await generationGate.release()
@@ -1699,7 +1781,7 @@ final class ThumbnailService: @unchecked Sendable {
     /// Replace the library poster (grid thumb + 720pt detail still) with a user-chosen image.
     /// Does not touch the filmstrip. Same cache keys as frame capture so UI refresh paths stay unchanged.
     func setPoster(fromImageURL imageURL: URL, for video: Video) async throws -> URL {
-        await generationGate.acquire()
+        await acquireGenerationSlot()
         do {
             let url = try await performSetPoster(fromImageURL: imageURL, for: video)
             await generationGate.release()
@@ -1759,7 +1841,7 @@ final class ThumbnailService: @unchecked Sendable {
             throw ThumbnailError.encodingFailed
         }
         try jpegData.write(to: cacheURL)
-        memoryCache.setObject(scaled, forKey: memoryKey)
+        rememberInMemory(scaled, forKey: memoryKey)
     }
 
     private static func scaledImage(_ image: NSImage, maxDimension: CGFloat) -> NSImage {
@@ -1812,7 +1894,7 @@ final class ThumbnailService: @unchecked Sendable {
         videoId: Int64,
         bookmarkId: Int64
     ) async throws -> URL {
-        await generationGate.acquire()
+        await acquireGenerationSlot()
         do {
             let url = try await performCaptureBookmarkStill(
                 for: video, atSeconds: seconds, videoId: videoId, bookmarkId: bookmarkId
@@ -1897,7 +1979,7 @@ final class ThumbnailService: @unchecked Sendable {
         ) else {
             return nil
         }
-        memoryCache.setObject(image, forKey: key)
+        rememberInMemory(image, forKey: key)
         if prefetchNeighbors {
             scheduleScrubNeighborPrefetch(video: video, around: quantized)
         }
@@ -1972,7 +2054,7 @@ final class ThumbnailService: @unchecked Sendable {
             throw ThumbnailError.encodingFailed
         }
         try jpegData.write(to: cacheURL)
-        memoryCache.setObject(nsImage, forKey: memoryKey)
+        rememberInMemory(nsImage, forKey: memoryKey)
     }
 
     /// Settings → Regenerate filmstrips: advance the cache epoch so every prior composite is
@@ -2226,28 +2308,28 @@ final class ThumbnailService: @unchecked Sendable {
         // Pass 3 — warm memory only after every disk move finished.
         for pair in changed {
             if let image = NSImage(contentsOf: thumbnailURL(for: pair.to)) {
-                memoryCache.setObject(image, forKey: pair.to as NSString)
+                rememberInMemory(image, forKey: pair.to as NSString)
             }
             if let image = NSImage(contentsOf: filmstripURL(for: pair.to)) {
-                memoryCache.setObject(image, forKey: filmstripMemoryKey(for: pair.to))
+                rememberInMemory(image, forKey: filmstripMemoryKey(for: pair.to))
             }
             if let image = NSImage(contentsOf: storyboardURL(for: pair.to)),
                Self.isValidStoryboardImage(image),
                loadStoryboardCellTimes(for: pair.to) != nil
             {
-                memoryCache.setObject(image, forKey: storyboardMemoryKey(for: pair.to))
+                rememberInMemory(image, forKey: storyboardMemoryKey(for: pair.to))
             }
             for n in Self.playerStripMinFrames...Self.playerStripMaxFrames {
                 if let image = NSImage(contentsOf: playerStripURL(for: pair.to, frameCount: n)),
                    Self.isValidPlayerStripImage(image, frameCount: n),
                    loadPlayerStripCellTimes(for: pair.to, frameCount: n) != nil
                 {
-                    memoryCache.setObject(image, forKey: playerStripMemoryKey(for: pair.to, frameCount: n))
+                    rememberInMemory(image, forKey: playerStripMemoryKey(for: pair.to, frameCount: n))
                 }
             }
             for edge in Self.detailPreviewLongEdgeChoices {
                 if let image = NSImage(contentsOf: detailPreviewURL(for: pair.to, longEdge: edge)) {
-                    memoryCache.setObject(image, forKey: detailPreviewMemoryKey(filePath: pair.to, longEdge: edge))
+                    rememberInMemory(image, forKey: detailPreviewMemoryKey(filePath: pair.to, longEdge: edge))
                 }
             }
         }

@@ -221,6 +221,9 @@ final class LibraryViewModel {
     }
     var viewMode: ViewMode = .grid {
         didSet {
+            if viewMode != oldValue {
+                wallAssetBackfill.invalidate()
+            }
             guard !_applyingLayout else { return }
             updateCurrentLayoutFromLive()
         }
@@ -535,6 +538,7 @@ final class LibraryViewModel {
                 thumbnailsSettled = false
             } else if !isScanning && oldValue {
                 startThumbnailSettlingTask()
+                wallAssetBackfill.noteActivity()
             }
         }
     }
@@ -625,6 +629,7 @@ final class LibraryViewModel {
         didSet {
             if oldValue && !isPlayingInline {
                 isPlayAllSession = false
+                wallAssetBackfill.noteActivity()
             }
         }
     }
@@ -2752,6 +2757,62 @@ final class LibraryViewModel {
         }
     }
 
+    /// Build the current view's missing wall images while the app is idle. Default on.
+    var prepareWallAssetsWhileIdle: Bool = true {
+        didSet {
+            UserDefaults.standard.set(prepareWallAssetsWhileIdle, forKey: PrefsKeys.prepareWallAssetsWhileIdle)
+            guard oldValue != prepareWallAssetsWhileIdle else { return }
+            if prepareWallAssetsWhileIdle {
+                wallAssetBackfill.invalidate()
+            } else {
+                wallAssetBackfill.stop()
+            }
+        }
+    }
+
+    @ObservationIgnored private lazy var wallAssetBackfill: WallAssetBackfill = makeWallAssetBackfill()
+
+    private func makeWallAssetBackfill() -> WallAssetBackfill {
+        let backfill = WallAssetBackfill(service: thumbnailService) { [weak self] in
+            guard let self else {
+                return WallBackfillConditions(
+                    enabled: false, isScanning: false, isPlaying: false, isMoving: false,
+                    isLowPower: false, isThermalSerious: false, lastActivityUptime: 0
+                )
+            }
+            let info = ProcessInfo.processInfo
+            return WallBackfillConditions(
+                enabled: self.prepareWallAssetsWhileIdle,
+                isScanning: self.isScanning,
+                isPlaying: self.isPlayingInline,
+                isMoving: self.moveJobs.contains(where: \.isActive),
+                isLowPower: info.isLowPowerModeEnabled,
+                isThermalSerious: info.thermalState == .serious || info.thermalState == .critical,
+                lastActivityUptime: self.browserScrollPinStore.lastScrollUptime
+            )
+        }
+        backfill.snapshot = { [weak self] in
+            guard let self, !self.videos.isEmpty else { return nil }
+            return WallAssetBackfill.Snapshot(
+                kind: WallAssetKind(viewMode: self.viewMode),
+                viewPaths: self.filteredVideos.map(\.filePath),
+                centerIndex: self.browserScrollPinStore.visibleCenterIndex,
+                libraryPaths: self.videos.map(\.filePath)
+            )
+        }
+        backfill.currentCenterIndex = { [weak self] in
+            self?.browserScrollPinStore.visibleCenterIndex ?? 0
+        }
+        backfill.video = { [weak self] path in
+            self?.video(forPath: path)
+        }
+        backfill.didMakePoster = { [weak self] video, url in
+            guard let self, let dbId = video.databaseId else { return }
+            Task { try? await self.videoRepo.updateThumbnailPath(videoId: dbId, path: url.path) }
+        }
+        return backfill
+    }
+
     /// Schema for per-video custom metadata — scoped to the active library database.
     var customMetadataFieldDefinitions: [CustomMetadataFieldDefinition] = [] {
         didSet {
@@ -3272,6 +3333,9 @@ final class LibraryViewModel {
             showFilmstripInPlayer = defaults.bool(forKey: Self.showFilmstripInPlayerKey)
         } else {
             showFilmstripInPlayer = true
+        }
+        if defaults.object(forKey: PrefsKeys.prepareWallAssetsWhileIdle) != nil {
+            prepareWallAssetsWhileIdle = defaults.bool(forKey: PrefsKeys.prepareWallAssetsWhileIdle)
         }
         loadCustomMetadataFieldDefinitions()
 
@@ -4043,6 +4107,7 @@ final class LibraryViewModel {
         let structureChanged = oldSet != newSet
         filteredVideos = newValue
         rebuildFilteredPathIndex()
+        wallAssetBackfill.invalidate()
         if structureChanged {
             filteredVideosVersion &+= 1
             if let id = pendingScrollToAfterRename, newValue.contains(where: { $0.id == id }) {

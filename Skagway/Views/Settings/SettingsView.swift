@@ -442,6 +442,12 @@ struct SettingsView: View {
                     description: "Plays a muted cycling scrub when the pointer rests on a Grid card, or in the enlarged preview that pops up over a List thumbnail (disabled automatically while the floating player is open).",
                     isOn: $viewModel.gridHoverPreviewEnabled
                 )
+                cardSeparator
+                describedToggleRow(
+                    title: "Prepare previews while idle",
+                    description: "When nothing is playing, scanning, or scrolling, Skagway makes the missing Grid, List, or Storyboard images for the current view, starting near what is on screen, then for the rest of the library. Uses disk space in the library cache and wakes sleeping drives. Inspector and player filmstrips are not included.",
+                    isOn: $viewModel.prepareWallAssetsWhileIdle
+                )
             }
 
             sectionBlock(title: "Tags") {
