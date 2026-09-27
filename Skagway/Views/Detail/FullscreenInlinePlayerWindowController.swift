@@ -206,15 +206,20 @@ final class FullscreenInlinePlayerWindowController: NSObject, NSWindowDelegate {
             guard let self else { return event }
             guard event.window === self.window else { return event }
             let location = event.locationInWindow
-            MainActor.assumeIsolated {
+            return MainActor.assumeIsolated { () -> NSEvent? in
                 if event.type == .scrollWheel {
                     self.chromeView?.noteScrollWheel(locationInWindow: location, event: event)
+                    // Scrubber bar and filmstrip scrub like the picture.
+                    if self.chromeView?.isOverTransportBar(locationInWindow: location) == true {
+                        self.playerView.forwardWheelScrub(event)
+                        return nil
+                    }
                 } else {
                     let isClickOrDrag = event.type != .mouseMoved
                     self.chromeView?.noteMouseActivity(locationInWindow: location, force: isClickOrDrag)
                 }
+                return event
             }
-            return event
         }
     }
 

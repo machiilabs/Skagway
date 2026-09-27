@@ -1,4 +1,5 @@
 import AppKit
+import AVKit
 import SwiftUI
 
 /// The single resizable, movable player surface. Positioned within the content area overlay;
@@ -601,7 +602,8 @@ struct FloatingPlayerPanel: View {
 /// Pass-through tracker over the player panel. Reports moves and whether the pointer is in the
 /// bottom transport band or top title strip (chrome stay-up zones). Scroll-wheel events use a
 /// window-scoped local monitor because `hitTest` returns nil (so SwiftUI/AVPlayerView still
-/// receive the wheel for seeking).
+/// receive the wheel for seeking). Wheel events over the transport band are forwarded to the
+/// player so the scrubber and filmstrip scrub too.
 private struct PanelChromeMouseTracker: NSViewRepresentable {
     var transportHeight: CGFloat
     var titleHeight: CGFloat
@@ -677,10 +679,26 @@ private struct PanelChromeMouseTracker: NSViewRepresentable {
                 guard event.window === self.window else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
                 guard self.bounds.contains(point) else { return event }
-                let overChrome = point.y <= self.transportHeight || point.y >= self.bounds.height - self.titleHeight
+                let overTransport = point.y <= self.transportHeight
+                let overChrome = overTransport || point.y >= self.bounds.height - self.titleHeight
                 self.onScrollWheel?(point, overChrome, event)
+                // Scrubber bar and filmstrip scrub like the picture.
+                if overTransport, let player = self.playerView() {
+                    player.forwardWheelScrub(event)
+                    return nil
+                }
                 return event
             }
+        }
+
+        private weak var cachedPlayerView: AVPlayerView?
+
+        private func playerView() -> AVPlayerView? {
+            if let cached = cachedPlayerView, cached.window === window, !cached.isHiddenOrHasHiddenAncestor {
+                return cached
+            }
+            cachedPlayerView = AVPlayerView.nearest(overlapping: self)
+            return cachedPlayerView
         }
 
         private func removeScrollMonitor() {
