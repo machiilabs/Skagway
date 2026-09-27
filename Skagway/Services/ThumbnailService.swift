@@ -4,18 +4,7 @@ import CryptoKit
 import Foundation
 
 private func withTimeout<T: Sendable>(seconds: Double, operation: @Sendable @escaping () async throws -> T) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask { try await operation() }
-        group.addTask {
-            try await Task.sleep(for: .seconds(seconds))
-            throw CancellationError()
-        }
-        guard let result = try await group.next() else {
-            throw CancellationError()
-        }
-        group.cancelAll()
-        return result
-    }
+    try await withDeadline(seconds: seconds, operation: operation)
 }
 
 /// Caps concurrent `AVAssetImageGenerator` work so 10k+ libraries don’t spawn unbounded AV decode pressure.
@@ -23,8 +12,10 @@ private actor ThumbnailGenerationGate {
     private let maxConcurrent: Int
     private var running = 0
     private var waiters: [CheckedContinuation<Void, Never>] = []
-    /// Idle fill. Starts only when nothing else holds or waits for a slot, so on-screen work goes first.
+    /// Idle fill. Starts only when nothing is waiting and at most `backgroundCeiling - 1` slots are busy,
+    /// so on-screen work goes first. Not "gate empty": one stuck slot would block idle fill for good.
     private var backgroundWaiters: [CheckedContinuation<Void, Never>] = []
+    private var backgroundCeiling: Int { max(1, maxConcurrent / 2) }
 
     init(maxConcurrent: Int) {
         self.maxConcurrent = max(1, maxConcurrent)
@@ -40,7 +31,7 @@ private actor ThumbnailGenerationGate {
     }
 
     func acquireBackground() async {
-        if running == 0, waiters.isEmpty {
+        if running < backgroundCeiling, waiters.isEmpty {
             running += 1
             return
         }
@@ -53,7 +44,7 @@ private actor ThumbnailGenerationGate {
         if !waiters.isEmpty {
             let cont = waiters.removeFirst()
             cont.resume()
-        } else if running == 0, !backgroundWaiters.isEmpty {
+        } else if running < backgroundCeiling, !backgroundWaiters.isEmpty {
             let cont = backgroundWaiters.removeFirst()
             cont.resume()
         }

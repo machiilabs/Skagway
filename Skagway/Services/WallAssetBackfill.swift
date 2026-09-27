@@ -99,6 +99,8 @@ final class WallAssetBackfill {
     private static let checkBatchSize = 128
     private static let pausePoll: Duration = .seconds(1)
     private static let betweenJobs: Duration = .milliseconds(150)
+    /// One video never holds up the rest. Past this, it is skipped for the session.
+    static let jobDeadlineSeconds: Double = 90
 
     private let service: ThumbnailService
     var snapshot: () -> Snapshot? = { nil }
@@ -155,7 +157,16 @@ final class WallAssetBackfill {
     }
 
     private func run() async {
-        defer { task = nil }
+        // App Nap would stretch the pause and between-job sleeps while the window is hidden or
+        // the display is off. Idle system sleep is still allowed.
+        let activity = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep,
+            reason: "Preparing previews while idle"
+        )
+        defer {
+            ProcessInfo.processInfo.endActivity(activity)
+            task = nil
+        }
         while !Task.isCancelled {
             var c = conditions()
             guard c.enabled else { return }
@@ -250,7 +261,10 @@ final class WallAssetBackfill {
             return
         }
         do {
-            let poster = try await service.fillWallAsset(kind, for: video)
+            let service = self.service
+            let poster = try await withDeadline(seconds: Self.jobDeadlineSeconds) {
+                try await service.fillWallAsset(kind, for: video)
+            }
             finished[kind, default: []].insert(path)
             if let poster, video.thumbnailPath == nil {
                 didMakePoster(video, poster)
