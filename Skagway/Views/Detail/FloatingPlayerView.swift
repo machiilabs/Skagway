@@ -20,6 +20,42 @@ final class KeyAwarePlayerView: AVPlayerView {
     }
 }
 
+extension AVPlayerView {
+    /// Hands a wheel event from Skagway's scrubber chrome to AVKit's own wheel scrub, so the bar and
+    /// filmstrip scrub exactly like the picture. AVKit handles the wheel in a private content subview,
+    /// not on `AVPlayerView`, so the event goes to whatever the player hit-tests at its center.
+    func forwardWheelScrub(_ event: NSEvent) {
+        let center = NSPoint(x: bounds.midX, y: bounds.midY)
+        let pointInSuperview = superview.map { convert(center, to: $0) } ?? center
+        let target = hitTest(pointInSuperview) ?? subviews.first ?? self
+        target.scrollWheel(with: event)
+    }
+
+    /// Nearest `AVPlayerView` that overlaps `view` on screen, searching outward from `view`.
+    static func nearest(overlapping view: NSView) -> AVPlayerView? {
+        guard view.window != nil else { return nil }
+        let frameInWindow = view.convert(view.bounds, to: nil)
+        func search(_ root: NSView) -> AVPlayerView? {
+            if let player = root as? AVPlayerView,
+               !player.isHiddenOrHasHiddenAncestor,
+               player.convert(player.bounds, to: nil).intersects(frameInWindow)
+            {
+                return player
+            }
+            for child in root.subviews {
+                if let found = search(child) { return found }
+            }
+            return nil
+        }
+        var ancestor = view.superview
+        while let current = ancestor {
+            if let found = search(current) { return found }
+            ancestor = current.superview
+        }
+        return nil
+    }
+}
+
 /// Hosts an `AVPlayer` in a floating-controls `AVPlayerView`. Used by every inline playback host
 /// (inspector hero, overlay panel). Takes first responder while mounted so keyboard transport
 /// (Space / Shift+Space) reaches it.

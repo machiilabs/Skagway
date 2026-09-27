@@ -186,6 +186,11 @@ final class FullscreenTransportChromeView: NSView {
         phase.contains(.began) || phase.contains(.changed) || phase.contains(.mayBegin)
     }
 
+    /// Scrubber bar + filmstrip, while visible. Wheel events here go to the player's own scrub.
+    func isOverTransportBar(locationInWindow: CGPoint) -> Bool {
+        isChromeVisible && barHitRect.contains(convert(locationInWindow, from: nil))
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard isChromeVisible else { return nil }
         guard barHitRect.contains(point) || trafficLightsHitRect.contains(point) else { return nil }
