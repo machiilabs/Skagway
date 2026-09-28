@@ -14,7 +14,7 @@ struct SkagwayApp: App {
                 .environment(appState)
                 .frame(minWidth: 900, minHeight: 600)
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                    DatabaseExportImport.checkpointAndCleanWAL()
+                    DatabaseExportImport.checkpointAndCloseLibrary()
                     DatabaseExportImport.clearSessionLocationPreferencesIfNeeded()
                 }
         }

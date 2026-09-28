@@ -24,18 +24,26 @@ enum DatabaseExportImport {
     /// Stored reference to the active dbPool, set by AppState on init.
     nonisolated(unsafe) static var activeDbPool: DatabasePool?
 
-    /// Checkpoints the current library and removes WAL files. Call before switching or closing.
-    /// Only removes WAL/SHM files if the checkpoint succeeds — prevents data loss.
-    static func checkpointAndCleanWAL() {
-        guard let pool = activeDbPool, let url = activeLibraryURL() else { return }
+    /// Flushes the current library's WAL into the main file, closes every connection, then removes
+    /// the emptied `-wal` / `-shm`. Call before quitting, switching, closing, or deleting.
+    /// The files must not be deleted while the pool is open: that is an SQLite API violation
+    /// ("vnode unlinked while in use") that can corrupt the library.
+    static func checkpointAndCloseLibrary() {
+        guard let pool = activeDbPool else { return }
+        let path = pool.path
         do {
             try pool.writeWithoutTransaction { db in try db.checkpoint(.truncate) }
-            let path = url.path
-            try? FileManager.default.removeItem(atPath: path + "-wal")
-            try? FileManager.default.removeItem(atPath: path + "-shm")
+            try pool.close()
+            activeDbPool = nil
         } catch {
-            // Checkpoint failed — leave WAL/SHM intact to avoid data loss
+            // Something still holds a connection. Leave WAL/SHM; SQLite replays them on next open.
+            return
         }
+        let fm = FileManager.default
+        let walSize = (try? fm.attributesOfItem(atPath: path + "-wal")[.size] as? NSNumber)?.intValue ?? 0
+        guard walSize == 0 else { return }
+        try? fm.removeItem(atPath: path + "-wal")
+        try? fm.removeItem(atPath: path + "-shm")
     }
 
     private static var applicationSupportRootURL: URL {
@@ -527,7 +535,7 @@ enum DatabaseExportImport {
 
     /// Switches to a library and restarts.
     static func switchToLibrary(_ item: RecentLibraryItem) {
-        checkpointAndCleanWAL()
+        checkpointAndCloseLibrary()
         let didStartAccess = item.url.startAccessingSecurityScopedResource()
         defer { if didStartAccess { item.url.stopAccessingSecurityScopedResource() } }
         seedLibraryCacheIfNeeded(at: item.url, preferredPlacement: nil)
@@ -685,7 +693,7 @@ enum DatabaseExportImport {
         if isHomeLibraryActive {
             return
         }
-        checkpointAndCleanWAL()
+        checkpointAndCloseLibrary()
         seedLibraryCacheIfNeeded(at: homeLibraryURL, preferredPlacement: nil)
         setActiveLibraryPreferences(url: homeLibraryURL)
         clearUserClosedLibrary()
@@ -727,7 +735,7 @@ enum DatabaseExportImport {
     /// Standard / Remember auto-open home again on the *next* cold launch; this session stays empty
     /// so File → Open / New / Recent can switch libraries. Ask-each-launch always starts empty.
     static func closeLibrary() {
-        checkpointAndCleanWAL()
+        checkpointAndCloseLibrary()
         clearActiveLibraryPreferences()
         UserDefaults.standard.set(true, forKey: userClosedLibraryKey)
         UserDefaults.standard.synchronize()
@@ -737,6 +745,11 @@ enum DatabaseExportImport {
 
     /// Deletes the library file from disk, removes from recent, and relaunches. Requires confirmation.
     static func deleteThisLibrary(at url: URL) {
+        if let active = activeLibraryURL(),
+           (active.path as NSString).standardizingPath == (url.path as NSString).standardizingPath
+        {
+            checkpointAndCloseLibrary()
+        }
         let fm = FileManager.default
         for ext in ["", "-wal", "-shm"] {
             let path = url.path + ext
@@ -822,7 +835,7 @@ enum DatabaseExportImport {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        checkpointAndCleanWAL()
+        checkpointAndCloseLibrary()
         UserDefaults.standard.set(false, forKey: PrefsKeys.didCompleteLibraryHomeSetup)
         UserDefaults.standard.removeObject(forKey: PrefsKeys.libraryHomeAccessMode)
         UserDefaults.standard.synchronize()
